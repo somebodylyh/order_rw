@@ -1,0 +1,8 @@
+policy	legal_rate	tau_vs_l2r	first_node_entropy	pairwise_tau	directed_score	progressive_support	cross_logprob	time_s
+progressive_rw	1.0000	0.0649	3.9620	0.0080	0.041473	0.042272	rw_sa=-204.9904,sa_rw=-205.3517	13.9
+self_avoiding_rw	1.0000	0.0108	3.9620	0.0006	0.041433	0.041769	rw_sa=-204.9904,sa_rw=-205.3517	10.5
+pagerank_source_det	1.0000	0.9603	-0.0000	1.0000	0.041352	0.049186	N/A	3.9
+pagerank_source_stoch	1.0000	0.0007	4.1537	-0.0011	0.041434	0.041429	N/A	10.8
+pagerank_uniform_det	1.0000	0.0090	-0.0000	0.9999	0.041716	0.042778	N/A	3.9
+pagerank_uniform_stoch	1.0000	-0.0005	4.1516	0.0052	0.041427	0.041422	N/A	10.8
+random_permutation	1.0000	-0.0004	4.1524	0.0039	0.041424	0.041423	N/A	3.9
