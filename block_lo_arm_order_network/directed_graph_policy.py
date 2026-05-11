@@ -28,11 +28,17 @@ def _softmax(
     scores: np.ndarray,
     tau: float,
     rng: np.random.Generator,
+    top_k: int = 0,
 ) -> np.ndarray:
     """Numerically stable softmax with temperature."""
     if tau <= 0.0:
         raise ValueError(f"tau must be > 0, got {tau}")
     scores = np.asarray(scores, dtype=np.float64).copy()
+    if top_k > 0 and top_k < scores.size:
+        keep = np.argpartition(-scores, top_k - 1)[:top_k]
+        masked = np.full_like(scores, -np.inf)
+        masked[keep] = scores[keep]
+        scores = masked
     if np.ptp(scores) < 1e-15:
         scores = scores + 1e-9 * rng.standard_normal(scores.shape)
     s_max = scores.max()
@@ -49,6 +55,7 @@ def progressive_rw_step(
     tau: float,
     source: np.ndarray,
     rng: np.random.Generator,
+    top_k: int = 0,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """One step of directed_progressive_rw; returns (p_t over candidates, raw scores)."""
     B = np.asarray(B, dtype=np.float64)
@@ -83,7 +90,7 @@ def progressive_rw_step(
         + betas.get('loc', 0.5) * local_score
     )
 
-    p_t = _softmax(score, tau, rng)
+    p_t = _softmax(score, tau, rng, top_k=top_k)
     return p_t, score
 
 
@@ -93,6 +100,7 @@ def self_avoiding_rw_step(
     last: int,
     tau: float,
     rng: np.random.Generator,
+    top_k: int = 0,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """One step of self_avoiding_rw; returns (p_t, raw scores)."""
     B = np.asarray(B, dtype=np.float64)
@@ -103,7 +111,7 @@ def self_avoiding_rw_step(
     else:
         score = B[last, U].astype(np.float64)
 
-    p_t = _softmax(score, tau, rng)
+    p_t = _softmax(score, tau, rng, top_k=top_k)
     return p_t, score
 
 
@@ -149,6 +157,8 @@ def sample_order(
     tau_step = float(params.get('tau_step', 1.0))
     alpha_dep = float(params.get('alpha_dep', 0.5))
     alpha_pr = float(params.get('alpha_pr', 0.85))
+    top_k = int(params.get('top_k', 0) or 0)
+    epsilon_uniform = float(params.get('epsilon_uniform', 0.0))
 
     # Compute source
     if start_source is None:
@@ -160,7 +170,9 @@ def sample_order(
 
     # --- Progressive RW --------------------------------------------------
     if policy == 'progressive_rw':
-        p0 = _softmax(source, tau_start, rng)
+        p0 = _softmax(source, tau_start, rng, top_k=top_k)
+        if epsilon_uniform > 0.0:
+            p0 = (1.0 - epsilon_uniform) * p0 + epsilon_uniform / N
         idx0 = int(rng.choice(N, p=p0))
 
         order = np.zeros(N, dtype=np.int64)
@@ -179,7 +191,11 @@ def sample_order(
         }
 
         for t in range(1, N):
-            p_t, _scores = progressive_rw_step(B, S, U, last, betas, tau_step, source, rng)
+            p_t, _scores = progressive_rw_step(
+                B, S, U, last, betas, tau_step, source, rng, top_k=top_k
+            )
+            if epsilon_uniform > 0.0:
+                p_t = (1.0 - epsilon_uniform) * p_t + epsilon_uniform / len(U)
             idx_t = int(rng.choice(len(U), p=p_t))
             node_t = int(U[idx_t])
 
@@ -194,7 +210,9 @@ def sample_order(
 
     # --- Self-avoiding RW ------------------------------------------------
     if policy == 'self_avoiding_rw':
-        p0 = _softmax(source, tau_start, rng)
+        p0 = _softmax(source, tau_start, rng, top_k=top_k)
+        if epsilon_uniform > 0.0:
+            p0 = (1.0 - epsilon_uniform) * p0 + epsilon_uniform / N
         idx0 = int(rng.choice(N, p=p0))
 
         order = np.zeros(N, dtype=np.int64)
@@ -206,7 +224,9 @@ def sample_order(
         last = idx0
 
         for t in range(1, N):
-            p_t, _scores = self_avoiding_rw_step(B, U, last, tau_step, rng)
+            p_t, _scores = self_avoiding_rw_step(B, U, last, tau_step, rng, top_k=top_k)
+            if epsilon_uniform > 0.0:
+                p_t = (1.0 - epsilon_uniform) * p_t + epsilon_uniform / len(U)
             idx_t = int(rng.choice(len(U), p=p_t))
             node_t = int(U[idx_t])
 
@@ -231,7 +251,9 @@ def sample_order(
     if policy == 'pagerank_stoch':
         q = _softmax(source, tau_start, rng)
         r = pagerank(B, q, alpha_pr)
-        p0 = _softmax(r, tau_start, rng)
+        p0 = _softmax(r, tau_start, rng, top_k=top_k)
+        if epsilon_uniform > 0.0:
+            p0 = (1.0 - epsilon_uniform) * p0 + epsilon_uniform / N
         idx0 = int(rng.choice(N, p=p0))
 
         order = np.zeros(N, dtype=np.int64)
@@ -243,7 +265,9 @@ def sample_order(
         last = idx0
 
         for t in range(1, N):
-            p_t, _scores = self_avoiding_rw_step(B, U, last, tau_step, rng)
+            p_t, _scores = self_avoiding_rw_step(B, U, last, tau_step, rng, top_k=top_k)
+            if epsilon_uniform > 0.0:
+                p_t = (1.0 - epsilon_uniform) * p_t + epsilon_uniform / len(U)
             idx_t = int(rng.choice(len(U), p=p_t))
             node_t = int(U[idx_t])
 
@@ -396,6 +420,7 @@ def _policy_step_entropy_replay(
     tau_step = float(params.get('tau_step', 1.0))
     alpha_dep = float(params.get('alpha_dep', 0.5))
     alpha_pr = float(params.get('alpha_pr', 0.85))
+    top_k = int(params.get('top_k', 0) or 0)
 
     source, _, _ = compute_source(B, alpha_dep)
 
@@ -414,11 +439,11 @@ def _policy_step_entropy_replay(
 
     # --- Step 0: p0 ---
     if policy in ('progressive_rw', 'self_avoiding_rw'):
-        p0 = _softmax(source, tau_start, rng)
+        p0 = _softmax(source, tau_start, rng, top_k=top_k)
     elif policy == 'pagerank_stoch':
         q = _softmax(source, tau_start, rng)
         r = pagerank(B, q, alpha_pr)
-        p0 = _softmax(r, tau_start, rng)
+        p0 = _softmax(r, tau_start, rng, top_k=top_k)
     else:
         raise ValueError(f"Unknown policy: {policy}")
 
@@ -433,9 +458,11 @@ def _policy_step_entropy_replay(
 
     for t in range(1, N):
         if policy == 'progressive_rw':
-            p_t, _scores = progressive_rw_step(B, S, U, last, betas, tau_step, source, rng)
+            p_t, _scores = progressive_rw_step(
+                B, S, U, last, betas, tau_step, source, rng, top_k=top_k
+            )
         elif policy in ('self_avoiding_rw', 'pagerank_stoch'):
-            p_t, _scores = self_avoiding_rw_step(B, U, last, tau_step, rng)
+            p_t, _scores = self_avoiding_rw_step(B, U, last, tau_step, rng, top_k=top_k)
         else:
             p_t = np.ones(len(U)) / len(U)  # fallback
 
@@ -472,10 +499,11 @@ def policy_step_entropy(
     tau_start = float(params.get('tau_start', 1.0))
     tau_step = float(params.get('tau_step', 1.0))
     alpha_dep = float(params.get('alpha_dep', 0.5))
+    top_k = int(params.get('top_k', 0) or 0)
 
     if len(S) == 0:
         source, _, _ = compute_source(B, alpha_dep)
-        p = _softmax(source, tau_start, rng)
+        p = _softmax(source, tau_start, rng, top_k=top_k)
     else:
         source, _, _ = compute_source(B, alpha_dep)
         betas = {
@@ -484,7 +512,7 @@ def policy_step_entropy(
             'src': float(params.get('beta_src', 0.2)),
             'loc': float(params.get('beta_loc', 0.5)),
         }
-        p, _ = progressive_rw_step(B, S, U, last, betas, tau_step, source, rng)
+        p, _ = progressive_rw_step(B, S, U, last, betas, tau_step, source, rng, top_k=top_k)
 
     eps = 1e-300
     return float(-np.sum(p * np.log(np.maximum(p, eps))))

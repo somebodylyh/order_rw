@@ -98,6 +98,59 @@ def test_progressive_rw_seedable(B):
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Test 3b: progressive_rw top-k masks low-score candidates
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_progressive_rw_step_top_k_masks_low_scores():
+    """top_k keeps probability mass only on the highest-scoring candidates."""
+    N = 5
+    B = np.zeros((N, N), dtype=np.float64)
+    S = np.array([0], dtype=np.int64)
+    U = np.array([1, 2, 3, 4], dtype=np.int64)
+    source = np.zeros(N, dtype=np.float64)
+    source[U] = np.array([0.1, 2.0, 0.5, 1.0])
+    rng = np.random.default_rng(123)
+
+    p_t, scores = progressive_rw_step(
+        B, S, U, last=0,
+        betas={'sup': 0.0, 'fut': 0.0, 'src': 1.0, 'loc': 0.0},
+        tau=0.5,
+        source=source,
+        rng=rng,
+        top_k=2,
+    )
+
+    top_nodes = set(U[np.argsort(-scores)[:2]].tolist())
+    for node, prob in zip(U, p_t):
+        if node in top_nodes:
+            assert prob > 0.0
+        else:
+            assert prob == pytest.approx(0.0)
+    assert p_t.sum() == pytest.approx(1.0)
+
+
+def test_progressive_rw_top_k_legal_and_seedable(B):
+    """top_k progressive_rw still returns legal, seeded permutations."""
+    params = {
+        'beta_sup': 1.0,
+        'beta_fut': 0.5,
+        'beta_src': 0.2,
+        'beta_loc': 0.5,
+        'tau_start': 0.2,
+        'tau_step': 0.2,
+        'top_k': 4,
+    }
+
+    order1, lp1 = sample_order(B, 'progressive_rw', params, seed=9876)
+    order2, lp2 = sample_order(B, 'progressive_rw', params, seed=9876)
+
+    assert sorted(order1.tolist()) == list(range(B.shape[0]))
+    np.testing.assert_array_equal(order1, order2)
+    assert lp1 == pytest.approx(lp2)
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Test 4: tie-break with no identity bias
 # ──────────────────────────────────────────────────────────────────────
 
