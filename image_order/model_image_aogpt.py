@@ -25,15 +25,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-# Import shared components from the text AOGPT
-from model_AOGPT_AdaLN6_NoRep_cond_128_trunc_qknorm import (
-    RMSNorm,
-    CausalSelfAttention,
-    MLP,
-    Block,
-    FinalLayer,
-    modulate,
-)
+from model_AOGPT_AdaLN6_NoRep_cond_128_trunc_qknorm import Block, FinalLayer
 
 
 @dataclass

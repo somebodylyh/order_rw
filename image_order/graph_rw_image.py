@@ -67,30 +67,17 @@ def sample_image_orders_batch(
 
 
 def mean_manhattan_step(orders: np.ndarray, grid: int = 8) -> float:
-    """Compute mean Manhattan distance between consecutive patches on grid × grid lattice.
+    """Mean Manhattan distance between consecutive patches on a `grid × grid` lattice.
 
-    orders: (K, N) int array.
-    Converts each patch index to (r, c) = (idx // grid, idx % grid).
-    Returns mean distance across all K*(N-1) transitions.
+    orders: (K, N) int. Patch index → (row, col) = (idx // grid, idx % grid).
     """
     orders = np.asarray(orders, dtype=np.int64)
-    K, N = orders.shape
-
-    distances = []
-    for k in range(K):
-        for t in range(N - 1):
-            idx_t = int(orders[k, t])
-            idx_next = int(orders[k, t + 1])
-
-            r_t = idx_t // grid
-            c_t = idx_t % grid
-            r_next = idx_next // grid
-            c_next = idx_next % grid
-
-            dist = abs(r_t - r_next) + abs(c_t - c_next)
-            distances.append(dist)
-
-    return float(np.mean(distances)) if distances else 0.0
+    if orders.shape[1] < 2:
+        return 0.0
+    rows = orders // grid
+    cols = orders % grid
+    d = np.abs(np.diff(rows, axis=1)) + np.abs(np.diff(cols, axis=1))
+    return float(d.mean())
 
 
 def sample_orders_for_eval(
@@ -129,8 +116,6 @@ def raster_orders(K: int, N: int) -> np.ndarray:
 
 
 if __name__ == "__main__":
-    # Smoke test
-    np.random.seed(0)
     A_global = np.random.RandomState(0).rand(64, 64).astype(np.float32)
 
     # Test make_B_from_attention
@@ -155,8 +140,14 @@ if __name__ == "__main__":
     manhattan_random = mean_manhattan_step(random_orders(200, 64))
     manhattan_raster = mean_manhattan_step(raster_orders(200, 64))
 
-    # Print results
     tau_vs_l2r_mean = result['tau_vs_l2r_mean']
     pairwise_tau_mean = result['pairwise_tau_mean']
 
-    print(f"OK graph_rw_image: K=200, top_k=4, manhattan_rw={manhattan_rw:.3f}, manhattan_random={manhattan_random:.3f}, manhattan_raster={manhattan_raster:.3f}")
+    print(
+        f"OK graph_rw_image: K=200, top_k=4, "
+        f"manhattan_rw={manhattan_rw:.3f}, "
+        f"manhattan_random={manhattan_random:.3f}, "
+        f"manhattan_raster={manhattan_raster:.3f}, "
+        f"tau_vs_l2r={tau_vs_l2r_mean:.3f}, "
+        f"pairwise_tau={pairwise_tau_mean:.3f}"
+    )

@@ -17,19 +17,20 @@ CIFAR_DIR = "/home/admin/bw/data/cifar-10-batches-py"
 RASTER_ORDER = np.arange(N_PATCHES, dtype=np.int64)
 
 
-def load_cifar10(split: str) -> Tuple[np.ndarray, np.ndarray]:
+def load_cifar10(split: str, cache_dir: str = CIFAR_DIR) -> Tuple[np.ndarray, np.ndarray]:
     """Load CIFAR-10 from local pickle files.
 
     Args:
         split: "train" or "test"
+        cache_dir: path to CIFAR-10 pickle directory
 
     Returns:
         Tuple of (images_uint8 shape (N, 3, 32, 32), labels shape (N,) int64)
     """
     if split == "train":
-        batch_paths = [f"{CIFAR_DIR}/data_batch_{i}" for i in range(1, 6)]
+        batch_paths = [f"{cache_dir}/data_batch_{i}" for i in range(1, 6)]
     elif split == "test":
-        batch_paths = [f"{CIFAR_DIR}/test_batch"]
+        batch_paths = [f"{cache_dir}/test_batch"]
     else:
         raise ValueError(f"Unknown split: {split}")
 
@@ -129,7 +130,7 @@ class CIFAR10Patches(torch.utils.data.Dataset):
             normalize: if True, map [0, 255] -> [-1, 1]
             cache_dir: path to CIFAR-10 pickle directory
         """
-        images_uint8, labels = load_cifar10(split)
+        images_uint8, labels = load_cifar10(split, cache_dir=cache_dir)
 
         # Convert to float32
         images = images_uint8.astype(np.float32)
