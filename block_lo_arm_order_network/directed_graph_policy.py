@@ -4,6 +4,12 @@ Directed graph stochastic order policy -- pure NumPy (no PyTorch, no ON, no AOGP
 import numpy as np
 from typing import Dict, Optional, Tuple, Union
 
+try:
+    import torch
+    _HAS_TORCH = True
+except ImportError:
+    _HAS_TORCH = False
+
 
 def build_directed_graph(A_global: np.ndarray) -> np.ndarray:
     """B = A_global.T with zero diagonal."""
@@ -94,6 +100,103 @@ def progressive_rw_step(
     return p_t, score
 
 
+def progressive_rw_v2_step(
+    B: np.ndarray,
+    S: np.ndarray,
+    U: np.ndarray,
+    last: int,
+    lam: float,
+    tau: float,
+    rng: np.random.Generator,
+    top_k: int = 0,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Two-term Graph-RW step: score(v) = C_t(v) - λ * D_t(v).
+
+    C_t(v) = support(v) + B[last, v]  -- context compatibility
+    D_t(v) = sum_{u∈U, u≠v} B[u, v]   -- dependency penalty
+
+    Source is only used at t=0 (initialization); not included in per-step scoring.
+    """
+    B = np.asarray(B, dtype=np.float64)
+    S = np.asarray(S, dtype=np.int64)
+    U = np.asarray(U, dtype=np.int64)
+
+    # C_t(v) = support + local
+    if len(S) > 0:
+        support = B[S].sum(axis=0)[U]
+    else:
+        support = np.zeros(len(U), dtype=np.float64)
+
+    if last >= 0:
+        local_score = B[last, U]
+    else:
+        local_score = np.zeros(len(U), dtype=np.float64)
+
+    C_t = support + local_score
+
+    # D_t(v) = unrevealed dependency penalty
+    if len(U) > 0:
+        future = B[U].sum(axis=0)[U]
+    else:
+        future = np.zeros(len(U), dtype=np.float64)
+
+    score = C_t - lam * future
+    p_t = _softmax(score, tau, rng, top_k=top_k)
+    return p_t, score
+
+
+def progressive_rw_v3_step(
+    B: np.ndarray,
+    S: np.ndarray,
+    U: np.ndarray,
+    last: int,
+    lam: float,
+    rho: float,
+    readiness: np.ndarray,
+    tau: float,
+    rng: np.random.Generator,
+    top_k: int = 0,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Readiness-guided Graph-RW step: score(v) = C_t(v) - λ·D_t(v) + ρ·r(v).
+
+    C_t(v) = support(v) + B[last, v]  -- context compatibility
+    D_t(v) = sum_{u∈U, u≠v} B[u, v]   -- dependency penalty
+    r(v)   = out(v) - α_dep·in(v)     -- global readiness prior (constant)
+
+    ρ controls strength of the global readiness signal.
+    """
+    B = np.asarray(B, dtype=np.float64)
+    S = np.asarray(S, dtype=np.int64)
+    U = np.asarray(U, dtype=np.int64)
+    readiness = np.asarray(readiness, dtype=np.float64)
+
+    # C_t(v) = support + local
+    if len(S) > 0:
+        support = B[S].sum(axis=0)[U]
+    else:
+        support = np.zeros(len(U), dtype=np.float64)
+
+    if last >= 0:
+        local_score = B[last, U]
+    else:
+        local_score = np.zeros(len(U), dtype=np.float64)
+
+    C_t = support + local_score
+
+    # D_t(v) = unrevealed dependency penalty
+    if len(U) > 0:
+        future = B[U].sum(axis=0)[U]
+    else:
+        future = np.zeros(len(U), dtype=np.float64)
+
+    # r(v): global readiness prior
+    r = readiness[U]
+
+    score = C_t - lam * future + rho * r
+    p_t = _softmax(score, tau, rng, top_k=top_k)
+    return p_t, score
+
+
 def self_avoiding_rw_step(
     B: np.ndarray,
     U: np.ndarray,
@@ -139,6 +242,103 @@ def pagerank(
         if delta < tol:
             break
     return r
+
+
+def sample_orders_batched_torch(
+    B_np: np.ndarray,
+    batch_size: int,
+    policy: str,
+    params: Dict[str, float],
+    base_seed: int,
+    device: "torch.device",
+) -> "torch.Tensor":
+    """GPU-batched order sampling for progressive_rw_v3.
+
+    Generates ``batch_size`` orders in parallel on GPU, all at once.
+    Returns (batch_size, N) LongTensor on ``device``.
+    """
+    if not _HAS_TORCH:
+        raise ImportError("torch is required for sample_orders_batched_torch")
+    if policy != "progressive_rw_v3":
+        raise ValueError(f"Batched sampling only supports progressive_rw_v3, got {policy}")
+
+    N = B_np.shape[0]
+    B = torch.from_numpy(B_np.copy()).float().to(device)  # (N, N)
+
+    tau_start = float(params.get("tau_start", 1.0))
+    tau_step = float(params.get("tau_step", 1.0))
+    alpha_dep = float(params.get("alpha_dep", 0.5))
+    lam = float(params.get("lam", 0.75))
+    rho = float(params.get("rho", 0.2))
+    top_k = int(params.get("top_k", 0) or 0)
+    epsilon_uniform = float(params.get("epsilon_uniform", 0.0))
+
+    out_deg = B.sum(dim=1)
+    in_deg = B.sum(dim=0)
+    source = out_deg - alpha_dep * in_deg  # (N,)  = readiness
+
+    gen = torch.Generator(device=device)
+    gen.manual_seed(base_seed)
+
+    orders = torch.zeros(batch_size, N, dtype=torch.long, device=device)
+    selected = torch.zeros(batch_size, N, dtype=torch.bool, device=device)
+    last_idx = torch.full((batch_size,), -1, dtype=torch.long, device=device)
+
+    # Pre-compute the bloat-noise pattern once per step (deterministic via gen)
+    # and re-use it when all unmasked scores are near-equal (degenerate softmax).
+    noise_cache = torch.rand(N, N, generator=gen, device=device, dtype=torch.float32) * 1e-9
+
+    for t in range(N):
+        if t == 0:
+            scores = source.unsqueeze(0).expand(batch_size, -1).clone()
+        else:
+            sel_f = selected.float()
+            unsel_f = (~selected).float()
+            support_all = torch.mm(sel_f, B)         # (B, N)
+            local_all = B[last_idx]                  # (B, N)
+            future_all = torch.mm(unsel_f, B)        # (B, N)
+            scores = support_all + local_all - lam * future_all + rho * source.unsqueeze(0)
+
+        # Mask already-selected nodes
+        scores = scores.masked_fill(selected, float("-inf"))
+
+        tau = tau_start if t == 0 else tau_step
+
+        # Top-k filter (per sample)
+        if top_k > 0 and top_k < scores.size(-1):
+            topk_vals, _ = torch.topk(scores, top_k, dim=-1)
+            threshold = topk_vals[:, -1:]
+            scores = torch.where(
+                scores >= threshold,
+                scores,
+                torch.tensor(float("-inf"), device=device, dtype=scores.dtype),
+            )
+
+        # Degenerate check: when all unmasked finite scores are nearly equal,
+        # add tiny noise so softmax doesn't return uniform (mirrors numpy _softmax).
+        finite_mask = ~torch.isinf(scores)
+        if finite_mask.any():
+            fmax = scores.masked_fill(~finite_mask, float("-inf")).max(dim=-1).values
+            fmin = scores.masked_fill(~finite_mask, float("inf")).min(dim=-1).values
+            degenerate = (fmax - fmin).abs() < 1e-15
+            if degenerate.any():
+                scores = scores + noise_cache[t].unsqueeze(0) * degenerate.unsqueeze(-1).float()
+
+        probs = torch.softmax(scores / tau, dim=-1)
+        probs = probs.masked_fill(selected, 0.0)  # guard against numerical leak
+
+        # Epsilon-uniform mix
+        if epsilon_uniform > 0.0:
+            uniform_prob = 1.0 / (N - t)
+            probs = (1.0 - epsilon_uniform) * probs + epsilon_uniform * uniform_prob
+            probs = probs / probs.sum(dim=-1, keepdim=True)
+
+        choices = torch.multinomial(probs, num_samples=1, generator=gen).squeeze(-1)  # (B,)
+        orders[:, t] = choices
+        selected[torch.arange(batch_size, device=device), choices] = True
+        last_idx = choices
+
+    return orders
 
 
 def sample_order(
@@ -193,6 +393,77 @@ def sample_order(
         for t in range(1, N):
             p_t, _scores = progressive_rw_step(
                 B, S, U, last, betas, tau_step, source, rng, top_k=top_k
+            )
+            if epsilon_uniform > 0.0:
+                p_t = (1.0 - epsilon_uniform) * p_t + epsilon_uniform / len(U)
+            idx_t = int(rng.choice(len(U), p=p_t))
+            node_t = int(U[idx_t])
+
+            order[t] = node_t
+            logprob += float(np.log(max(p_t[idx_t], 1e-300)))
+
+            S = np.append(S, node_t)
+            U = U[U != node_t]
+            last = node_t
+
+        return order, logprob
+
+    # --- Progressive RW v2 (two-term: C_t - λ D_t) ---------------------
+    if policy == 'progressive_rw_v2':
+        lam = float(params.get('lam', 1.0))
+
+        p0 = _softmax(source, tau_start, rng, top_k=top_k)
+        if epsilon_uniform > 0.0:
+            p0 = (1.0 - epsilon_uniform) * p0 + epsilon_uniform / N
+        idx0 = int(rng.choice(N, p=p0))
+
+        order = np.zeros(N, dtype=np.int64)
+        order[0] = idx0
+        logprob = float(np.log(max(p0[idx0], 1e-300)))
+
+        S = np.array([idx0], dtype=np.int64)
+        U = np.setdiff1d(np.arange(N, dtype=np.int64), S)
+        last = idx0
+
+        for t in range(1, N):
+            p_t, _scores = progressive_rw_v2_step(
+                B, S, U, last, lam, tau_step, rng, top_k=top_k
+            )
+            if epsilon_uniform > 0.0:
+                p_t = (1.0 - epsilon_uniform) * p_t + epsilon_uniform / len(U)
+            idx_t = int(rng.choice(len(U), p=p_t))
+            node_t = int(U[idx_t])
+
+            order[t] = node_t
+            logprob += float(np.log(max(p_t[idx_t], 1e-300)))
+
+            S = np.append(S, node_t)
+            U = U[U != node_t]
+            last = node_t
+
+        return order, logprob
+
+    # --- Progressive RW v3 (readiness-guided: C_t - λ D_t + ρ r) ------------
+    if policy == 'progressive_rw_v3':
+        lam = float(params.get('lam', 0.75))
+        rho = float(params.get('rho', 0.2))
+
+        p0 = _softmax(source, tau_start, rng, top_k=top_k)
+        if epsilon_uniform > 0.0:
+            p0 = (1.0 - epsilon_uniform) * p0 + epsilon_uniform / N
+        idx0 = int(rng.choice(N, p=p0))
+
+        order = np.zeros(N, dtype=np.int64)
+        order[0] = idx0
+        logprob = float(np.log(max(p0[idx0], 1e-300)))
+
+        S = np.array([idx0], dtype=np.int64)
+        U = np.setdiff1d(np.arange(N, dtype=np.int64), S)
+        last = idx0
+
+        for t in range(1, N):
+            p_t, _scores = progressive_rw_v3_step(
+                B, S, U, last, lam, rho, source, tau_step, rng, top_k=top_k
             )
             if epsilon_uniform > 0.0:
                 p_t = (1.0 - epsilon_uniform) * p_t + epsilon_uniform / len(U)
@@ -438,7 +709,7 @@ def _policy_step_entropy_replay(
     H = np.zeros(N, dtype=np.float64)
 
     # --- Step 0: p0 ---
-    if policy in ('progressive_rw', 'self_avoiding_rw'):
+    if policy in ('progressive_rw', 'progressive_rw_v2', 'progressive_rw_v3', 'self_avoiding_rw'):
         p0 = _softmax(source, tau_start, rng, top_k=top_k)
     elif policy == 'pagerank_stoch':
         q = _softmax(source, tau_start, rng)
@@ -460,6 +731,17 @@ def _policy_step_entropy_replay(
         if policy == 'progressive_rw':
             p_t, _scores = progressive_rw_step(
                 B, S, U, last, betas, tau_step, source, rng, top_k=top_k
+            )
+        elif policy == 'progressive_rw_v2':
+            lam = float(params.get('lam', 1.0))
+            p_t, _scores = progressive_rw_v2_step(
+                B, S, U, last, lam, tau_step, rng, top_k=top_k
+            )
+        elif policy == 'progressive_rw_v3':
+            lam = float(params.get('lam', 0.75))
+            rho = float(params.get('rho', 0.2))
+            p_t, _scores = progressive_rw_v3_step(
+                B, S, U, last, lam, rho, source, tau_step, rng, top_k=top_k
             )
         elif policy in ('self_avoiding_rw', 'pagerank_stoch'):
             p_t, _scores = self_avoiding_rw_step(B, U, last, tau_step, rng, top_k=top_k)

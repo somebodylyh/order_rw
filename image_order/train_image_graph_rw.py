@@ -21,12 +21,14 @@ from pathlib import Path
 import numpy as np
 import torch
 
+torch.set_float32_matmul_precision("high")
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "image_order"))
 
 from data_image_patches import CIFAR10Patches
 from model_image_aogpt import ImageAOGPT, ImageAOGPTConfig
-from graph_rw_image import IMAGE_RW_PARAMS_DEFAULT, sample_image_orders_batch
+from graph_rw_image import IMAGE_RW_PARAMS_DEFAULT, IMAGE_RW_PARAMS_V2, IMAGE_RW_PARAMS_V3, sample_image_orders_batch
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +69,14 @@ def parse_args():
     parser.add_argument("--rw-epsilon", type=float, default=0.0)
     parser.add_argument("--rw-tau-start", type=float, default=0.10)
     parser.add_argument("--rw-tau-step", type=float, default=0.10)
+    parser.add_argument("--rw-policy", type=str, default="progressive_rw",
+                       choices=["progressive_rw", "progressive_rw_v2", "progressive_rw_v3"])
+    parser.add_argument("--rw-lam", type=float, default=1.0,
+                       help="λ trade-off for dependency penalty (v2/v3)")
+    parser.add_argument("--rw-rho", type=float, default=0.2,
+                       help="ρ global readiness prior strength (v3 only)")
+    parser.add_argument("--save-steps", type=str, default="",
+                       help="comma-separated step numbers to save intermediate ckpts, e.g. '5000,10000'")
     return parser.parse_args()
 
 
@@ -196,12 +206,23 @@ def main():
     # ------------------------------------------------------------------
     # Build RW params
     # ------------------------------------------------------------------
-    rw_params = IMAGE_RW_PARAMS_DEFAULT.copy()
+    if args.rw_policy == "progressive_rw_v3":
+        rw_defaults = IMAGE_RW_PARAMS_V3
+    elif args.rw_policy == "progressive_rw_v2":
+        rw_defaults = IMAGE_RW_PARAMS_V2
+    else:
+        rw_defaults = IMAGE_RW_PARAMS_DEFAULT
+    rw_params = rw_defaults.copy()
     rw_params["top_k"] = args.rw_top_k
     rw_params["epsilon_uniform"] = args.rw_epsilon
     rw_params["tau_start"] = args.rw_tau_start
     rw_params["tau_step"] = args.rw_tau_step
-    log(f"RW params: {rw_params}")
+    if args.rw_policy in ("progressive_rw_v2",):
+        rw_params["lam"] = args.rw_lam
+    elif args.rw_policy == "progressive_rw_v3":
+        rw_params["lam"] = args.rw_lam
+        rw_params["rho"] = args.rw_rho
+    log(f"RW policy={args.rw_policy}, params: {rw_params}")
 
     # ------------------------------------------------------------------
     # Load baseline checkpoint
@@ -218,6 +239,7 @@ def main():
     model = ImageAOGPT(cfg)
     model.load_state_dict(ckpt["model_state_dict"])
     model.to(device)
+    model = torch.compile(model, mode="reduce-overhead")
     model.train()
 
     param_count = sum(p.numel() for p in model.parameters())
@@ -342,6 +364,23 @@ def main():
         raise SystemExit(1)
     log(f"Smoke check passed: step-0 val_random={step0_val_random:.4f}")
 
+    def save_dict_fn():
+        return {
+            "model_state_dict": best_state if best_state is not None else {k: v.cpu().clone() for k, v in model.state_dict().items()},
+            "config": saved_config,
+            "args": vars(args),
+            "train_losses": train_losses,
+            "train_losses_random": train_losses_random,
+            "train_losses_rw": train_losses_rw,
+            "best_val_rw_top4_eps0": best_val_rw_top4_eps0,
+            "best_step": best_step,
+            "rw_params": rw_params,
+        }
+
+    save_steps = set()
+    if args.save_steps:
+        save_steps = set(int(x.strip()) for x in args.save_steps.split(",") if x.strip())
+
     # ------------------------------------------------------------------
     # Train loop
     # ------------------------------------------------------------------
@@ -362,7 +401,7 @@ def main():
         rand_orders = torch.stack([torch.randperm(64, device=device) for _ in range(args.batch_size)])
         rw_orders = sample_image_orders_batch(
             B_global, rw_params, args.batch_size,
-            seed_base=args.seed, step=step, device=device
+            seed_base=args.seed, step=step, device=device, policy=args.rw_policy,
         )
 
         # Forward
@@ -416,21 +455,17 @@ def main():
                 current_lr=current_lr,
             )
 
+        # Intermediate save
+        if (step + 1) in save_steps:
+            ckpt_path = output_dir / f"ckpt_step{step+1}.pt"
+            torch.save(save_dict_fn(), ckpt_path)
+            log(f"Saved intermediate ckpt: {ckpt_path}")
+
     # ------------------------------------------------------------------
     # Final checkpoint
     # ------------------------------------------------------------------
     final_ckpt_path = output_dir / f"ckpt_step{args.max_steps}.pt"
-    save_dict = {
-        "model_state_dict": best_state if best_state is not None else {k: v.cpu().clone() for k, v in model.state_dict().items()},
-        "config": saved_config,
-        "args": vars(args),
-        "train_losses": train_losses,
-        "train_losses_random": train_losses_random,
-        "train_losses_rw": train_losses_rw,
-        "best_val_rw_top4_eps0": best_val_rw_top4_eps0,
-        "best_step": best_step,
-        "rw_params": rw_params,
-    }
+    save_dict = save_dict_fn()
     torch.save(save_dict, final_ckpt_path)
     log(f"Saved checkpoint: {final_ckpt_path}")
 

@@ -20,6 +20,20 @@ IMAGE_RW_PARAMS_DEFAULT = dict(
     top_k=4,        epsilon_uniform=0.0,
 )
 
+IMAGE_RW_PARAMS_V2 = dict(
+    tau_start=0.10, tau_step=0.10,
+    alpha_dep=0.5,  alpha_pr=0.85,
+    lam=1.0,
+    top_k=4,        epsilon_uniform=0.0,
+)
+
+IMAGE_RW_PARAMS_V3 = dict(
+    tau_start=0.10, tau_step=0.10,
+    alpha_dep=0.5,  alpha_pr=0.85,
+    lam=0.75,       rho=0.2,
+    top_k=4,        epsilon_uniform=0.0,
+)
+
 
 def make_B_from_attention(A_global: np.ndarray) -> np.ndarray:
     """Build directed graph B from attention matrix A_global.
@@ -45,6 +59,7 @@ def sample_image_orders_batch(
     seed_base: int,
     step: int,
     device=None,
+    policy: str = POLICY,
 ) -> torch.LongTensor:
     """Sample batch_size orders using deterministic seeding.
 
@@ -56,7 +71,7 @@ def sample_image_orders_batch(
 
     for b in range(batch_size):
         seed = seed_base * 100000 + step * batch_size + b
-        order, _ = sample_order(B, POLICY, params, seed)
+        order, _ = sample_order(B, policy, params, seed)
         orders[b] = order
 
     orders_t = torch.from_numpy(orders).long()
@@ -85,12 +100,13 @@ def sample_orders_for_eval(
     params: Dict[str, float],
     K: int,
     seed_base: int = 42,
+    policy: str = POLICY,
 ) -> dict:
     """Sample K orders and return diagnostics dict augmented with mean_manhattan_step.
 
-    Calls sample_orders(B, POLICY, params, K, seed_base) and adds 'mean_manhattan_step' key.
+    Calls sample_orders(B, policy, params, K, seed_base) and adds 'mean_manhattan_step' key.
     """
-    result = sample_orders(B, POLICY, params, K, seed_base)
+    result = sample_orders(B, policy, params, K, seed_base)
     result['mean_manhattan_step'] = mean_manhattan_step(result['orders'])
     return result
 

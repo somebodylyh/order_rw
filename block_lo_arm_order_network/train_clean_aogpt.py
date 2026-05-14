@@ -18,6 +18,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+torch.set_float32_matmul_precision("high")
+
 from clean_training_protocol import (
     CleanPermutation,
     batch_indices_for_step,
@@ -32,7 +34,7 @@ from clean_training_protocol import (
     train_cursor_for_next_step,
     verify_clean_coordinate_round_trip,
 )
-from directed_graph_policy import build_directed_graph, sample_order
+from directed_graph_policy import build_directed_graph, sample_order, sample_orders_batched_torch
 from training_utils import (
     AOGPT,
     AOGPTConfig,
@@ -175,12 +177,14 @@ def clean_model_args(args):
     }
 
 
-def build_model(model_args, device):
+def build_model(model_args, device, compile_model=True):
     sig = list(AOGPTConfig.__init__.__code__.co_varnames)
     valid = {k: v for k, v in dict(model_args).items() if k in sig}
     model = AOGPT(AOGPTConfig(**valid))
     model.crop_block_size(SEQ_LEN)
     model.to(device)
+    if compile_model:
+        model = torch.compile(model, mode="reduce-overhead")
     return model
 
 
@@ -202,6 +206,15 @@ def sample_random_physical_orders(batch_size, seed, global_step, micro_step, dev
 
 
 def sample_rw_physical_orders(batch_size, B, policy, params, seed, global_step, micro_step, device, bag_idx=0):
+    if policy == "progressive_rw_v3" and device.type == "cuda":
+        base_seed = (
+            int(seed) * 100000000
+            + int(global_step) * 10000
+            + int(micro_step) * 1000
+            + int(bag_idx) * 100
+        )
+        return sample_orders_batched_torch(B, batch_size, policy, params, base_seed, device)
+
     rows = []
     for b in range(batch_size):
         order_seed = (
@@ -501,6 +514,12 @@ def parse_args(default_run_kind="baseline"):
     p.add_argument("--tau-step", type=float, default=0.1)
     p.add_argument("--rw-top-k", type=int, default=4)
     p.add_argument("--rw-order-bag-k", type=int, default=1)
+    p.add_argument("--rw-policy", type=str, default="progressive_rw",
+                   choices=["progressive_rw", "progressive_rw_v2", "progressive_rw_v3"])
+    p.add_argument("--rw-lam", type=float, default=0.75,
+                   help="λ trade-off for dependency penalty (v2/v3)")
+    p.add_argument("--rw-rho", type=float, default=0.2,
+                   help="ρ global readiness prior strength (v3 only)")
     p.add_argument("--epsilon-uniform", type=float, default=0.0,
                    help="Epsilon-uniform exploration mixing (0=disabled, 0.15=recommended)")
     return p.parse_args()
@@ -566,26 +585,40 @@ def main(default_run_kind="baseline"):
         train_losses = []
     else:
         model_args = ckpt.get("model_args") or clean_model_args(args)
-        model = build_model(model_args, device)
+        model = build_model(model_args, device, compile_model=False)
         state_dict = ckpt.get("model") or ckpt.get("model_state_dict")
         if state_dict is None:
             raise KeyError("resume checkpoint lacks model/model_state_dict")
         model.load_state_dict(clean_state_dict(state_dict))
+        model = torch.compile(model, mode="reduce-overhead")
         start_step = int(ckpt.get("global_step", ckpt.get("iter_num", 0)))
         train_losses = list(ckpt.get("train_losses", []))
 
+    # Fix alpha on resume: don't restart warmup from 0.
+    # alpha_for_step measures local_step = global_step - start_step,
+    # so a resume makes local_step jump back to 0.  Compensate by
+    # advancing alpha_start to whatever alpha should be at start_step.
+    if start_step > 0:
+        current_alpha = alpha_for_step(start_step, 0, args)
+        args.alpha_start = current_alpha
+
     # Initialize Graph-RW policy from current model's attention
-    rw_policy = "progressive_rw"
+    rw_policy = args.rw_policy
     rw_params = {
         "tau_start": args.tau_start,
         "tau_step": args.tau_step,
         "alpha_dep": 0.5,
         "alpha_pr": 0.85,
-        "beta_sup": 1.0,
-        "beta_fut": 0.5,
-        "beta_src": 0.2,
-        "beta_loc": 0.5,
     }
+    if rw_policy in ("progressive_rw_v2", "progressive_rw_v3"):
+        rw_params["lam"] = args.rw_lam
+    if rw_policy == "progressive_rw_v3":
+        rw_params["rho"] = args.rw_rho
+    if rw_policy == "progressive_rw":
+        rw_params.update({
+            "beta_sup": 1.0, "beta_fut": 0.5,
+            "beta_src": 0.2, "beta_loc": 0.5,
+        })
     if args.rw_top_k > 0:
         rw_params["top_k"] = int(args.rw_top_k)
     if args.epsilon_uniform > 0.0:
