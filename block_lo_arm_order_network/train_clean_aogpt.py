@@ -437,6 +437,10 @@ def checkpoint_payload(model, optimizer, args, clean_perm, split, global_step, t
 
 
 def write_config(output_dir, args, split, clean_perm, rw_policy, rw_params):
+    # Honest config: only emit Graph-RW fields if Graph-RW is actually active.
+    # alpha_for_step short-circuits to 0.0 when run_kind is not in {graph_rw, graph_rw_bag},
+    # so writing rw_policy / rw_params for baseline / l2r runs is misleading.
+    graph_rw_active = args.run_kind in {"graph_rw", "graph_rw_bag"}
     payload = {
         "args": vars(args),
         "model_args": clean_model_args(args),
@@ -456,8 +460,18 @@ def write_config(output_dir, args, split, clean_perm, rw_policy, rw_params):
             "train_shuffle_order_sha256": sha256_int_array(split["train_shuffle_order"]),
             "eval_indices_sha256": sha256_int_array(split["eval_indices"]),
         },
-        "rw_policy": rw_policy,
-        "rw_params": rw_params,
+        "graph_rw_active": graph_rw_active,
+        "actual_alpha_schedule": (
+            {
+                "alpha_start": float(args.alpha_start),
+                "alpha_target": float(args.alpha_target),
+                "alpha_warmup_steps": int(args.alpha_warmup_steps),
+            }
+            if graph_rw_active
+            else {"alpha_constant": 0.0, "reason": f"run_kind={args.run_kind} short-circuits alpha_for_step to 0"}
+        ),
+        "rw_policy": rw_policy if graph_rw_active else None,
+        "rw_params": rw_params if graph_rw_active else None,
         "block_perm_first16": clean_perm.block_perm_phys_to_model[:16].tolist(),
         "inv_perm_first16": clean_perm.inv_perm_model_to_phys[:16].tolist(),
     }
@@ -546,6 +560,24 @@ def main(default_run_kind="baseline"):
             f.write(message + "\n")
 
     log(f"Run kind: {args.run_kind}")
+    _graph_rw_active = args.run_kind in {"graph_rw", "graph_rw_bag"}
+    log(f"graph_rw_active: {_graph_rw_active}")
+    if _graph_rw_active:
+        log(
+            f"alpha_schedule: start={args.alpha_start} target={args.alpha_target} "
+            f"warmup_steps={args.alpha_warmup_steps}"
+        )
+        log(
+            f"rw_policy={args.rw_policy} top_k={args.rw_top_k} "
+            f"epsilon={getattr(args, 'rw_epsilon_uniform', None)} "
+            f"tau_start={args.tau_start} lam={getattr(args, 'rw_lam', None)} "
+            f"rho={getattr(args, 'rw_rho', None)}"
+        )
+    else:
+        log(
+            f"alpha_schedule: constant 0.0 (run_kind={args.run_kind} short-circuits "
+            f"alpha_for_step). Any rw_* CLI flags are ignored at training time."
+        )
     log(f"Output dir: {output_dir}")
     log(f"Device: {device}")
 
