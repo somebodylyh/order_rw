@@ -15,8 +15,18 @@ Interface notes (verified against source):
   Before each forward pass, input tokens must be reordered by fixed_token_perm
   (derived from block_perm stored in ckpt['data_permutation']). Without this
   the model sees out-of-distribution input and val_loss is ~0.6 nats higher.
-  When passing explicit block-orders under permuted data, block_orders are
-  passed directly (they index into the already-permuted token sequence).
+- COORDINATE FRAME: A_block (and therefore B and all RW/raster orders built
+  from it) live in PHYSICAL raster coordinates. The permuted-data model lives
+  in MODEL coordinates (model block position p holds physical block block_perm[p]).
+  So any physically-defined block order MUST be remapped to model coordinates
+  via inverse_block_perm before being fed to the model:
+      model_block_order = inverse_block_perm[phys_block_order]
+  This matches train.py's own original-L2R eval (it feeds inverse_block_perm
+  as the block order to reveal the physical raster sequence) and the codebase
+  helper phys_n64_block_order_to_model_token_order (inv_perm[phys]=model).
+  Skipping this remap silently scrambles raster/graph_rw structure (random
+  orders are frame-invariant, so val_random would still look fine — which is
+  why this bug is invisible to the val_random gate).
 """
 
 import argparse, json, math, os, pickle, sys, time
@@ -104,18 +114,24 @@ def load_baseline_model(ckpt_path, device):
     # tokens were reordered by block_perm before each forward pass.
     # We must apply the same permutation here.
     fixed_token_perm = None
+    inv_block_perm = None
     dp = ckpt.get("data_permutation")
     if dp is not None and dp.get("permute_mode") == "block":
         block_len = model_args.get("block_order_block_len", 4)
         block_perm_list = dp["block_perm"]
         block_perm = torch.tensor(block_perm_list, dtype=torch.long)
         fixed_token_perm = block_permutation_to_token_permutation(block_perm, block_len)
+        # inverse_block_perm maps a PHYSICAL block index -> the MODEL block
+        # position that holds it; used to remap physically-defined block orders
+        # into the model coordinate frame. See module docstring.
+        inv_block_perm = torch.tensor(dp["inverse_block_perm"], dtype=torch.long)
         print(f"  [data_perm] loaded block_perm (len={len(block_perm_list)}), "
-              f"fixed_token_perm (len={len(fixed_token_perm)})")
+              f"fixed_token_perm (len={len(fixed_token_perm)}), "
+              f"inv_block_perm (len={len(inv_block_perm)})")
     else:
         print("  [data_perm] no data_permutation found in ckpt; feeding raw token order")
 
-    return model, model_args, ckpt, fixed_token_perm
+    return model, model_args, ckpt, fixed_token_perm, inv_block_perm
 
 
 def get_lr(step, args):
@@ -134,12 +150,20 @@ def get_alpha(step, args):
     return min(args.alpha, args.alpha * step / max(args.alpha_warmup, 1))
 
 
-def _forward_with_block_orders(model, x, block_orders, fixed_token_perm=None):
-    """Run model forward with block-level orders.
+def _forward_with_block_orders(model, x, block_orders, fixed_token_perm=None,
+                               inv_block_perm=None):
+    """Run model forward with PHYSICAL-coordinate block-level orders.
 
     If fixed_token_perm is provided, x is first reordered by it (to match the
-    data permutation used during baseline training). Block_orders index into
-    the already-permuted token sequence so they are passed as-is.
+    data permutation used during baseline training), putting the model in its
+    permuted (model) coordinate frame.
+
+    If inv_block_perm is provided, block_orders are assumed to be in PHYSICAL
+    raster coordinates and are remapped into model coordinates via
+    model_block_order = inv_block_perm[phys_block_order] BEFORE expansion. This
+    is required whenever the data is permuted; otherwise structured orders
+    (raster/graph_rw) traverse scrambled positions. (Harmless for random orders,
+    which stay random under any bijection.)
 
     Expands block_orders (batch, N_BLOCKS) → token_orders (batch, SEQ_LEN)
     then calls model(x, mode=None, orders=token_orders).
@@ -148,6 +172,9 @@ def _forward_with_block_orders(model, x, block_orders, fixed_token_perm=None):
     if fixed_token_perm is not None:
         perm_idx = fixed_token_perm.to(x.device)
         x = x[:, perm_idx]
+    if inv_block_perm is not None:
+        ibp = inv_block_perm.to(block_orders.device)
+        block_orders = ibp[block_orders]
     token_orders = model._expand_block_orders_to_token_orders(block_orders)
     result = model(x, mode=None, orders=token_orders)
     loss = result[1]
@@ -168,7 +195,8 @@ def sample_block_orders(policy, B_global, batch_size, step, rw_params, raster_or
 
 @torch.no_grad()
 def evaluate_5orders(model, val_tokens, B_real, raster_order, device,
-                     batch_size, max_eval_batches, step, fixed_token_perm=None):
+                     batch_size, max_eval_batches, step, fixed_token_perm=None,
+                     inv_block_perm=None):
     model.eval()
     V = val_tokens.shape[0]
     n_batches = min(max_eval_batches, math.ceil(V / batch_size))
@@ -197,7 +225,9 @@ def evaluate_5orders(model, val_tokens, B_real, raster_order, device,
             B_actual, seed_base=seed_base + 2, step=0, device=device)
 
         for name, ord_ in zip(cols, [rand_b, ras_b, rw4, rweps, rwk8]):
-            loss = _forward_with_block_orders(model, x, ord_, fixed_token_perm=fixed_token_perm)
+            loss = _forward_with_block_orders(model, x, ord_,
+                                              fixed_token_perm=fixed_token_perm,
+                                              inv_block_perm=inv_block_perm)
             results[name].append(float(loss.item()))
 
     model.train()
@@ -232,7 +262,7 @@ def main():
                  "tau_start": args.rw_tau_start, "tau_step": args.rw_tau_step}
 
     # ----- model -----
-    model, model_args, ckpt, fixed_token_perm = load_baseline_model(args.baseline_ckpt, device)
+    model, model_args, ckpt, fixed_token_perm, inv_block_perm = load_baseline_model(args.baseline_ckpt, device)
     optimizer = model.configure_optimizers(args.weight_decay, args.lr,
                                            (args.beta1, args.beta2), device.split(":")[0])
     model.train()
@@ -292,7 +322,8 @@ def main():
                     )
 
                 loss = _forward_with_block_orders(model, x, block_orders,
-                                                  fixed_token_perm=fixed_token_perm)
+                                                  fixed_token_perm=fixed_token_perm,
+                                                  inv_block_perm=inv_block_perm)
                 (loss / args.grad_accum).backward()
                 running_loss.append(float(loss.item()))
 
@@ -302,7 +333,8 @@ def main():
         if step % args.eval_interval == 0:
             vr = evaluate_5orders(model, val_tokens, B_real, raster_order, device,
                                   args.batch_size, args.max_eval_batches, step,
-                                  fixed_token_perm=fixed_token_perm)
+                                  fixed_token_perm=fixed_token_perm,
+                                  inv_block_perm=inv_block_perm)
             tl = float(np.mean(running_loss[-100:])) if running_loss else float("nan")
             log(f"[eval] step={step:5d} train={tl:.4f} α={alpha_now:.3f} lr={lr_now:.2e} "
                 f"rnd={vr['random']:.4f} ras={vr['raster']:.4f} "
