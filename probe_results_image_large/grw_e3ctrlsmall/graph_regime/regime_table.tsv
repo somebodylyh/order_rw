@@ -1,0 +1,7 @@
+graph	readiness_strength	asymmetry	row_entropy	top1_mass	argmax_dist	p_nbr_le1	locality_score	directionality	regime	suggested_readout
+E3_ctrl_small_image	2.4879	0.0733	0.9928	0.0403	1.2500	0.9531	0.7656	0.5000	proximity_dominant	coverage_readout (Bcov_balanced / Hilbert); single-step Graph-RW insufficient
+E3_shuffled_cols(ctrl)	2.9911	0.2537	0.9890	0.0409	5.2500	0.0781	0.0156	0.2540	uniform_noisy	no structured readout — random/mixed fallback; do not over-trust B
+random_B(ctrl)	5.0796	0.6678	0.9530	0.0316	5.1094	0.0469	0.0420	0.2500	uniform_noisy	no structured readout — random/mixed fallback; do not over-trust B
+E2_singletoken_vq_image	7.7494	0.1541	0.9991	0.0191	5.1250	0.0156	0.0391	0.2344	uniform_noisy	no structured readout — random/mixed fallback; do not over-trust B
+E2_large_image	3.4045	0.1030	0.9964	0.0285	5.4688	0.0469	0.0000	0.2656	uniform_noisy	no structured readout — random/mixed fallback; do not over-trust B
+text_clean_method	11.8458	0.2047	0.9998	0.0196	1.0000	1.0000	0.9538	0.9844	readiness_dominant	readiness-guided Graph-RW (progressive_rw_v3, high rho); directional 1D edges
