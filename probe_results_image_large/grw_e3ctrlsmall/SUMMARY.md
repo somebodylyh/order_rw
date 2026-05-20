@@ -89,7 +89,35 @@ Core training comparison: **Bcov_balanced vs hilbert** — does B's directed str
 anything over a generic space-filling curve? locality is a diagnostic, not the objective;
 decide by val loss / cross-order robustness / sample quality.
 
-## Pending
-- Task 6 (post-train A re-extraction + dual-level drift metric on each ckpt_final.pt) —
-  GPU ~25 min, not yet run. Records how each arm's attention graph drifted from the
-  pre-continuation baseline (descriptive, no hard pass/fail).
+## Task 6 — attention drift (DESCRIPTIVE, not a decision gate)
+
+Re-extracted A_global (256×256, val.bin, 500 imgs × 3 random-order passes) for a fresh
+baseline + all 5 arms with the same extractor, aggregated to block-level (8×8). Fresh
+baseline reproduces the stored reference exactly (mean_manh 1.156, P(d≤1) 0.984), so the
+extraction is frame-consistent and drift is meaningful.
+
+| arm | mean_manh | P(d≤1) | same_q | s_readiness | relFrob vs base | top4 edge overlap | rank ρ |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| baseline (pre) | 1.156 | 0.984 | 0.984 | 2.641 | — | — | — |
+| cont_random | 1.156 | 0.984 | 0.984 | 2.944 | 0.073 | 0.82 | 0.939 |
+| cont_graph_rw | 1.156 | 0.984 | 0.984 | 3.135 | 0.076 | 0.83 | 0.940 |
+| cont_raster | **1.000** | **1.000** | **1.000** | 3.156 | **0.087** | 0.81 | 0.938 |
+| cont_shuffled_B | 1.156 | 0.984 | 0.984 | 3.080 | 0.073 | 0.84 | 0.940 |
+| cont_eps015 | 1.156 | 0.984 | 0.984 | 2.914 | 0.073 | 0.84 | 0.940 |
+
+**Interpretation (descriptive):**
+1. Continuation barely reshaped the attention graph for random/graph_rw/shuffled_B/eps015 —
+   locality is identical to baseline (1.156/0.984), relFrob ~0.073, rank ρ ~0.94, top-4
+   edge overlap ~0.83. 5000 steps mostly adapted head/loss, not the graph.
+2. **raster is the only arm that moved the graph — and it SHARPENED locality to perfect
+   4-neighbor** (mean_manh 1.000, P(d≤1) 1.000, same_quad 1.000) with the largest drift
+   (relFrob 0.087). The strong order-specialization (Table 2: val_raster −0.082) is mirrored
+   mechanistically by attention becoming perfectly local.
+3. **graph_rw ≈ random at the attention level too** (relFrob 0.076 vs 0.073, locality
+   unchanged) — consistent with its near-random spatial orders. The near-random readout did
+   not trigger any structural attention migration distinct from random.
+4. s_readiness rose slightly in all arms (2.64 → 2.9–3.2); does not change locality.
+
+None of this alters the main verdict; it confirms it from the attention side: only a
+genuinely local training order (raster) reshapes the attention graph, and v1 graph_rw —
+being spatially near-random — behaves like random here too.

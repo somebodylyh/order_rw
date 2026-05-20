@@ -1,0 +1,96 @@
+{
+  "token_level_16x16": [
+    {
+      "label": "cont_eps015 (post 5000 steps)",
+      "N": 256,
+      "grid": 16,
+      "A_mean": 0.002975281512087591,
+      "A_std": 0.001766134240254581,
+      "A_max": 0.025605181232094765,
+      "mean_manh": 2.61328125,
+      "median_manh": 1.0,
+      "p_dist_le1": 0.75390625,
+      "p_dist_le2": 0.77734375,
+      "same_quad": 0.55859375,
+      "s_readiness": 14.221414246525185,
+      "hub_score": 1.1641957047800209
+    },
+    {
+      "label": "cont_eps015 (post 5000 steps) [shuffled cols]",
+      "N": 256,
+      "grid": 16,
+      "A_mean": 0.002975281512087591,
+      "A_std": 0.001766134240254581,
+      "A_max": 0.025605181232094765,
+      "mean_manh": 10.59375,
+      "median_manh": 10.0,
+      "p_dist_le1": 0.01171875,
+      "p_dist_le2": 0.0234375,
+      "same_quad": 0.0078125,
+      "s_readiness": 9.168665511442187,
+      "hub_score": 1.0938968990175493
+    },
+    {
+      "label": "uniform random",
+      "N": 256,
+      "grid": 16,
+      "A_mean": 0.4978414475917816,
+      "A_std": 0.29021382331848145,
+      "A_max": 0.9999978542327881,
+      "mean_manh": 10.390625,
+      "median_manh": 10.0,
+      "p_dist_le1": 0.01171875,
+      "p_dist_le2": 0.02734375,
+      "same_quad": 0.01171875,
+      "s_readiness": 9.02886771318904,
+      "hub_score": 1.098686933517456
+    }
+  ],
+  "block_level_8x8": [
+    {
+      "label": "cont_eps015 (post 5000 steps)",
+      "N": 64,
+      "grid": 8,
+      "A_mean": 0.0028889216482639313,
+      "A_std": 0.0008808161946944892,
+      "A_max": 0.011213538236916065,
+      "mean_manh": 1.15625,
+      "median_manh": 1.0,
+      "p_dist_le1": 0.984375,
+      "p_dist_le2": 0.984375,
+      "same_quad": 0.984375,
+      "s_readiness": 2.914472997037998,
+      "hub_score": 1.0728775262832642
+    },
+    {
+      "label": "cont_eps015 (post 5000 steps) [shuffled cols]",
+      "N": 64,
+      "grid": 8,
+      "A_mean": 0.0028889216482639313,
+      "A_std": 0.0008808161946944892,
+      "A_max": 0.011213538236916065,
+      "mean_manh": 4.921875,
+      "median_manh": 5.0,
+      "p_dist_le1": 0.09375,
+      "p_dist_le2": 0.203125,
+      "same_quad": 0.125,
+      "s_readiness": 2.3894911791140814,
+      "hub_score": 1.085982322692871
+    },
+    {
+      "label": "uniform random",
+      "N": 64,
+      "grid": 8,
+      "A_mean": 0.48589324951171875,
+      "A_std": 0.29559966921806335,
+      "A_max": 0.9995874762535095,
+      "mean_manh": 5.5625,
+      "median_manh": 5.5,
+      "p_dist_le1": 0.03125,
+      "p_dist_le2": 0.140625,
+      "same_quad": 0.03125,
+      "s_readiness": 4.601963509036381,
+      "hub_score": 1.1426953077316284
+    }
+  ]
+}

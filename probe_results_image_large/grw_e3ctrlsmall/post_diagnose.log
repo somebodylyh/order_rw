@@ -1,0 +1,193 @@
+==================================================
+[2026-05-20T17:07:39+08:00] baseline (pre-continuation, fresh)
+==================================================
+Loading model from /home/admin/lyuyuhuan/order_lyu/nanogpt-learned-order/out/image_large/imagenet64_vq_f4_800k/seq256/patch2x2_full_baseline_l4h8e256/ckpt.pt...
+number of parameters: 8.24M
+  n_layer=4, n_head=8, n_embd=256, block_size=256
+Loading data from /home/admin/lyuyuhuan/order_lyu/nanogpt-learned-order/data/Imagenet64VQ_f4_800k_full_patch8x8/val.bin (tokens_per_image=256)
+Extracting attention from 500 images x M=3 orders, T=256
+  100/500
+  200/500
+  300/500
+  400/500
+  500/500
+Saved /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/baseline_attention/A_global.npy, /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/baseline_attention/B_global.npy; A mean=0.003069, max=0.026528
+Saved heatmaps.
+Loaded A_token shape=(256, 256), mean=0.003069, max=0.026528
+Saved A_block_8x8.npy ((64, 64), mean=0.002983)
+Wrote /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/baseline_attention/diagnostics.json
+
+token-level (N=256, grid=16):
+  label                                          mean_manh  P(d<=1)  P(d<=2)   s_read    hub
+  baseline (pre-continuation, fresh)                 3.492    0.750    0.754   13.611  1.134
+  baseline (pre-continuation, fresh) [shuffled cols]     10.590    0.016    0.031    9.186  1.096
+  uniform random                                    10.391    0.012    0.027    9.029  1.099
+
+block-level (N=64, grid=8):
+  label                                          mean_manh  P(d<=1)  P(d<=2)   s_read    hub
+  baseline (pre-continuation, fresh)                 1.156    0.984    0.984    2.641  1.066
+  baseline (pre-continuation, fresh) [shuffled cols]      4.922    0.094    0.203    2.465  1.093
+  uniform random                                     5.562    0.031    0.141    4.602  1.143
+
+Wrote /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/baseline_attention/SUMMARY.md
+==================================================
+[2026-05-20T17:07:44+08:00] cont_random (post 5000 steps)
+==================================================
+Loading model from /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_random/ckpt_final.pt...
+number of parameters: 8.24M
+  n_layer=4, n_head=8, n_embd=256, block_size=256
+Loading data from /home/admin/lyuyuhuan/order_lyu/nanogpt-learned-order/data/Imagenet64VQ_f4_800k_full_patch8x8/val.bin (tokens_per_image=256)
+Extracting attention from 500 images x M=3 orders, T=256
+  100/500
+  200/500
+  300/500
+  400/500
+  500/500
+Saved /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_random/attention/A_global.npy, /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_random/attention/B_global.npy; A mean=0.002977, max=0.025796
+Saved heatmaps.
+Loaded A_token shape=(256, 256), mean=0.002977, max=0.025796
+Saved A_block_8x8.npy ((64, 64), mean=0.002890)
+Wrote /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_random/attention/diagnostics.json
+
+token-level (N=256, grid=16):
+  label                                          mean_manh  P(d<=1)  P(d<=2)   s_read    hub
+  cont_random (post 5000 steps)                      2.613    0.758    0.773   14.218  1.161
+  cont_random (post 5000 steps) [shuffled cols]     10.488    0.012    0.027    9.177  1.094
+  uniform random                                    10.391    0.012    0.027    9.029  1.099
+
+block-level (N=64, grid=8):
+  label                                          mean_manh  P(d<=1)  P(d<=2)   s_read    hub
+  cont_random (post 5000 steps)                      1.156    0.984    0.984    2.944  1.074
+  cont_random (post 5000 steps) [shuffled cols]      4.922    0.094    0.203    2.390  1.086
+  uniform random                                     5.562    0.031    0.141    4.602  1.143
+
+Wrote /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_random/attention/SUMMARY.md
+==================================================
+[2026-05-20T17:07:49+08:00] cont_graph_rw (post 5000 steps)
+==================================================
+Loading model from /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_graph_rw/ckpt_final.pt...
+number of parameters: 8.24M
+  n_layer=4, n_head=8, n_embd=256, block_size=256
+Loading data from /home/admin/lyuyuhuan/order_lyu/nanogpt-learned-order/data/Imagenet64VQ_f4_800k_full_patch8x8/val.bin (tokens_per_image=256)
+Extracting attention from 500 images x M=3 orders, T=256
+  100/500
+  200/500
+  300/500
+  400/500
+  500/500
+Saved /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_graph_rw/attention/A_global.npy, /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_graph_rw/attention/B_global.npy; A mean=0.002961, max=0.026109
+Saved heatmaps.
+Loaded A_token shape=(256, 256), mean=0.002961, max=0.026109
+Saved A_block_8x8.npy ((64, 64), mean=0.002874)
+Wrote /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_graph_rw/attention/diagnostics.json
+
+token-level (N=256, grid=16):
+  label                                          mean_manh  P(d<=1)  P(d<=2)   s_read    hub
+  cont_graph_rw (post 5000 steps)                    2.676    0.758    0.777   15.278  1.168
+  cont_graph_rw (post 5000 steps) [shuffled cols]     10.535    0.012    0.031    9.321  1.095
+  uniform random                                    10.391    0.012    0.027    9.029  1.099
+
+block-level (N=64, grid=8):
+  label                                          mean_manh  P(d<=1)  P(d<=2)   s_read    hub
+  cont_graph_rw (post 5000 steps)                    1.156    0.984    0.984    3.135  1.078
+  cont_graph_rw (post 5000 steps) [shuffled cols]      4.922    0.094    0.203    2.443  1.087
+  uniform random                                     5.562    0.031    0.141    4.602  1.143
+
+Wrote /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_graph_rw/attention/SUMMARY.md
+==================================================
+[2026-05-20T17:07:54+08:00] cont_raster (post 5000 steps)
+==================================================
+Loading model from /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_raster/ckpt_final.pt...
+number of parameters: 8.24M
+  n_layer=4, n_head=8, n_embd=256, block_size=256
+Loading data from /home/admin/lyuyuhuan/order_lyu/nanogpt-learned-order/data/Imagenet64VQ_f4_800k_full_patch8x8/val.bin (tokens_per_image=256)
+Extracting attention from 500 images x M=3 orders, T=256
+  100/500
+  200/500
+  300/500
+  400/500
+  500/500
+Saved /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_raster/attention/A_global.npy, /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_raster/attention/B_global.npy; A mean=0.002922, max=0.026318
+Saved heatmaps.
+Loaded A_token shape=(256, 256), mean=0.002922, max=0.026318
+Saved A_block_8x8.npy ((64, 64), mean=0.002830)
+Wrote /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_raster/attention/diagnostics.json
+
+token-level (N=256, grid=16):
+  label                                          mean_manh  P(d<=1)  P(d<=2)   s_read    hub
+  cont_raster (post 5000 steps)                      2.461    0.805    0.824   14.555  1.170
+  cont_raster (post 5000 steps) [shuffled cols]     10.730    0.012    0.035   10.033  1.104
+  uniform random                                    10.391    0.012    0.027    9.029  1.099
+
+block-level (N=64, grid=8):
+  label                                          mean_manh  P(d<=1)  P(d<=2)   s_read    hub
+  cont_raster (post 5000 steps)                      1.000    1.000    1.000    3.156  1.076
+  cont_raster (post 5000 steps) [shuffled cols]      5.000    0.094    0.203    2.572  1.098
+  uniform random                                     5.562    0.031    0.141    4.602  1.143
+
+Wrote /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_raster/attention/SUMMARY.md
+==================================================
+[2026-05-20T17:07:58+08:00] cont_shuffled_B (post 5000 steps)
+==================================================
+Loading model from /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_shuffled_B/ckpt_final.pt...
+number of parameters: 8.24M
+  n_layer=4, n_head=8, n_embd=256, block_size=256
+Loading data from /home/admin/lyuyuhuan/order_lyu/nanogpt-learned-order/data/Imagenet64VQ_f4_800k_full_patch8x8/val.bin (tokens_per_image=256)
+Extracting attention from 500 images x M=3 orders, T=256
+  100/500
+  200/500
+  300/500
+  400/500
+  500/500
+Saved /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_shuffled_B/attention/A_global.npy, /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_shuffled_B/attention/B_global.npy; A mean=0.002979, max=0.025743
+Saved heatmaps.
+Loaded A_token shape=(256, 256), mean=0.002979, max=0.025743
+Saved A_block_8x8.npy ((64, 64), mean=0.002893)
+Wrote /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_shuffled_B/attention/diagnostics.json
+
+token-level (N=256, grid=16):
+  label                                          mean_manh  P(d<=1)  P(d<=2)   s_read    hub
+  cont_shuffled_B (post 5000 steps)                  2.609    0.746    0.770   14.730  1.164
+  cont_shuffled_B (post 5000 steps) [shuffled cols]     10.453    0.012    0.027    9.216  1.099
+  uniform random                                    10.391    0.012    0.027    9.029  1.099
+
+block-level (N=64, grid=8):
+  label                                          mean_manh  P(d<=1)  P(d<=2)   s_read    hub
+  cont_shuffled_B (post 5000 steps)                  1.156    0.984    0.984    3.080  1.085
+  cont_shuffled_B (post 5000 steps) [shuffled cols]      4.922    0.094    0.203    2.380  1.086
+  uniform random                                     5.562    0.031    0.141    4.602  1.143
+
+Wrote /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_shuffled_B/attention/SUMMARY.md
+==================================================
+[2026-05-20T17:08:03+08:00] cont_eps015 (post 5000 steps)
+==================================================
+Loading model from /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_eps015/ckpt_final.pt...
+number of parameters: 8.24M
+  n_layer=4, n_head=8, n_embd=256, block_size=256
+Loading data from /home/admin/lyuyuhuan/order_lyu/nanogpt-learned-order/data/Imagenet64VQ_f4_800k_full_patch8x8/val.bin (tokens_per_image=256)
+Extracting attention from 500 images x M=3 orders, T=256
+  100/500
+  200/500
+  300/500
+  400/500
+  500/500
+Saved /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_eps015/attention/A_global.npy, /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_eps015/attention/B_global.npy; A mean=0.002975, max=0.025605
+Saved heatmaps.
+Loaded A_token shape=(256, 256), mean=0.002975, max=0.025605
+Saved A_block_8x8.npy ((64, 64), mean=0.002889)
+Wrote /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_eps015/attention/diagnostics.json
+
+token-level (N=256, grid=16):
+  label                                          mean_manh  P(d<=1)  P(d<=2)   s_read    hub
+  cont_eps015 (post 5000 steps)                      2.613    0.754    0.777   14.221  1.164
+  cont_eps015 (post 5000 steps) [shuffled cols]     10.594    0.012    0.023    9.169  1.094
+  uniform random                                    10.391    0.012    0.027    9.029  1.099
+
+block-level (N=64, grid=8):
+  label                                          mean_manh  P(d<=1)  P(d<=2)   s_read    hub
+  cont_eps015 (post 5000 steps)                      1.156    0.984    0.984    2.914  1.073
+  cont_eps015 (post 5000 steps) [shuffled cols]      4.922    0.094    0.203    2.389  1.086
+  uniform random                                     5.562    0.031    0.141    4.602  1.143
+
+Wrote /home/admin/lyuyuhuan/order_lyu/probe_results_image_large/grw_e3ctrlsmall/cont_eps015/attention/SUMMARY.md
+[2026-05-20T17:08:08+08:00] ALL POST-DIAGNOSE DONE
