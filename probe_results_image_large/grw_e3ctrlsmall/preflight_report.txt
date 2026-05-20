@@ -1,0 +1,21 @@
+=== Preflight report for E3-control-small Graph-RW continuation ===
+ckpt iter_num: 16250, best_val_loss: 7.4633
+data_permutation in ckpt: yes
+A_block: shape=(64, 64), mean=0.002983, max=0.012371, diag_sum=0.0
+B (A^T, diag-zeroed, NOT row-normalized): row_sums first 5 = [0.190651468699798, 0.2000591796822846, 0.18964935559779406, 0.19866492436267436, 0.19423753372393548]
+  NOTE: row sums ~0.19 expected (64 blocks, raw attention weights, not renormalized)
+B[0] argmax = 1 (block (0,0) top neighbor; expected 1 or 8 for 4-connectivity)
+B[9] argmax = 8, expected in {8, 1, 10, 17}: YES
+B[9] top-5 indices: [8, 36, 52, 2, 3], weights: [0.007599912118166685, 0.005622526165097952, 0.005209916736930609, 0.004797257017344236, 0.004664515610784292]
+B[0] top-5 indices: [1, 59, 41, 58, 40], weights: [0.00808887928724289, 0.004692988004535437, 0.004417669028043747, 0.003748668357729912, 0.0035521246027201414]
+
+=== Gate summary ===
+[PASS] ckpt iter_num=16250, best_val=7.4633
+[PASS] _orig_mod prefix present on all state-dict keys
+[PASS] model_args: n_layer=4, n_head=8, n_embd=256, block_size=256, vocab_size=8192, block_order_block_len=4, order_impl='block'
+[PASS] data_permutation present (type: dict with keys permute_mode/permute_seed/block_perm/inverse_block_perm)
+[PASS] A_block shape=(64,64), diag=0, mean=0.002983, max=0.012371
+[PASS] B[0].argmax()=1 (spatial 4-neighbor of block (0,0))
+[PASS] B[9].argmax()=8 in {8, 1, 10, 17}: coordinate alignment confirmed
+
+RESULT: ALL GATES PASSED. Safe to proceed to Tasks 2-5.
