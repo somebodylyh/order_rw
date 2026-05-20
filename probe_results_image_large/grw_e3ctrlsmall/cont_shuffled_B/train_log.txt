@@ -1,0 +1,16 @@
+[start] policy=shuffled_B max_steps=5000 eff_batch=256 ckpt=/home/admin/lyuyuhuan/order_lyu/nanogpt-learned-order/out/image_large/imagenet64_vq_f4_800k/seq256/patch2x2_full_baseline_l4h8e256/ckpt.pt
+[eval] step=    0 train=nan α=0.000 lr=0.00e+00 rnd=7.3926 ras=7.3624 rw4=7.3954 eps=7.3922 k8=7.3969 elapsed=2.1s
+[eval] step=  500 train=7.2952 α=0.450 lr=9.85e-05 rnd=7.2846 ras=7.2657 rw4=7.2904 eps=7.2860 k8=7.2850 elapsed=152.7s
+[eval] step= 1000 train=7.2743 α=0.900 lr=9.27e-05 rnd=7.2752 ras=7.2588 rw4=7.2752 eps=7.2730 k8=7.2755 elapsed=433.8s
+[save] ckpt_step1000.pt
+[eval] step= 1500 train=7.2580 α=0.900 lr=8.31e-05 rnd=7.2681 ras=7.2534 rw4=7.2662 eps=7.2655 k8=7.2671 elapsed=776.4s
+[eval] step= 2000 train=7.2637 α=0.900 lr=7.05e-05 rnd=7.2595 ras=7.2477 rw4=7.2609 eps=7.2581 k8=7.2636 elapsed=1120.2s
+[eval] step= 2500 train=7.2341 α=0.900 lr=5.64e-05 rnd=7.2568 ras=7.2452 rw4=7.2593 eps=7.2565 k8=7.2565 elapsed=1464.0s
+[eval] step= 3000 train=7.2552 α=0.900 lr=4.22e-05 rnd=7.2520 ras=7.2400 rw4=7.2543 eps=7.2506 k8=7.2549 elapsed=1808.2s
+[save] ckpt_step3000.pt
+[eval] step= 3500 train=7.2413 α=0.900 lr=2.93e-05 rnd=7.2504 ras=7.2387 rw4=7.2524 eps=7.2487 k8=7.2530 elapsed=2153.3s
+[eval] step= 4000 train=7.2651 α=0.900 lr=1.89e-05 rnd=7.2467 ras=7.2362 rw4=7.2509 eps=7.2477 k8=7.2491 elapsed=2499.2s
+[eval] step= 4500 train=7.2543 α=0.900 lr=1.23e-05 rnd=7.2454 ras=7.2348 rw4=7.2499 eps=7.2460 k8=7.2495 elapsed=2843.2s
+[eval] step= 5000 train=7.2695 α=0.900 lr=1.00e-05 rnd=7.2464 ras=7.2347 rw4=7.2470 eps=7.2498 k8=7.2511 elapsed=3188.5s
+[save] ckpt_step5000.pt
+[done] final ckpt saved at step 5000
