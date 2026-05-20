@@ -1,0 +1,5 @@
+[start] policy=random max_steps=200 eff_batch=64 ckpt=nanogpt-learned-order/out/image_large/imagenet64_vq_f4_800k/seq256/patch2x2_full_baseline_l4h8e256/ckpt.pt
+[eval] step=    0 train=nan α=0.000 lr=0.00e+00 rnd=7.3926 ras=7.3624 rw4=7.3954 eps=7.3922 k8=7.3969 elapsed=2.0s
+[eval] step=  100 train=7.3343 α=0.090 lr=1.00e-04 rnd=7.3274 ras=7.3123 rw4=7.3276 eps=7.3227 k8=7.3284 elapsed=8.3s
+[eval] step=  200 train=7.3463 α=0.180 lr=1.00e-05 rnd=7.3116 ras=7.2982 rw4=7.3130 eps=7.3149 k8=7.3127 elapsed=14.6s
+[done] final ckpt saved at step 200
