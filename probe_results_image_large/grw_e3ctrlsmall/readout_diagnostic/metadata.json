@@ -1,0 +1,34 @@
+{
+  "a_block_path": "probe_results_image_large/imagenet64_vqf4_full_l4h8e256_patch2x2_control/A_block_8x8.npy",
+  "B_frame": "physical_raster_8x8",
+  "note": "B = A^T diag-zeroed, NOT row-normalized; orders are PHYSICAL frame (apply inverse_block_perm before feeding permuted-data model).",
+  "s_readiness": 2.48789992380347,
+  "n_samples": 16,
+  "seed": 0,
+  "v1_params": {
+    "tau_start": 0.1,
+    "tau_step": 0.1,
+    "alpha_dep": 0.5,
+    "alpha_pr": 0.85,
+    "beta_sup": 1.0,
+    "beta_fut": 0.5,
+    "beta_src": 0.2,
+    "beta_loc": 0.5,
+    "top_k": 4,
+    "epsilon_uniform": 0.0
+  },
+  "b_coverage_variants": {
+    "distance_only": [
+      0.01,
+      1.0
+    ],
+    "balanced": [
+      1.0,
+      1.0
+    ],
+    "Bdominant_safety": [
+      1.0,
+      0.2
+    ]
+  }
+}

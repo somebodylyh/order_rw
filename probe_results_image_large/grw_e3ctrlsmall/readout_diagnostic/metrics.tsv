@@ -1,0 +1,10 @@
+readout	mean_manh	p_d_le1	p_d_le2	same_quad	disagree_vs_distonly
+random	5.3492	0.0407	0.1359	0.2282	nan
+raster	1.7778	0.8889	0.8889	0.7619	nan
+serpentine	1.0000	1.0000	1.0000	0.8571	nan
+hilbert	1.0000	1.0000	1.0000	0.9524	nan
+v1_graph_rw	4.9177	0.1647	0.2490	0.3185	nan
+local_greedy	3.2490	0.5069	0.5496	0.6062	nan
+Bcov_distance_only	1.1300	0.9464	0.9573	0.8661	0.0000
+Bcov_balanced	2.4067	0.5556	0.6776	0.6905	0.9414
+Bcov_Bdominant_safety	3.0635	0.5129	0.5804	0.6389	0.9561
