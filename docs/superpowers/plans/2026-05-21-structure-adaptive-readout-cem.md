@@ -1040,3 +1040,78 @@ The earlier "test whether head-selected B sharpens readout (at n=30)" motivation
 - CEM input: locked (B), N_BATCH=30 all-head spatial-aggregated B.
 - **Phase 2 may start** once this amendment is reviewed. Ablation per (E). Task 1.2 CI
   consolidation proceeds in parallel when the result-file path is provided.
+
+---
+
+# AMENDMENT 2 (2026-05-21) — Phase 2 partial release: ex-ante gates
+
+Phase 2 (Tasks 2.1, 2.2, 2.3 dry-run) released. Tasks 2.4 short-continuation, Phase 3
+oracle, Phase 4 MLP remain HELD. The following are binding and reviewed-at-dry-run.
+
+## G. Dry-run sanity tests — ex-ante hard pass/fail (built into Task 2.3)
+
+CEM dry-run uses CPU surrogate fitness. Three tests, each reported pass/fail. All three must
+pass before Phase 3, else the machinery is not adequate (do not burn loss-fitness compute).
+
+```
+Test 1 (proximity, E3 graph) — FULL family, fitness = -mean_manh:
+  PASS: final mean_manh < 3.0 AND (gamma_B+gamma_d)_norm > 0.5 AND fallback_mix < 0.2.
+  (family CAN express the proximity regime; CEM finds it.)
+
+Test 2 (NO FALSE STRUCTURE, random B) — gamma_d DISABLED (clamped 0), fitness = -mean_manh:
+  PASS: final mean_manh > 4.5.
+  Rationale: the distance term is graph-independent, so with the full family CEM would game
+  -mean_manh via gamma_d even on a structureless B. Disabling gamma_d forces locality to come
+  ONLY from B; on random B no (beta_sup,beta_dep,rho,gamma_B) achieves low manh, so manh
+  stays ~random. This tests the family does not hallucinate structure. (The original
+  "fallback_mix>0.5" criterion is DROPPED — fallback-selection is a Phase-3 task-loss
+  behavior, not surrogate-observable.)
+  Cross-check: the SAME gamma_d-disabled search on the E3 graph SHOULD reach mean_manh < 3.5
+  (B-driven locality), confirming the test discriminates structured vs random B.
+
+Test 3 (readiness, text graph) — fitness = directionality of sampled orders:
+  PASS: final directionality > 0.7 AND rho dominant in best_w (rho is the top normalized term).
+```
+
+## H. Audit checklist (LIVING — update one line per script verified)
+
+```
+Audited CLEAN (uses only supplied/global B, no per-sample token->block aggregation):
+  [x] train_imagelarge_round2.py        — case (a): np.load(global A_block); no re-agg
+  [x] train_imagelarge_graph_rw.py      — loads global A_block via --a-block-path; no re-agg
+  [x] graph_regime_diagnostic.py        — operates on supplied B
+  [x] readout_order_diagnostic.py       — operates on supplied A_block
+
+Audited and FIXED:
+  [x] extract_per_sample_gB.py          — was contiguous block_len=4; fixed to spatial map
+  [x] layer_head_locality_scan.py       — contiguous + N_LAYERS=8 hardcode; DEPRECATED,
+                                          replaced by analyses/phase1_5_per_head.py
+
+NOT YET AUDITED (explicit; must clear image-pipeline per-sample-agg ones before Phase 3):
+  [ ] any other script calling a token->block aggregation on patch2x2 data
+  [ ] any other script hardcoding N_LAYERS / n_head / model-arch constants
+  [ ] (enumerate via: grep -rn "block_len\|//4\|N_LAYERS\|n_layer *= *[0-9]" on image pipeline)
+```
+
+## I. Round-2 external-run confirmation — 1-seed spot-check (do at Task 1.2 TSV arrival)
+
+```
+When Round-2 multi-seed TSV arrives, BEFORE computing CI/sign-count:
+  1. Pick one seed from the TSV.
+  2. Rerun that seed with COMMITTED train_imagelarge_round2.py on the same graph/arms.
+  3. Compare val_cross_avg / val_structured_avg / val_noisy_avg to the TSV row.
+  4. PASS: numerical match (eval deterministic given seed).
+  5. FAIL: external run used a different code path -> flag for full rerun before any
+     CI/sign-count is trusted.
+```
+
+## J. Phase 3 launch conditions — ALL FOUR required (ex-ante)
+
+```
+1. Phase 2.3 three sanity tests (G) all PASS.
+2. Task 1.2 TSV provided AND 1-seed spot-check (I) PASSES.
+3. Task 1.2 CI/sign-count written; Bcov vs control displacement is statistically defensible.
+4. Audit checklist (H) covers ALL per-sample aggregation scripts on the image pipeline
+   main path (no [ ] left in the image-pipeline category).
+Any one unmet => not ready for the expensive oracle.
+```
