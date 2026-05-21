@@ -943,3 +943,100 @@ git commit -m "structure-adaptive: optional MLP hypernetwork imitating CEM oracl
 - **Placeholders:** none — every code/command step has concrete content. `short_continuation_fitness` stub in 2.2 is explicitly completed in 2.4.
 - **Open dependency:** Task 1.2 needs the externally-run Round-2 result file path (flagged as a blocker, numbers computed not hard-coded).
 - **Commit hygiene:** no ckpt/large-npy committed anywhere.
+
+---
+
+# AMENDMENT 2026-05-21 — Phase 1.5 results: CEM input definition + bug audit
+
+This amendment is binding. It supersedes any conflicting text above and in the deprecated
+graph-diversity REPORT. It locks the CEM input spec so Phase 2 cannot reinterpret it.
+
+## A. Deprecation list (specific prior claim → replacing evidence)
+
+These came from the per-sample aggregation bug (contiguous `block_len=4` pooling scrambled
+the patch2x2 spatial structure; correct mapping is spatial `token_to_patch_indices`,
+16×16 token grid → 8×8 patch grid). All DEPRECATED:
+
+| Deprecated claim | Replaced by (corrected evidence) |
+|---|---|
+| "E3 per-sample g(B) ≈ random on locality" (p_nbr≤1≈0.06, locality_score≈0) | per-sample E3 **p_nbr≤1 = 0.55 ± 0.06, locality_score = 0.43 ± 0.06** (spatial agg, 300 samples) |
+| "regime structure is purely population-level emergent" | structure is **robustly aggregable**: knee at n≈5, ~95% of global by n≈30 (`phase1_5_20260521/aggregation_knee.tsv`) |
+| "controller must be checkpoint-level / full-population global B" | **batch-level (n≈30) is sufficient**; per-sample carries signal-with-noise |
+| The paper-ready "modality-dependent **sample-level visibility** is asymmetric (text 0.53 vs 0.98, image 0.019 vs 0.77)" narrative | **DELETED in full.** The image "0.019 per-sample" number was a pure artifact. Do not reuse this framing anywhere. |
+| Old per-head result (`layer_head_scan/...step20000.tsv`, all heads ≈random) | per-head locality is **head-concentrated**: 5/32 heads (all layer-0) have locality_score>0.5, best 0.80 (`phase1_5_20260521/PER_HEAD_FINDING.md`) |
+
+Corrected Case-A status: STILL HOLDS and is cleaner — all 12 g(B) metrics ratio<0.3, only
+e2_small↔e2_large cross the boundary (1/300), and the **locality metrics now also separate
+setups** (p_nbr≤1 ratio 0.127), so separation is no longer driven only by noise-amplified
+metrics. See the corrected banner in `analyses/graph_diversity_20260521/REPORT.md`.
+
+## B. CEM input — PRECISE specification (do NOT reinterpret in Phase 2)
+
+The default CEM/oracle graph input is:
+```
+For a fixed batch of N_BATCH = 30 val images:
+  per (sample, layer, head): A_token[256,256] in PHYSICAL frame
+    (= extract_image_attention_e2 path: feed token data, reveal under random order,
+       remap reveal-order back via argsort — gives physical token positions)
+  B_input = mean over (sample ∈ batch_30, layer ∈ ALL layers, head ∈ ALL heads) of A_token
+  A_block = spatial aggregation of B_input via token_to_patch_indices  (16x16 -> 8x8)
+            [the UNIFIED utility diagnose_e3_control_dual_level.aggregate_token_to_block;
+             NEVER contiguous block_len=4 for patch2x2]
+  B = build_directed_graph(A_block)            # = A_block^T, diag zeroed, NOT row-normalized
+```
+Explicitly NOT permitted without a new amendment: "all heads but layer-0 only",
+"per-layer averaged then concatenated", "single-sample B", "contiguous block_len=4".
+N_BATCH=30 is chosen from the knee (≥95% of global locality). Global B (all 500 images)
+is the offline upper-reference only.
+
+## C. Bug-audit-ongoing note (BINDING)
+
+> Two configuration/aggregation bugs were found and fixed during Phase 1.5:
+> (1) `extract_per_sample_gB.py` used contiguous `block_len=4` pooling for patch2x2 (fixed →
+> spatial `token_to_patch_indices`); (2) `layer_head_locality_scan.py` used the same wrong
+> pooling AND hardcoded `N_LAYERS=8` for a 4-layer model. Neither was a typo — both were
+> silent contamination producing plausible-but-wrong numbers. Audit of token→block mapping
+> and model-configuration constants across the codebase is **ongoing**. Any analysis
+> predating this audit is conditionally valid until re-verified with the unified spatial
+> aggregation utility.
+
+## D. Round-2 Bcov dependency — AUDITED, gate PASSED (with one confirmation needed)
+
+> The Round-2 Bcov empirical core was audited for the aggregation bug (code-reading, Task Y).
+> Result: **case (a) — Round-2 uses only the GLOBAL `A_block_8x8.npy`.**
+> `scripts/run_round2_e3_5arm.sh` passes `--a-block-path .../A_block_8x8.npy` to
+> `block_lo_arm_order_network/train_imagelarge_round2.py`, which at line 400–402 does
+> `A_block = np.load(a_block_path); B_real = build_directed_graph(A_block)` and performs
+> **no token→block aggregation** (it never re-aggregates per-sample 256-token attention).
+> The global A_block was produced with the correct `token_to_patch_indices` (verified:
+> p_nbr≤1=0.984). Therefore Round-2 Bcov-vs-control numbers are UNAFFECTED by the bug, and
+> CEM keeps its hand-designed reference point.
+>
+> **Remaining confirmation (does NOT block Phase 2):** the audit covers the *committed*
+> Round-2 code. If the external run used a modified copy, confirm it matches. Task 1.2 (the
+> multi-seed CI/sign-count consolidation) still needs the result-file path, but the
+> aggregation gate for Phase 2 is satisfied.
+
+## E. Optional ablation — REDEFINED (head-selection is a noise-floor test, not a sharpener)
+
+Per-head finding shows global all-head locality (0.783) ≈ the layer-0 local heads (0.80) —
+the non-local heads contribute ~neutrally, so all-head averaging is already implicitly
+≈ local-head-only. Therefore head-selection cannot meaningfully "sharpen the readout" at
+batch scale. Redefine:
+
+> **Ablation A (per-sample regime exposure / noise floor):** compare layer-0-selected B vs
+> all-head B at **n=1**. Tests whether head selection materially reduces per-sample noise.
+> Expected: layer-0 wins at n=1, gap closes by n≈10, indistinguishable by n≈30.
+>
+> **Ablation B (NOT recommended in baseline):** layer-0-selected B at n=30 as alternative
+> CEM input. Run only if Ablation A shows a large persistent gap. Skip by default.
+
+The earlier "test whether head-selected B sharpens readout (at n=30)" motivation is removed
+— the data would dismiss it.
+
+## F. Phase-2 gate status
+- Aggregation bug: fixed for per-sample + per-head paths; codebase audit ongoing (C).
+- Round-2 reference: audited clean, case (a) (D).
+- CEM input: locked (B), N_BATCH=30 all-head spatial-aggregated B.
+- **Phase 2 may start** once this amendment is reviewed. Ablation per (E). Task 1.2 CI
+  consolidation proceeds in parallel when the result-file path is provided.
