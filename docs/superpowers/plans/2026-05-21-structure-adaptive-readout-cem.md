@@ -1119,3 +1119,67 @@ When Round-2 multi-seed TSV arrives, BEFORE computing CI/sign-count:
    main path (no [ ] left in the image-pipeline category).
 Any one unmet => not ready for the expensive oracle.
 ```
+
+---
+
+# AMENDMENT 3 (2026-05-21) — Phase 3 reframe: structure ≠ locality; objective = task loss
+
+Phase 2 ablation showed that under a -mean_manh surrogate, E3 proximity is driven by the
+graph-independent distance term (γ_d), and γ_B (attention graph B) is not necessary. This
+does NOT mean B lacks structure — it means **locality is one probe, not the full structure**.
+Attention-derived B may encode appearance/region/codebook/centrality/difficulty/readiness
+structure that does not reduce mean_manh (may even raise it) yet helps the task. This
+amendment rebuilds Phase 3 around task loss + multi-probe characterization.
+
+## K. KEYSTONE PREMISE — UNVERIFIED (hard prerequisite, not optional)
+The entire reframe rests on: **"real Bcov beats distance-only and shuffled-Bcov on
+multi-seed validation loss"** (i.e., B contributes beyond geometry). Those numbers were run
+EXTERNALLY and are NOT in this repo / unaudited. If the Bcov-vs-distance-only gap is within
+noise, B has no demonstrable task value and the structure-conditioned-readout claim must be
+downgraded to "local orders specialize" (already shown by raster). Therefore:
+> Phase 3 reframe is conditional on Task 1.2: 1-seed spot-check (Amendment 2.I) PASS **and**
+> CI/sign-count showing Bcov < distance-only beyond noise (e.g. paired sign-count ≥ ~4/5 and
+> |Δ| > seed std). If that fails, STOP and rewrite the paper scope before any Phase 3 oracle.
+
+## L. Phase 3 objective — TASK LOSS, not locality
+CEM Phase 3 fitness (replaces the mean_manh surrogate of the dry-run):
+```
+fitness(w) = - frozen_eval_fitness(w)          # screening (Task 2.2, available)
+           [confirm top-K with short_continuation cross_avg — Task 2.4, still HELD]
+```
+The question becomes: *Can CEM discover task-relevant readout structure from B WITHOUT
+assuming the structure is locality?* — not "can B reduce mean_manh."
+
+## M. Two structure classes (frame for interpretation)
+1. **Geometry-visible** (distance-only / Hilbert excel): mean_manh, P(d≤1), same-quadrant.
+2. **Attention-internal** (may NOT lower mean_manh): B-edge-following, centrality/readiness
+   order, appearance/codebook grouping, difficulty/uncertainty order. Bcov's edge over
+   distance-only — IF real (K) — likely lives here.
+
+## N. Multi-probe characterization of CEM-discovered orders (NEW Task 3.3)
+For every CEM best-order (and the Bcov/distance/Hilbert references), compute ALL probes, not
+just locality, then report which structure the discovered order actually has:
+- **A. Spatial:** mean_manh, P(d≤1), same_quadrant. (have: readout_order_diagnostic)
+- **B. B-edge-following:** mean B[order[t],order[t+1]] (normalized vs random-order baseline);
+  top-k edge-following rate (next ∈ top-k B-neighbors of current); path edge mass.
+- **C. Centrality/readiness:** Spearman(visit_time, node out_degree / source); are early
+  nodes high-centrality/high-readiness?
+- **D. Appearance/codebook:** consecutive-block VQ-code similarity (code equality rate /
+  feature distance) from the actual val tokens. (needs token plumbing; Phase-3 build)
+- **E. Difficulty:** Spearman(visit_time, per-position model loss); easy→hard vs hard→easy.
+  (needs the model; Phase-3 build)
+Probes A–C are cheap and order-only (build now / preview); D–E need data/model plumbing.
+
+## O. Phase 3 families (interpretation corrected)
+full | no-B (γ_B=0) | no-distance (γ_d=0) | fallback. Interpret **no-distance** as "can B
+provide a task-relevant order WITHOUT explicit geometry" (NOT "is it still local"). The
+decisive contrast for the paper is **Bcov(γ_B-driven) vs Hilbert/distance-only on task loss**.
+
+## P. Paper framing (locked)
+> Spatial locality is a useful diagnostic probe, not the full structure encoded by the
+> attention graph. The attention-derived graph may encode model-specific relations
+> (appearance similarity, region grouping, codebook co-occurrence, centrality, difficulty/
+> readiness). We use locality only as a structural diagnostic; the readout objective is task
+> loss and cross-order robustness. Under a locality surrogate the geometry term dominates and
+> B is unnecessary; whether B carries task-relevant structure beyond geometry is decided by
+> task loss + multi-probe characterization (this section), conditional on premise K.
