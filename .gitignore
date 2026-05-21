@@ -1,1 +1,34 @@
 .worktrees/
+
+# Large binaries (never commit)
+*.pt
+*.bin
+*.npy
+*.npz
+*.pth
+*.safetensors
+
+# Large directories with artifacts
+nanogpt-learned-order/
+AO-GPT-MDM/
+probe_results/
+probe_results_image/
+probe_results_image_large/
+cv/
+logs/
+block_lo_arm_order_network/probe_results/
+block_lo_arm_order_network/probe_results_image_large/
+
+# Bytecode
+__pycache__/
+*.pyc
+
+# Claude Code / IDE
+.claude/
+.codex
+.ds_env
+
+# Images/plots
+*.png
+*.jpg
+*.log

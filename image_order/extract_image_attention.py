@@ -38,6 +38,7 @@ sys.path.insert(0, IMAGE_ORDER_DIR)
 sys.path.insert(0, REPO_ROOT)
 
 from data_image_patches import CIFAR10Patches
+from data_imagenet32_patches import ImageNet32Patches
 from model_image_aogpt import ImageAOGPT, ImageAOGPTConfig
 
 
@@ -157,9 +158,21 @@ def extract(args) -> None:
     N = model.config.n_patches  # 64
 
     # 3. Load dataset
-    print(f"[2/4] Loading CIFAR10Patches(split='{args.split}')")
-    ds = CIFAR10Patches(args.split)
-    patches_all = ds.patches[: args.num_images]  # (num_images, 64, 48)
+    if args.dataset == "cifar10":
+        print(f"[2/4] Loading CIFAR10Patches(split='{args.split}')")
+        ds = CIFAR10Patches(args.split)
+        patches_all = ds.patches[: args.num_images]
+    elif args.dataset == "imagenet32":
+        print(f"[2/4] Loading ImageNet32Patches(split='{args.split}')")
+        ds = ImageNet32Patches(args.split, max_images=args.num_images)
+        if ds.patches is not None:
+            patches_all = ds.patches[: args.num_images]
+        else:
+            patches_all = ds.patches_for_indices(
+                np.arange(min(args.num_images, len(ds))), device="cpu"
+            )
+    else:
+        raise ValueError(f"Unknown --dataset {args.dataset!r}")
     num_images = patches_all.shape[0]
     print(f"  Using {num_images} images.")
 
@@ -301,7 +314,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42,
                         help="Random seed for reproducibility (default: 42)")
     parser.add_argument("--split", type=str, default="test",
-                        help="Dataset split to use (default: test)")
+                        help="Dataset split to use (default: test for cifar10, val for imagenet32)")
+    parser.add_argument("--dataset", type=str, default="cifar10",
+                        choices=["cifar10", "imagenet32"],
+                        help="Which dataset's patch sequences to use (default: cifar10)")
     return parser.parse_args()
 
 

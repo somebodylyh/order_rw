@@ -21,9 +21,9 @@ Smoke (no encoding, just verifies shapes / loaders):
     python prepare.py --smoke
 
 External deps (install once):
-    pip install diffusers==0.27.0 omegaconf einops pillow
-    # CompVis VQ-f4 ckpt: download via scripts/image_partner/download_vq_f4.sh
-    # ImageNet-64 .npz files: scripts/image_partner/download_imagenet64.sh
+    pip install diffusers>=0.28.0 omegaconf einops pillow
+    # VQ-f4: automatically loaded via diffusers from xvjiarui/ldm-vq-f4 (HF mirror)
+    # ImageNet-64 data: download via download_full_imagenet64.py (HF parquets → .npz)
 
 This script is single-GPU; rough cost @ batch=128 on a 4090: ~3-5 min for the full
 800k train + 50k val encoding pass.
