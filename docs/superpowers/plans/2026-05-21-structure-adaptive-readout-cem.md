@@ -1224,3 +1224,70 @@ coincidence). Whether this axis transfers to task loss = premise K (Amendment 3.
 unverified, decided by Task 1.2 CI + Phase 3 task-loss oracle.
 
 Saved: `probe_results_image_large/structure_adaptive/structural_probes/shuffledB_reverse_control.json`.
+
+---
+
+# AMENDMENT 3.2 (2026-05-21) — Paper-ready framing (LOCKED) + Phase 3 two-axis table schema
+
+Three structural levels are now distinguishable (locked terminology, do not reword in paper):
+
+1. **Geometric locality** — achievable by Hilbert / distance-only alone; cannot demonstrate B's
+   contribution.
+2. **Incidental B-following from geometry** — Hilbert top4_follow ≈ 0.40, distance-only ≈ 0.53.
+   Not B-specific readout; comes from the spatial locality of B coinciding with a geometric
+   coverage path. Not evidence of B-driven design.
+3. **Real-B edge-following** — Bcov top4_follow ≈ 0.84; the shuffled-B reverse control
+   (sampling on shuffled B, scoring on real B) collapses to ≈ 0.09 (below hilbert 0.40). So
+   Bcov is genuinely following the real attention graph's high-weight edges, NOT a circular
+   self-evaluation and NOT a geometric coincidence.
+
+## Paper-ready statement (canonical EN — do not reword)
+
+> While geometric orders such as Hilbert or distance-only coverage incidentally follow some
+> high-B edges due to the spatial locality of B, Bcov_balanced follows real-B high-weight
+> edges much more strongly. A shuffled-B control collapses this real-B top-k following rate,
+> ruling out both geometric coincidence and self-evaluation artifacts. Thus, Bcov introduces
+> an attention-internal edge-following structure beyond geometry; the remaining question is
+> whether this structure yields task-level gains.
+
+## Canonical ZH version (do not reword)
+
+> Hilbert 或 distance-only 这类几何顺序会因为 B 本身具有空间局部性而顺带经过一部分高权重 B 边，
+> 但 Bcov_balanced 对真实 B 高权重边的跟随显著更强。shuffled-B 反控使 real-B top-k following
+> rate 大幅下降，排除了几何偶然和自评循环。因此，Bcov 注入的是一种超出几何局部性的
+> attention-internal edge-following 结构；剩下的核心问题是这种结构能否转化为任务层面的收益。
+
+## Phase 3 reporting schema — two-axis table per CEM candidate / reference order
+
+For every CEM candidate (and every reference order: random / hilbert / distance-only /
+Bcov_balanced / shuffled_Bcov / raster), report BOTH axes:
+
+```
+Structural axis:
+  mean_manh
+  B_edge_ratio (mean B[t,t+1] / mean off-diagonal B)
+  top4_follow_realB         <- main attention-internal probe
+  top4_follow_shuffledB     <- circularity floor (same sampling, but score on shuffled B)
+                              OR shuffled-B sampling scored on real B (the harder control)
+Task axis:
+  cross_avg
+  structured_avg
+  noisy_avg
+  delta_vs_distance_only
+  delta_vs_shuffled_B
+```
+
+The decisive paper claim becomes evaluable as a 2D scatter: does a candidate's
+top4_follow_realB **predict** its delta_vs_distance_only on cross/structured? If yes,
+B-edge-following → task benefit (premise K confirmed). If not, premise K fails and the
+claim downgrades to "Bcov has different structure, but no task value beyond geometry."
+
+## Status of the two remaining gates (do NOT start without explicit go-ahead)
+
+1. **Task 1.2 — Round-2 multi-seed CI/sign-count** (premise K, evidence side).
+   Hard prerequisite: TSV path from user. Then 1-seed spot-check (Amendment 2.I), then CI.
+2. **Phase 3 — task-loss CEM oracle** (premise K, oracle side).
+   Hard prerequisites: (1) above, plus Phase-3 launch conditions in Amendment 2.J.
+
+No other implementation is released. Structural-axis side is closed; the work is one gate
+away from being writable as a complete paper.
