@@ -1,0 +1,96 @@
+{
+  "verdict": "premise K supported (Bcov beats geometry / shuffled control beyond noise)",
+  "n_passing_rows": 4,
+  "table": [
+    {
+      "comparison": "Bcov vs random",
+      "metric": "cross",
+      "n": 5,
+      "mean_delta": -0.002914200000000022,
+      "std": 0.0007096997252362168,
+      "ci95": 0.0008810673275946606,
+      "wins": 5,
+      "passes_gate": true
+    },
+    {
+      "comparison": "Bcov vs random",
+      "metric": "structured",
+      "n": 5,
+      "mean_delta": -0.0061519999999999795,
+      "std": 0.0009057151870207339,
+      "ci95": 0.0011244136513152109,
+      "wins": 5,
+      "passes_gate": true
+    },
+    {
+      "comparison": "Bcov vs random",
+      "metric": "noisy",
+      "n": 5,
+      "mean_delta": 0.0051800000000001845,
+      "std": 0.0007846973939044461,
+      "ci95": 0.0009741743039110924,
+      "wins": 0,
+      "passes_gate": false
+    },
+    {
+      "comparison": "Bcov vs distance_only_coverage",
+      "metric": "cross",
+      "n": 5,
+      "mean_delta": -0.0021000000000000797,
+      "std": 0.00017863790191317621,
+      "ci95": 0.0002217726923782771,
+      "wins": 5,
+      "passes_gate": true
+    },
+    {
+      "comparison": "Bcov vs distance_only_coverage",
+      "metric": "structured",
+      "n": 5,
+      "mean_delta": -0.001180000000000092,
+      "std": 0.00016792855623756187,
+      "ci95": 0.00020847741517979656,
+      "wins": 5,
+      "passes_gate": true
+    },
+    {
+      "comparison": "Bcov vs distance_only_coverage",
+      "metric": "noisy",
+      "n": 5,
+      "mean_delta": -0.004400000000000048,
+      "std": 0.0003409545424246333,
+      "ci95": 0.0004232831109316626,
+      "wins": 5,
+      "passes_gate": true
+    },
+    {
+      "comparison": "Bcov vs shuffled_Bcov_balanced",
+      "metric": "cross",
+      "n": 5,
+      "mean_delta": -0.0049058000000002265,
+      "std": 0.000563372612042723,
+      "ci95": 0.0006994073466314133,
+      "wins": 5,
+      "passes_gate": true
+    },
+    {
+      "comparison": "Bcov vs shuffled_Bcov_balanced",
+      "metric": "structured",
+      "n": 5,
+      "mean_delta": -0.007480000000000153,
+      "std": 0.0005739337940914317,
+      "ci95": 0.0007125186838815432,
+      "wins": 5,
+      "passes_gate": true
+    },
+    {
+      "comparison": "Bcov vs shuffled_Bcov_balanced",
+      "metric": "noisy",
+      "n": 5,
+      "mean_delta": 0.0015300000000001645,
+      "std": 0.0007734662242137423,
+      "ci95": 0.0009602312004924503,
+      "wins": 0,
+      "passes_gate": false
+    }
+  ]
+}
