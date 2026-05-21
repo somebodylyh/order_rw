@@ -1291,3 +1291,67 @@ claim downgrades to "Bcov has different structure, but no task value beyond geom
 
 No other implementation is released. Structural-axis side is closed; the work is one gate
 away from being writable as a complete paper.
+
+---
+
+# AMENDMENT 3.3 (2026-05-21) — Execution order locked + interim abstract framing
+
+## Execution order (locked; do NOT reorder without explicit go-ahead)
+
+```
+NEXT  -> Task 1.2  : Round-2 multi-seed CI + sign-count (cheap, uses existing data)
+THEN  -> Phase 3   : task-loss CEM oracle (only after Task 1.2 outcome reviewed)
+HELD  -> Task 2.4  : short-continuation rerank
+HELD  -> Phase 4   : MLP imitation
+HELD  -> all GRPO/AttnTNT (future)
+```
+
+Rationale: Task 1.2 is data-integration, no new training; if Round-2 already supports
+premise K with tight CI and high sign-count, the paper's task-axis claim has anchored
+evidence before any expensive oracle starts. If Task 1.2 fails (CI in noise, sign-count
+weak), Phase 3 design must be revisited before launching.
+
+## Task 1.2 — hard blocker on TSV path (NOT optional)
+
+```
+Required input from user: per-(arm, seed) TSV with columns
+    arm, seed, val_cross_avg, val_structured_avg, val_noisy_avg
+covering arms { Bcov_balanced, cont_random, cont_distance_only,
+                cont_shuffled_Bcov, [cont_hilbert if present] }
+
+On arrival, BEFORE computing CI:
+  1. 1-seed spot-check (Amendment 2.I): rerun one seed using committed
+     train_imagelarge_round2.py; require numerical match.
+  2. Then run scripts/round2_bcov_ci_summary.py:
+       paired Δ (Bcov - control), mean, 95% CI, seeds-Bcov-wins.
+
+Pass = premise K supported if paired Δ negative beyond CI AND sign-count ≥ ~4/5 of seeds
+       on cross_avg or structured_avg, for at least one of {distance_only, shuffled_Bcov}.
+Fail = premise K not supported by existing data; Phase 3 design must be revisited.
+
+Report:
+  - TSV path
+  - spot-check result (PASS / FAIL with numbers)
+  - mean ± CI per comparison
+  - sign-count per comparison
+  - one-line "premise K supported / not supported / inconclusive"
+```
+
+## Interim abstract framing (canonical; use until premise K is decided)
+
+> The structural axis is established: Bcov_balanced follows real-B high-weight edges beyond
+> both geometric coincidence and self-evaluation artifacts. The remaining task-level question
+> is whether this real-B edge-following yields validation gains. We evaluate this through
+> multi-seed Round-2 comparisons and a task-loss CEM oracle.
+
+> 结构轴已经成立：Bcov_balanced 对真实 B 高权重边的跟随超出了几何偶然和自评循环。剩下的任务层
+> 问题是，这种 real-B edge-following 是否能带来 validation 收益。我们通过 Round-2 多 seed
+> 对比和 task-loss CEM oracle 来验证这一点。
+
+Conditional clauses (insert/remove based on Task 1.2 result, do not pre-commit):
+- if PASS: "Multi-seed Round-2 results support this claim; we further corroborate it with
+  task-loss CEM, which actively selects high real-B edge-following over geometric locality."
+- if FAIL: "Multi-seed Round-2 results do not show a gain beyond noise; we therefore
+  downgrade the claim to 'attention-internal structure is recoverable at the order level
+  but does not transfer to task loss at this scale,' and report this honestly as a
+  negative result on the task axis."
