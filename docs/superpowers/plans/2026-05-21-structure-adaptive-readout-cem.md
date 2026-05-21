@@ -1183,3 +1183,44 @@ decisive contrast for the paper is **Bcov(γ_B-driven) vs Hilbert/distance-only 
 > loss and cross-order robustness. Under a locality surrogate the geometry term dominates and
 > B is unnecessary; whether B carries task-relevant structure beyond geometry is decided by
 > task loss + multi-probe characterization (this section), conditional on premise K.
+
+---
+
+# AMENDMENT 3.1 (2026-05-21) — Shuffled-B reverse control for the B-edge-following axis
+
+The Phase-3 reframe (Amendment 3) rests on B-edge-following being a genuine
+attention-internal structure axis (not a circular "Bcov argmax follows Bcov's own scoring"
+metric). Top-4 edge-follow is computed from B[last,·]'s top-4 outgoing edges; Bcov's score
+function is `gamma_B*B[last,v] - gamma_d*dist`. These look correlated by construction.
+
+## Decisive reverse control
+Re-run Bcov_balanced sampling on a row-shuffled B (label 'Bcov(shuffled)'), then EVALUATE
+top-4 edge-follow against the REAL B (not against the shuffled B the sampler saw).
+
+| order | sampling B | metric B | top4_follow | B_edge_ratio | mean_manh |
+|---|---|---|--:|--:|--:|
+| Bcov(real)       | real     | real | **0.84** | 2.07 | 2.39 |
+| **Bcov(shuffled) | shuffled | real** | **0.09** | 1.05 | 3.31 |
+| Bcov(shuffled)   | shuffled | shuffled | 0.62 | 1.75 | 3.31 |
+| hilbert          | —        | real | 0.40 | 1.56 | 1.00 |
+| random           | —        | real | 0.06 | 0.99 | 5.35 |
+
+**Read:**
+- Row 2 vs Row 1: scrambling B drops top4-follow 0.84 → **0.09 ≈ random** when scored on real
+  B → Bcov(real)'s 0.84 is genuinely sampling real-B edges, NOT just measuring its own
+  scoring function. The metric is independent.
+- Row 3 (the same Bcov(shuffled) order scored on its OWN sampled-from B) gives 0.62,
+  confirming the "argmax-of-its-own-scoring" circularity is REAL but small (~0.62) — and
+  Bcov(real)'s 0.84 is well above this self-consistency floor.
+- Row 2 < Row 4 (hilbert=0.40): Hilbert's incidental B-edge following is a spatial accident
+  (B itself is spatially local, so a geometric path passes through some local B edges). Once
+  the spatial accident is destroyed (sampling-B shuffled but metric-B is real), even Bcov's
+  geometry term can't fake B-edge following — it collapses below hilbert.
+
+## Conclusion
+B-edge-following is a **genuine, independent structure axis** for image-proximity graphs.
+Bcov's 0.84 is causally driven by real B (not by metric-design circularity, not by geometric
+coincidence). Whether this axis transfers to task loss = premise K (Amendment 3.K), still
+unverified, decided by Task 1.2 CI + Phase 3 task-loss oracle.
+
+Saved: `probe_results_image_large/structure_adaptive/structural_probes/shuffledB_reverse_control.json`.

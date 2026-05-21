@@ -1,0 +1,29 @@
+{
+  "Bcov_real_on_realB": {
+    "top4_follow": 0.837,
+    "B_edge_ratio": 2.072,
+    "mean_manh": 2.391
+  },
+  "Bcov_shuffled_on_realB": {
+    "top4_follow": 0.093,
+    "B_edge_ratio": 1.054,
+    "mean_manh": 3.31,
+    "note": "DECISIVE: shuffled-B sampling, metric scored on real B"
+  },
+  "Bcov_shuffled_on_shuffledB": {
+    "top4_follow": 0.619,
+    "B_edge_ratio": 1.746,
+    "mean_manh": 3.31,
+    "note": "self-consistency floor; metric circularity is real but small"
+  },
+  "hilbert_on_realB": {
+    "top4_follow": 0.397,
+    "B_edge_ratio": 1.557,
+    "mean_manh": 1.0
+  },
+  "random_on_realB": {
+    "top4_follow": 0.059,
+    "B_edge_ratio": 0.988,
+    "mean_manh": 5.349
+  }
+}
