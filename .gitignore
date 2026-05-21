@@ -9,7 +9,17 @@
 *.safetensors
 
 # Large directories with artifacts
-nanogpt-learned-order/
+# Keep source code under nanogpt-learned-order TRACKED; ignore only artifacts.
+nanogpt-learned-order/out/
+nanogpt-learned-order/data/
+nanogpt-learned-order/wandb/
+nanogpt-learned-order/__pycache__/
+nanogpt-learned-order/**/*.pt
+nanogpt-learned-order/**/*.pth
+nanogpt-learned-order/**/*.bin
+nanogpt-learned-order/**/*.npy
+nanogpt-learned-order/**/*.npz
+nanogpt-learned-order/**/*.safetensors
 AO-GPT-MDM/
 probe_results/
 probe_results_image/
@@ -32,3 +42,13 @@ __pycache__/
 *.png
 *.jpg
 *.log
+
+# Analysis artifacts
+*.tsv
+*.json
+!package.json
+!tsconfig.json
+
+# Python bytecode
+*.pyc
+*.pyo
