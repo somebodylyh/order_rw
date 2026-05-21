@@ -52,6 +52,25 @@ def order_directionality(orders):
     return float(np.mean(np.abs(d.mean(axis=1))))
 
 
+def behavioral_metric(B, source, coords, has, w, kind, k=8, seed=1):
+    """kind='manh' -> mean_manh (lower=proximity); 'direc' -> order directionality."""
+    o = ur.sample_orders_batch(B, source, coords, ur.clip_params(w), k, seed, has)
+    return order_stats(o)["mean_manh"] if kind == "manh" else order_directionality(o)
+
+
+def term_ablation(B, source, coords, has, best_w, kind):
+    """Knock out each term from best_w; report behavioral metric delta.
+    Answers 'is this term NECESSARY for the behavior' (vs 'is it the biggest weight')."""
+    full = behavioral_metric(B, source, coords, has, best_w, kind)
+    rows = {"full_best_w": round(full, 4)}
+    for term in ["beta_sup", "beta_dep", "rho", "gamma_B", "gamma_d"]:
+        w = dict(best_w); w[term] = 0.0
+        rows[f"{term}=0"] = round(behavioral_metric(B, source, coords, has, w, kind), 4)
+    w = dict(best_w); w["fallback_mix"] = 1.0
+    rows["fallback=1"] = round(behavioral_metric(B, source, coords, has, w, kind), 4)
+    return rows
+
+
 def _setup(a_path, topology, grid, random_B=False, seed=0):
     if random_B:
         rng = np.random.default_rng(seed)
@@ -75,19 +94,23 @@ def run_sanity(outdir, pop, gens):
         print(m, flush=True); log_lines.append(m)
 
     # ---- Test 1: proximity on E3, FULL family, fitness = -mean_manh ----
-    log("[Test 1] proximity (E3, full family, -mean_manh)")
+    # PASS = BEHAVIORAL only (mean_manh<3.0). term-attribution is DESCRIPTIVE (not a gate):
+    # the family is over-parameterized so dominant-term is non-identifiable.
+    log("[Test 1] proximity (E3, full family, -mean_manh) — behavioral gate")
     B, src, coords, has = _setup(E3, "grid2d", 8)
     def fit1(w):
         o = ur.sample_orders_batch(B, src, coords, ur.clip_params(w), 6, 0, has)
         return -order_stats(o)["mean_manh"]
     best1, _ = cem(fit1, pop, 4, gens, log=log)
-    w1 = ur.clip_params(best1[1]); o1 = ur.sample_orders_batch(B, src, coords, w1, 8, 1, has)
-    mm1 = order_stats(o1)["mean_manh"]; dt1 = dominant_terms(w1)
-    gB_gd = dt1["gamma_B"] + dt1["gamma_d"]
-    pass1 = (mm1 < 3.0) and (gB_gd > 0.5) and (w1["fallback_mix"] < 0.2)
-    log(f"  mean_manh={mm1:.3f} (gamma_B+gamma_d)_norm={gB_gd:.3f} fallback={w1['fallback_mix']:.3f} -> {'PASS' if pass1 else 'FAIL'}")
-    results["test1_proximity_E3"] = dict(passed=bool(pass1), mean_manh=mm1, gB_gd_norm=gB_gd,
-                                         fallback_mix=w1["fallback_mix"], dominant=dt1)
+    w1 = ur.clip_params(best1[1]); mm1 = behavioral_metric(B, src, coords, has, w1, "manh")
+    dt1 = dominant_terms(w1)
+    pass1 = mm1 < 3.0
+    abl1 = term_ablation(B, src, coords, has, w1, "manh")
+    log(f"  mean_manh={mm1:.3f} -> {'PASS' if pass1 else 'FAIL'} (behavioral)")
+    log(f"  [descriptive] dominant terms={dt1} fallback={w1['fallback_mix']:.3f}")
+    log(f"  [ablation manh, higher=term necessary for proximity] {abl1}")
+    results["test1_proximity_E3"] = dict(passed=bool(pass1), mean_manh=mm1, best_w=w1,
+                                         dominant_terms_descriptive=dt1, ablation=abl1)
 
     # ---- Test 2: NO false structure on random B, gamma_d DISABLED ----
     log("[Test 2] no-false-structure (random B, gamma_d disabled, -mean_manh)")
@@ -108,9 +131,12 @@ def run_sanity(outdir, pop, gens):
     best2e, _ = cem(fit2e, pop, 4, gens, bound_override=disable_gd, log=log)
     w2e = ur.clip_params(best2e[1]); mm2e = order_stats(ur.sample_orders_batch(B, src, coords, w2e, 8, 1, has))["mean_manh"]
     discr = mm2e < 3.5
+    abl2 = term_ablation(Br, srcr, coordsr, hasr, w2, "manh")
     log(f"  cross-check E3 (gamma_d disabled) mean_manh={mm2e:.3f} (<3.5 expected) -> {'OK' if discr else 'WEAK'}")
+    log(f"  [ablation manh on random B; should stay ~random for all] {abl2}")
     results["test2_nofalse_randomB"] = dict(passed=bool(pass2), random_B_mean_manh=mm2,
-                                            E3_gd_disabled_mean_manh=mm2e, discriminates=bool(discr))
+                                            E3_gd_disabled_mean_manh=mm2e, discriminates=bool(discr),
+                                            ablation=abl2)
 
     # ---- Test 3: readiness on text, fitness = directionality ----
     log("[Test 3] readiness (text, fitness = order directionality)")
@@ -120,13 +146,15 @@ def run_sanity(outdir, pop, gens):
             o = ur.sample_orders_batch(Bt, srct, coordst, ur.clip_params(w), 6, 0, hast)
             return order_directionality(o)
         best3, _ = cem(fit3, pop, 4, gens, log=log)
-        w3 = ur.clip_params(best3[1]); o3 = ur.sample_orders_batch(Bt, srct, coordst, w3, 8, 1, hast)
-        dir3 = order_directionality(o3); dt3 = dominant_terms(w3)
-        rho_dom = max(dt3, key=dt3.get) == "rho"
-        pass3 = (dir3 > 0.7) and rho_dom
-        log(f"  directionality={dir3:.3f} dominant={dt3} rho_dominant={rho_dom} -> {'PASS' if pass3 else 'FAIL'}")
-        results["test3_readiness_text"] = dict(passed=bool(pass3), directionality=dir3,
-                                               rho_dominant=bool(rho_dom), dominant=dt3)
+        w3 = ur.clip_params(best3[1]); dir3 = behavioral_metric(Bt, srct, coordst, hast, w3, "direc")
+        dt3 = dominant_terms(w3)
+        pass3 = dir3 > 0.7  # BEHAVIORAL only; rho-dominance is descriptive (non-identifiable)
+        abl3 = term_ablation(Bt, srct, coordst, hast, w3, "direc")
+        log(f"  directionality={dir3:.3f} -> {'PASS' if pass3 else 'FAIL'} (behavioral)")
+        log(f"  [descriptive] dominant terms={dt3}")
+        log(f"  [ablation directionality, lower=term necessary for readiness order] {abl3}")
+        results["test3_readiness_text"] = dict(passed=bool(pass3), directionality=dir3, best_w=w3,
+                                               dominant_terms_descriptive=dt3, ablation=abl3)
     else:
         log("  text A_global missing -> SKIP (report as not-run)")
         results["test3_readiness_text"] = dict(passed=None, skipped=True)

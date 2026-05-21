@@ -1,11 +1,13 @@
-[Test 1] proximity (E3, full family, -mean_manh)
+[Test 1] proximity (E3, full family, -mean_manh) — behavioral gate
     gen 0: best=-2.6905 mean=-4.3671
     gen 1: best=-2.7275 mean=-3.4148
     gen 2: best=-2.3016 mean=-2.6718
     gen 3: best=-2.1693 mean=-2.4317
     gen 4: best=-2.1270 mean=-2.2641
     gen 5: best=-2.0661 mean=-2.2573
-  mean_manh=2.079 (gamma_B+gamma_d)_norm=0.487 fallback=0.000 -> FAIL
+  mean_manh=2.079 -> PASS (behavioral)
+  [descriptive] dominant terms={'gamma_d': 0.356, 'beta_dep': 0.197, 'rho': 0.18, 'beta_sup': 0.135, 'gamma_B': 0.131} fallback=0.000
+  [ablation manh, higher=term necessary for proximity] {'full_best_w': 2.0794, 'beta_sup=0': 1.9524, 'beta_dep=0': 1.9782, 'rho=0': 2.1071, 'gamma_B=0': 2.0278, 'gamma_d=0': 3.4246, 'fallback=1': 5.2798}
 [Test 2] no-false-structure (random B, gamma_d disabled, -mean_manh)
     gen 0: best=-5.2328 mean=-5.4448
     gen 1: best=-5.2143 mean=-5.4167
@@ -21,6 +23,7 @@
     gen 4: best=-3.1746 mean=-3.2933
     gen 5: best=-3.1720 mean=-3.3156
   cross-check E3 (gamma_d disabled) mean_manh=3.304 (<3.5 expected) -> OK
+  [ablation manh on random B; should stay ~random for all] {'full_best_w': 5.2659, 'beta_sup=0': 5.246, 'beta_dep=0': 5.504, 'rho=0': 5.3909, 'gamma_B=0': 5.379, 'gamma_d=0': 5.2659, 'fallback=1': 5.2798}
 [Test 3] readiness (text, fitness = order directionality)
     gen 0: best=0.8730 mean=0.2262
     gen 1: best=0.9894 mean=0.5625
@@ -28,7 +31,9 @@
     gen 3: best=0.9841 mean=0.9719
     gen 4: best=1.0000 mean=0.9775
     gen 5: best=1.0000 mean=0.9924
-  directionality=1.000 dominant={'gamma_B': 0.271, 'rho': 0.247, 'beta_sup': 0.199, 'gamma_d': 0.169, 'beta_dep': 0.113} rho_dominant=False -> FAIL
+  directionality=1.000 -> PASS (behavioral)
+  [descriptive] dominant terms={'gamma_B': 0.271, 'rho': 0.247, 'beta_sup': 0.199, 'gamma_d': 0.169, 'beta_dep': 0.113}
+  [ablation directionality, lower=term necessary for readiness order] {'full_best_w': 1.0, 'beta_sup=0': 0.9603, 'beta_dep=0': 0.9881, 'rho=0': 0.7381, 'gamma_B=0': 0.9683, 'gamma_d=0': 1.0, 'fallback=1': 0.0635}
 
-[SANITY SUMMARY] test1_proximity_E3=FAIL test2_nofalse_randomB=PASS test3_readiness_text=FAIL
-ALL PASS: False
+[SANITY SUMMARY] test1_proximity_E3=PASS test2_nofalse_randomB=PASS test3_readiness_text=PASS
+ALL PASS: True

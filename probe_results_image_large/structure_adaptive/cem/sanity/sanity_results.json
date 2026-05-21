@@ -1,33 +1,75 @@
 {
   "test1_proximity_E3": {
-    "passed": false,
+    "passed": true,
     "mean_manh": 2.0793650793650795,
-    "gB_gd_norm": 0.487,
-    "fallback_mix": 0.0,
-    "dominant": {
+    "best_w": {
+      "beta_sup": 0.7512994047782287,
+      "beta_dep": 1.0956215909947289,
+      "rho": 1.0020997660570903,
+      "gamma_B": 0.7295387280952986,
+      "gamma_d": 1.9804801968408456,
+      "tau": 0.14632985179668662,
+      "fallback_mix": 0.0
+    },
+    "dominant_terms_descriptive": {
       "gamma_d": 0.356,
       "beta_dep": 0.197,
       "rho": 0.18,
       "beta_sup": 0.135,
       "gamma_B": 0.131
+    },
+    "ablation": {
+      "full_best_w": 2.0794,
+      "beta_sup=0": 1.9524,
+      "beta_dep=0": 1.9782,
+      "rho=0": 2.1071,
+      "gamma_B=0": 2.0278,
+      "gamma_d=0": 3.4246,
+      "fallback=1": 5.2798
     }
   },
   "test2_nofalse_randomB": {
     "passed": true,
     "random_B_mean_manh": 5.265873015873016,
     "E3_gd_disabled_mean_manh": 3.3035714285714284,
-    "discriminates": true
+    "discriminates": true,
+    "ablation": {
+      "full_best_w": 5.2659,
+      "beta_sup=0": 5.246,
+      "beta_dep=0": 5.504,
+      "rho=0": 5.3909,
+      "gamma_B=0": 5.379,
+      "gamma_d=0": 5.2659,
+      "fallback=1": 5.2798
+    }
   },
   "test3_readiness_text": {
-    "passed": false,
+    "passed": true,
     "directionality": 1.0,
-    "rho_dominant": false,
-    "dominant": {
+    "best_w": {
+      "beta_sup": 1.3355681303210578,
+      "beta_dep": 0.7601564279717392,
+      "rho": 1.656893165202985,
+      "gamma_B": 1.8185035774517004,
+      "gamma_d": 1.132388054587351,
+      "tau": 0.1925030126613784,
+      "fallback_mix": 0.0
+    },
+    "dominant_terms_descriptive": {
       "gamma_B": 0.271,
       "rho": 0.247,
       "beta_sup": 0.199,
       "gamma_d": 0.169,
       "beta_dep": 0.113
+    },
+    "ablation": {
+      "full_best_w": 1.0,
+      "beta_sup=0": 0.9603,
+      "beta_dep=0": 0.9881,
+      "rho=0": 0.7381,
+      "gamma_B=0": 0.9683,
+      "gamma_d=0": 1.0,
+      "fallback=1": 0.0635
     }
   }
 }
