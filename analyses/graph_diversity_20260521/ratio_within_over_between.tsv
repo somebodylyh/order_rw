@@ -1,0 +1,13 @@
+metric	avg_within_std	avg_between_dist	ratio_within_over_between	verdict
+readiness_strength	2.367309	10.202436	0.232034	A (setup dominates)
+asymmetry	0.028739	0.434762	0.066103	A (setup dominates)
+row_entropy	0.003796	0.047396	0.080094	A (setup dominates)
+top1_mass	0.002301	0.013313	0.172853	A (setup dominates)
+top4_mass	0.004809	0.042581	0.112944	A (setup dominates)
+argmax_dist	0.593336	10.040052	0.059097	A (setup dominates)
+p_nbr_le1	0.033179	0.260694	0.127270	A (setup dominates)
+locality_score	0.036513	0.214365	0.170332	A (setup dominates)
+local_greedy_dist	0.493744	9.280653	0.053201	A (setup dominates)
+directionality	0.030172	0.166224	0.181514	A (setup dominates)
+out_degree_std	0.017111	0.204117	0.083830	A (setup dominates)
+in_degree_std	0.004325	0.060718	0.071238	A (setup dominates)

@@ -1,0 +1,16 @@
+setup_i	setup_j	L2_distance
+e2_large	e2_small	9.267323
+e2_large	e3_ctrl_small	10.459433
+e2_large	random_uniform	21.370979
+e2_large	shuffled_rows	23.399425
+e2_large	text	24.922639
+e2_small	e3_ctrl_small	19.548864
+e2_small	random_uniform	30.567237
+e2_small	shuffled_rows	32.660780
+e2_small	text	27.634339
+e3_ctrl_small	random_uniform	11.875824
+e3_ctrl_small	shuffled_rows	13.603287
+e3_ctrl_small	text	28.174233
+random_uniform	shuffled_rows	3.912228
+random_uniform	text	30.655280
+shuffled_rows	text	31.875376
