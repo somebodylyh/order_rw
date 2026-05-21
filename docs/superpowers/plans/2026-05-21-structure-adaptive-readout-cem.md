@@ -1081,6 +1081,10 @@ Audited CLEAN (uses only supplied/global B, no per-sample token->block aggregati
   [x] train_imagelarge_graph_rw.py      — loads global A_block via --a-block-path; no re-agg
   [x] graph_regime_diagnostic.py        — operates on supplied B
   [x] readout_order_diagnostic.py       — operates on supplied A_block
+  [x] unified_readout.py                — operates on supplied B; no token->block aggregation
+  [x] readout_fitness.py                — global A_block + shared inverse_block_perm remap
+  [x] cem_readout_search.py             — operates on supplied B / global A_block
+  [x] analyses/phase1_5_aggregation_knee.py, phase1_5_per_head.py — spatial token_to_patch_indices
 
 Audited and FIXED:
   [x] extract_per_sample_gB.py          — was contiguous block_len=4; fixed to spatial map

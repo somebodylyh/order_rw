@@ -1,0 +1,33 @@
+{
+  "test1_proximity_E3": {
+    "passed": false,
+    "mean_manh": 2.0793650793650795,
+    "gB_gd_norm": 0.487,
+    "fallback_mix": 0.0,
+    "dominant": {
+      "gamma_d": 0.356,
+      "beta_dep": 0.197,
+      "rho": 0.18,
+      "beta_sup": 0.135,
+      "gamma_B": 0.131
+    }
+  },
+  "test2_nofalse_randomB": {
+    "passed": true,
+    "random_B_mean_manh": 5.265873015873016,
+    "E3_gd_disabled_mean_manh": 3.3035714285714284,
+    "discriminates": true
+  },
+  "test3_readiness_text": {
+    "passed": false,
+    "directionality": 1.0,
+    "rho_dominant": false,
+    "dominant": {
+      "gamma_B": 0.271,
+      "rho": 0.247,
+      "beta_sup": 0.199,
+      "gamma_d": 0.169,
+      "beta_dep": 0.113
+    }
+  }
+}
