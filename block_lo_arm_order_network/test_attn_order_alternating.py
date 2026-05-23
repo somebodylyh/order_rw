@@ -86,7 +86,7 @@ def test_alpha_warmup_start_schedule():
     args = types.SimpleNamespace(run_kind="graph_rw", alpha_start=0.0, alpha_target=0.9,
                                  alpha_warmup_steps=10000, alpha_warmup_start=5000)
     assert alpha_for_step(0, 0, args) == 0.0
-    assert alpha_for_step(5000, 0, args) == 0.0          # still warmup
+    assert alpha_for_step(5000, 0, args) == 0.0          # still in hold period (offset not yet elapsed)
     assert abs(alpha_for_step(10000, 0, args) - 0.45) < 1e-6   # halfway through ramp
     assert abs(alpha_for_step(15000, 0, args) - 0.9) < 1e-6    # ramp done
     assert abs(alpha_for_step(30000, 0, args) - 0.9) < 1e-6    # plateau
