@@ -113,3 +113,17 @@ def test_alpha_warmup_start_schedule():
     args0 = types.SimpleNamespace(run_kind="graph_rw", alpha_start=0.0, alpha_target=0.9,
                                   alpha_warmup_steps=10000, alpha_warmup_start=0)
     assert abs(alpha_for_step(5000, 0, args0) - 0.45) < 1e-6
+
+
+def test_should_sample_rw_gate():
+    from train_clean_aogpt import should_sample_rw
+    # warmup: alpha 0 -> never sample rw
+    assert should_sample_rw(alpha=0.0, rw_policy="mlp_cdl", rw_mlp=None) is False
+    # mlp_cdl with no beta yet -> never sample, even if alpha>0 (defensive)
+    assert should_sample_rw(alpha=0.3, rw_policy="mlp_cdl", rw_mlp=None) is False
+    # mlp_cdl with beta + alpha>0 -> sample
+    assert should_sample_rw(alpha=0.3, rw_policy="mlp_cdl", rw_mlp=object()) is True
+    # non-mlp policy (v3) with alpha>0 -> sample
+    assert should_sample_rw(alpha=0.3, rw_policy="progressive_rw_v3", rw_mlp=None) is True
+    # non-mlp policy with alpha 0 -> skip (behavior-preserving: mixed==random anyway)
+    assert should_sample_rw(alpha=0.0, rw_policy="progressive_rw_v3", rw_mlp=None) is False

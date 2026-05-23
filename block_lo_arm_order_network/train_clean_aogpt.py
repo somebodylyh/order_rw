@@ -207,6 +207,15 @@ def sample_random_physical_orders(batch_size, seed, global_step, micro_step, dev
     return torch.tensor(np.stack(rows), dtype=torch.long, device=device)
 
 
+def should_sample_rw(alpha, rw_policy, rw_mlp):
+    """Sample rw orders only when they will actually be used: alpha>0, and (for mlp_cdl) beta exists."""
+    if alpha <= 0.0:
+        return False
+    if rw_policy == "mlp_cdl" and rw_mlp is None:
+        return False
+    return True
+
+
 def sample_rw_physical_orders(batch_size, B, policy, params, seed, global_step, micro_step, device, bag_idx=0, mlp=None):
     if policy == "position_only":
         base_seed = (
@@ -921,15 +930,18 @@ def main(default_run_kind="baseline"):
                 l2r = torch.arange(N, dtype=torch.long, device=device).unsqueeze(0).expand(args.batch_size, -1)
                 loss = order_loss(model, idx_batch, l2r, clean_perm, device)
             elif args.run_kind == "graph_rw":
-                rw_phys = sample_rw_physical_orders(
-                    args.batch_size, B, rw_policy, rw_params, args.seed, global_step, micro_step, device,
-                    mlp=rw_mlp,
-                )
-                choose_rng = torch.Generator(device=device)
-                choose_rng.manual_seed(args.seed * 100000000 + global_step * 1000 + micro_step)
-                use_rw = torch.rand(args.batch_size, generator=choose_rng, device=device) < alpha
-                mixed = torch.where(use_rw.unsqueeze(1), rw_phys, random_phys)
-                loss = order_loss(model, idx_batch, mixed, clean_perm, device)
+                if should_sample_rw(alpha, rw_policy, rw_mlp):
+                    rw_phys = sample_rw_physical_orders(
+                        args.batch_size, B, rw_policy, rw_params, args.seed, global_step, micro_step,
+                        device, mlp=rw_mlp,
+                    )
+                    choose_rng = torch.Generator(device=device)
+                    choose_rng.manual_seed(args.seed * 100000000 + global_step * 1000 + micro_step)
+                    use_rw = torch.rand(args.batch_size, generator=choose_rng, device=device) < alpha
+                    mixed = torch.where(use_rw.unsqueeze(1), rw_phys, random_phys)
+                    loss = order_loss(model, idx_batch, mixed, clean_perm, device)
+                else:
+                    loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
             else:
                 random_loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
                 weighted = (1.0 - alpha) * random_loss
