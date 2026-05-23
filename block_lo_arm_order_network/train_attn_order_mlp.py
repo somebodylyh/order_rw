@@ -261,10 +261,7 @@ def run(modality, args):
           f"no entropy reg; CPU.",
           f"- states: {ddiag['n_states']} (teacher+random rollouts).",
           f"- teacher target entropy (val) = {teach_ent:.4f} nats.\n",
-          "## Imitation curve (val)",
-          "\n| epoch | train_kl | val_kl | top1 | top4 |", "|---|---|---|---|---|"]
-    for r in log:
-        md.append(f"| {r['epoch']} | {r['train_kl']} | {r['val_kl']} | {r['top1']} | {r['top4']} |")
+          "_Per-epoch imitation curve not materialized; final distillation diag below._"]
     md += [f"\n**Final (val):** KL={vkl:.4f} (untrained {kl0:.4f}), top1_agreement={vt1:.4f}, "
            f"top4_agreement={vt4:.4f}, student_entropy={vstud_ent:.4f} (teacher {teach_ent:.4f}).",
            "\n## Student rollouts vs teacher vs random"]

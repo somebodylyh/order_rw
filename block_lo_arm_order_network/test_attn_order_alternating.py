@@ -58,3 +58,6 @@ def test_run_distill_matches_factored_path():
                                act="gelu", seed=7, device="cpu")
     assert diag["val_kl"] < diag["kl0_untrained"]
     assert 0.0 <= diag["top4"] <= 1.0
+    # cross-config sanity (distinct N/seed/n_orders from the Task-1 test): the strong forward
+    # chain in _toy_B must be recovered with high top-1 agreement at this config too.
+    assert diag["top1"] >= 0.7
