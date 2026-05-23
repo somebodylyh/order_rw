@@ -1,4 +1,11 @@
+import json
+import math
+import subprocess
+import sys
+from pathlib import Path
+
 import numpy as np
+import pytest
 import torch
 
 
@@ -127,3 +134,30 @@ def test_should_sample_rw_gate():
     assert should_sample_rw(alpha=0.3, rw_policy="progressive_rw_v3", rw_mlp=None) is True
     # non-mlp policy with alpha 0 -> skip (behavior-preserving: mixed==random anyway)
     assert should_sample_rw(alpha=0.0, rw_policy="progressive_rw_v3", rw_mlp=None) is False
+
+
+@pytest.mark.skipif(not __import__("torch").cuda.is_available(), reason="needs a GPU")
+def test_alternating_smoke_from0(tmp_path):
+    """200-step from-0 alternating run: warmup(50) random, refresh@100/200 distill beta, finite eval."""
+    here = Path(__file__).resolve().parent
+    out = tmp_path / "alt_smoke"
+    cmd = [sys.executable, "-u", "train_clean_aogpt.py",
+           "--run-kind", "graph_rw", "--rw-policy", "mlp_cdl", "--mlp-alternating",
+           "--mlp-refresh-mode", "finetune", "--mlp-orientation", "source_start",
+           "--mlp-tau", "0.5", "--mlp-src-rho", "0.3", "--rw-top-k", "4",
+           "--refresh-interval", "100", "--refresh-ema-beta", "0.0", "--refresh-n-chunks", "32",
+           "--alpha-warmup-start", "50", "--alpha-warmup-steps", "100",
+           "--alpha-start", "0.0", "--alpha-target", "0.9",
+           "--mlp-distill-n-orders", "40", "--mlp-distill-epochs", "15", "--mlp-distill-batch-states", "64",
+           "--max-steps", "200", "--eval-interval", "100", "--log-interval", "50",
+           "--batch-size", "8", "--grad-accum", "1", "--save-steps", "200",
+           "--output-dir", str(out), "--device", "cuda:0"]
+    r = subprocess.run(cmd, cwd=str(here), capture_output=True, text=True, timeout=1800)
+    assert r.returncode == 0, r.stdout[-3000:] + "\nSTDERR:\n" + r.stderr[-3000:]
+    assert (out / "beta_step100.pt").exists() and (out / "beta_step200.pt").exists()
+    rows = [json.loads(l) for l in (out / "refresh_diagnostics.jsonl").read_text().splitlines() if l.strip()]
+    assert [x["step"] for x in rows] == [100, 200]
+    assert all("rollout_tau_vs_l2r" in x and "val_kl" in x for x in rows)
+    ec = (out / "eval_curve.tsv").read_text().strip().splitlines()
+    hdr = ec[0].split("\t"); j = hdr.index("val_ori_l2r_block")
+    assert any(math.isfinite(float(ln.split("\t")[j])) for ln in ec[1:])

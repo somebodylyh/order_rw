@@ -343,12 +343,16 @@ def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, 
                 pos_tau=float(rw_params["pos_tau"]), top_k=int(rw_params.get("top_k", 4) or 0),
             ).cpu().long()
         elif rw_policy == "mlp_cdl":
-            rw_phys = sample_orders_batched_mlp(
-                B, n_eval, rw_mlp, rw_params["orientation"], int(seed) * 10000, device,
-                tau=float(rw_params["mlp_tau"]), tau_start=float(rw_params.get("tau_start", 0.1)),
-                top_k=int(rw_params.get("top_k", 4) or 0), src_rho=float(rw_params.get("src_rho", 0.0)),
-                alpha_dep=float(rw_params.get("alpha_dep", 0.5)),
-            ).cpu().long()
+            if rw_mlp is None:
+                # alternating warmup: beta not yet born — fall back to random (same as unstructured)
+                rw_phys = unstructured_phys
+            else:
+                rw_phys = sample_orders_batched_mlp(
+                    B, n_eval, rw_mlp, rw_params["orientation"], int(seed) * 10000, device,
+                    tau=float(rw_params["mlp_tau"]), tau_start=float(rw_params.get("tau_start", 0.1)),
+                    top_k=int(rw_params.get("top_k", 4) or 0), src_rho=float(rw_params.get("src_rho", 0.0)),
+                    alpha_dep=float(rw_params.get("alpha_dep", 0.5)),
+                ).cpu().long()
         else:
             rw_rows = [sample_order(B, rw_policy, rw_params, seed=int(seed) * 10000 + seq_idx)[0]
                        for seq_idx in range(n_eval)]
@@ -1001,6 +1005,28 @@ def main(default_run_kind="baseline"):
             log(f"[Refresh @ {next_step}] Done in {elapsed:.1f}s ({n_extracted} chunks), A_global saved")
             np.save(output_dir / f"A_global_step{next_step}.npy", A_global)
             np.save(output_dir / "A_global_eval.npy", A_global)
+            if rw_policy == "mlp_cdl" and args.mlp_alternating:
+                from attn_order_distill import distill_order_mlp, refresh_diagnostics
+                seed_r = int(args.seed) * 100000 + int(next_step)
+                init = rw_mlp if (args.mlp_refresh_mode == "finetune" and rw_mlp is not None) else None
+                rw_mlp, ddiag = distill_order_mlp(
+                    B, mlp=init, n_orders=args.mlp_distill_n_orders, tau_T=args.mlp_distill_tau_t,
+                    tau_train=args.mlp_distill_tau_train, epochs=args.mlp_distill_epochs,
+                    lr=args.mlp_distill_lr, batch_states=args.mlp_distill_batch_states,
+                    seed=seed_r, device=device,
+                )
+                rdiag = refresh_diagnostics(
+                    B, rw_mlp, tau=float(args.mlp_tau), top_k=int(args.rw_top_k),
+                    src_rho=float(rw_params["src_rho"]), seed=seed_r, device=device,
+                )
+                torch.save(rw_mlp.state_dict(), output_dir / f"beta_step{next_step}.pt")
+                rec = dict(step=int(next_step), refresh_mode=args.mlp_refresh_mode, **ddiag, **rdiag)
+                with (output_dir / "refresh_diagnostics.jsonl").open("a") as f:
+                    f.write(json.dumps(rec) + "\n")
+                log(f"[Refresh+Distill @ {next_step}] beta={args.mlp_refresh_mode} "
+                    f"val_kl={ddiag['val_kl']} top1={ddiag['top1']} top4={ddiag['top4']} | "
+                    f"rollout tau_vs_l2r={rdiag['rollout_tau_vs_l2r']} ent={rdiag['rollout_entropy']} "
+                    f"uniq={rdiag['rollout_unique']} src={rdiag['src_node']} | teacher_tau={rdiag['teacher_tau_vs_l2r']}")
             next_refresh_step = next_step + args.refresh_interval
 
         if next_step in save_steps or next_step == args.max_steps:
