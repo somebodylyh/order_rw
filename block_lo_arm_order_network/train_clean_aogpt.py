@@ -1017,7 +1017,7 @@ def main(default_run_kind="baseline"):
                 )
                 rdiag = refresh_diagnostics(
                     B, rw_mlp, tau=float(args.mlp_tau), top_k=int(args.rw_top_k),
-                    src_rho=float(rw_params["src_rho"]), seed=seed_r, device=device,
+                    src_rho=float(rw_params["src_rho"]), seed=seed_r + 1, device=device,
                 )
                 torch.save(rw_mlp.state_dict(), output_dir / f"beta_step{next_step}.pt")
                 rec = dict(step=int(next_step), refresh_mode=args.mlp_refresh_mode, **ddiag, **rdiag)
