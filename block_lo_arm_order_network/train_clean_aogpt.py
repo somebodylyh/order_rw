@@ -605,12 +605,19 @@ def parse_args(default_run_kind="baseline"):
                         "--refresh-interval>0; B/beta are born at the first refresh (no --mlp-graph).")
     p.add_argument("--mlp-refresh-mode", choices=["finetune", "scratch"], default="finetune",
                    help="alternating: warm-start beta from the previous beta (finetune) or re-init (scratch).")
-    p.add_argument("--mlp-distill-n-orders", type=int, default=200)
-    p.add_argument("--mlp-distill-tau-t", type=float, default=0.5)
-    p.add_argument("--mlp-distill-tau-train", type=float, default=0.5)
-    p.add_argument("--mlp-distill-epochs", type=int, default=60)
-    p.add_argument("--mlp-distill-lr", type=float, default=1e-3)
-    p.add_argument("--mlp-distill-batch-states", type=int, default=256)
+    p.add_argument("--mlp-distill-n-orders", type=int, default=200,
+                   help="alternating: teacher/random rollouts used to build the distillation dataset "
+                        "for beta at each refresh")
+    p.add_argument("--mlp-distill-tau-t", type=float, default=0.5,
+                   help="alternating: C-D+L teacher softmax temperature for the distillation target")
+    p.add_argument("--mlp-distill-tau-train", type=float, default=0.5,
+                   help="alternating: student (beta) softmax temperature during KL distillation")
+    p.add_argument("--mlp-distill-epochs", type=int, default=60,
+                   help="alternating: KL-distillation epochs to (re)train beta at each refresh")
+    p.add_argument("--mlp-distill-lr", type=float, default=1e-3,
+                   help="alternating: Adam learning rate for the per-refresh beta distillation")
+    p.add_argument("--mlp-distill-batch-states", type=int, default=256,
+                   help="alternating: states per minibatch in the per-refresh beta distillation")
     return p.parse_args()
 
 
@@ -747,6 +754,10 @@ def main(default_run_kind="baseline"):
             if args.mlp_graph:
                 raise SystemExit("--mlp-alternating must NOT take --mlp-graph (B is born from refresh, "
                                  "no future-B leakage)")
+            if args.run_kind not in {"graph_rw", "graph_rw_bag"}:
+                raise SystemExit("--mlp-alternating requires --run-kind graph_rw (or graph_rw_bag); "
+                                 f"got {args.run_kind!r} — the refresh loop and alpha curriculum are "
+                                 "inactive otherwise, so B/beta would never be born (silent no-op)")
             rw_mlp = load_order_mlp(args.mlp_path, device) if args.mlp_path else None  # optional seed
             log(f"[mlp_cdl ALTERNATING] mode={args.mlp_refresh_mode}; beta "
                 f"{'seeded from --mlp-path' if args.mlp_path else 'born at first refresh'}; "
@@ -768,7 +779,9 @@ def main(default_run_kind="baseline"):
     idx_train = idx_model[split["train_indices"]]
     if rw_policy == "mlp_cdl":
         if args.mlp_alternating:
-            A_global = np.zeros((N, N), dtype=np.float32)   # placeholder; first refresh overwrites
+            # placeholder until the first refresh; the refresh loop (re-extract B + re-distill beta)
+            # overwrites B and trains rw_mlp — that wiring lives in the refresh block, not here.
+            A_global = np.zeros((N, N), dtype=np.float32)
             B = A_global
             log("[mlp_cdl ALTERNATING] placeholder zero-B; first refresh extracts B from theta + "
                 "distills beta. Use --refresh-ema-beta 0.0 so B is the fresh extraction.")
