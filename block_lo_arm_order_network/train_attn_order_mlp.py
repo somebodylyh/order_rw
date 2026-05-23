@@ -193,47 +193,16 @@ def run(modality, args):
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    data = make_dataset(B, args.n_orders, args.tau_T, args.seed, standardize=True)
-    rng = np.random.default_rng(args.seed)
-    idx = rng.permutation(len(data))
-    n_val = max(1, int(0.2 * len(data)))
-    val = [data[i] for i in idx[:n_val]]
-    train = [data[i] for i in idx[n_val:]]
-
-    mlp = OrderMLP(hidden=args.hidden, layers=args.layers, act=args.act)
-    opt = torch.optim.Adam(mlp.parameters(), lr=args.lr)
-
-    teach_ent = mean_teacher_entropy(val)
-    log = []
-    # baseline (untrained) val KL
-    mlp.eval()
-    kl0, t1_0, t4_0, _ = kl_terms(mlp, val, args.tau_train)
-    log.append(dict(epoch=0, train_kl="", val_kl=round(kl0, 4), top1=round(t1_0, 4), top4=round(t4_0, 4)))
-
-    bs = args.batch_states
-    for ep in range(1, args.epochs + 1):
-        mlp.train()
-        order = rng.permutation(len(train))
-        ep_kl = 0.0; nb = 0
-        for b in range(0, len(train), bs):
-            batch = [train[i] for i in order[b:b + bs]]
-            opt.zero_grad()
-            kl_acc = 0.0
-            for X, pT in batch:
-                logp = torch.log_softmax(mlp(X) / args.tau_train, dim=0)
-                kl_acc = kl_acc + (pT * (torch.log(pT + 1e-12) - logp)).sum()
-            kl_acc = kl_acc / len(batch)
-            kl_acc.backward()
-            opt.step()
-            ep_kl += float(kl_acc); nb += 1
-        mlp.eval()
-        vkl, vt1, vt4, vent = kl_terms(mlp, val, args.tau_train)
-        log.append(dict(epoch=ep, train_kl=round(ep_kl / nb, 4), val_kl=round(vkl, 4),
-                        top1=round(vt1, 4), top4=round(vt4, 4)))
-
-    # final metrics
-    mlp.eval()
-    vkl, vt1, vt4, vstud_ent = kl_terms(mlp, val, args.tau_train)
+    from attn_order_distill import distill_order_mlp
+    mlp, ddiag = distill_order_mlp(
+        B, mlp=None, n_orders=args.n_orders, tau_T=args.tau_T, tau_train=args.tau_train,
+        epochs=args.epochs, lr=args.lr, batch_states=args.batch_states,
+        hidden=args.hidden, layers=args.layers, act=args.act, seed=args.seed, device="cpu",
+    )
+    teach_ent = ddiag["teacher_entropy"]
+    kl0 = ddiag["kl0_untrained"]
+    vkl, vt1, vt4, vstud_ent = ddiag["val_kl"], ddiag["top1"], ddiag["top4"], ddiag["student_entropy"]
+    log = []   # per-epoch curve no longer materialized; final diag is reported instead
 
     # student vs teacher vs random rollouts (structural)
     K = 200
@@ -272,7 +241,7 @@ def run(modality, args):
         modality=modality, N=N, graph=graph_str,
         config=dict(tau_T=args.tau_T, tau_train=args.tau_train, hidden=args.hidden,
                     layers=args.layers, act=args.act, epochs=args.epochs, lr=args.lr,
-                    n_orders=args.n_orders, n_states=len(data), device="cpu"),
+                    n_orders=args.n_orders, n_states=ddiag["n_states"], device="cpu"),
         teacher_entropy_val=round(teach_ent, 4),
         final=dict(val_kl=round(vkl, 4), top1_agreement=round(vt1, 4),
                    top4_agreement=round(vt4, 4), student_entropy_val=round(vstud_ent, 4)),
@@ -290,7 +259,7 @@ def run(modality, args):
           f"- MLP: 12 -> {args.hidden}" + (f" -> {args.hidden}" if args.layers >= 3 else "") +
           f" -> 1 ({args.act.upper()}); KL(p_T || p_beta); tau_T={args.tau_T}, tau_train={args.tau_train}; "
           f"no entropy reg; CPU.",
-          f"- states: {len(data)} (teacher+random rollouts), {len(train)} train / {len(val)} val.",
+          f"- states: {ddiag['n_states']} (teacher+random rollouts).",
           f"- teacher target entropy (val) = {teach_ent:.4f} nats.\n",
           "## Imitation curve (val)",
           "\n| epoch | train_kl | val_kl | top1 | top4 |", "|---|---|---|---|---|"]
@@ -310,7 +279,8 @@ def run(modality, args):
                "|---|---|---|---|"]
         for k, v in rows.items():
             md.append(f"| {k} | {v['tau_vs_raster_proxy']} | {v['abs_tau']} | {v['unique']} |")
-    collapse = vstud_ent < 0.05 and len(val) > 1
+    n_val = max(1, int(0.2 * ddiag["n_states"]))
+    collapse = vstud_ent < 0.05 and n_val > 1
     md += ["\n## Read",
            f"- Distillation {'CONVERGED' if vkl < 0.1 else 'partially converged'}: val KL {kl0:.3f} -> {vkl:.3f}, "
            f"top1 {vt1:.3f}, top4 {vt4:.3f}. The MLP reproduces the C-D+L ranking from the 12-d features.",

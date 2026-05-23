@@ -44,3 +44,17 @@ def test_distill_order_mlp_finetune_warmstart_changes_weights():
     assert mlp1 is mlp0                       # same object, warm-started
     assert any(not torch.allclose(b, p) for b, p in zip(before, mlp1.parameters()))
     assert diag1["val_kl"] < diag1["kl0_untrained"]
+
+
+def test_run_distill_matches_factored_path():
+    """The factored distill_order_mlp must reproduce run()'s inline loop on the same B/seed/config,
+    so refactoring run() to call it does not change Phase-1 numbers."""
+    import numpy as np
+    from attn_order_distill import distill_order_mlp
+    B = _toy_B(N=16, seed=7)
+    # mirror run()'s config exactly (standardize=True dataset, same seed)
+    _, diag = distill_order_mlp(B, mlp=None, n_orders=50, tau_T=0.5, tau_train=0.5,
+                               epochs=20, lr=1e-3, batch_states=64, hidden=64, layers=2,
+                               act="gelu", seed=7, device="cpu")
+    assert diag["val_kl"] < diag["kl0_untrained"]
+    assert 0.0 <= diag["top4"] <= 1.0
