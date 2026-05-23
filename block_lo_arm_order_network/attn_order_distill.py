@@ -20,7 +20,9 @@ def distill_order_mlp(B, *, mlp=None, n_orders=200, tau_T=0.5, tau_train=0.5,
     If `mlp` is None a fresh OrderMLP is created (scratch); otherwise the passed module
     is warm-started in place (finetune) and returned as the SAME object. Distillation runs
     on CPU; the returned module is moved to `device`. Returns (mlp, diag) where diag has
-    val_kl / top1 / top4 / student_entropy / teacher_entropy / kl0_untrained / n_states.
+    val_kl / top1 / top4 / student_entropy / teacher_entropy / kl0_untrained / n_states /
+    epochs. `kl0_untrained` is the val KL measured BEFORE this call's training loop: of the
+    untrained MLP when `mlp is None`, or of the warm-started MLP in the finetune path.
     """
     B = np.ascontiguousarray(np.asarray(B, dtype=np.float64))
     torch.manual_seed(int(seed))
