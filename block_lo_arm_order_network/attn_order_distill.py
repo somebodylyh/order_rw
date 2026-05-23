@@ -63,3 +63,28 @@ def distill_order_mlp(B, *, mlp=None, n_orders=200, tau_T=0.5, tau_train=0.5,
                 student_entropy=round(vent, 4), teacher_entropy=round(teach_ent, 4),
                 kl0_untrained=round(kl0, 4), n_states=len(data), epochs=int(epochs))
     return mlp.to(device), diag
+
+
+def refresh_diagnostics(B, mlp, *, tau=0.5, top_k=4, src_rho=0.3, seed=0, K=128, device="cpu"):
+    """Snapshot the current B / teacher / distilled-beta at a refresh step (attention-only)."""
+    import attn_order_mlp_policy as P
+    from attn_order_teacher import rollout_order
+    from train_attn_order_mlp import kendall_tau_vs_raster, diversity
+
+    B = np.ascontiguousarray(np.asarray(B, dtype=np.float32))
+    N = B.shape[0]
+
+    teach = np.stack([rollout_order(B, tau_T=tau, seed=int(seed) + s, mode="C-D+L", standardize=True)
+                      for s in range(K)])
+    t_tau = float(kendall_tau_vs_raster(teach))
+    src_node = int(np.argmax(P.readiness_vector(B)))
+
+    orders, ent = P.sample_orders_batched_mlp(
+        B, K, mlp.to(device), "source_start", base_seed=int(seed), device=torch.device(device),
+        tau=tau, top_k=top_k, src_rho=src_rho, return_entropy=True,
+    )
+    o = orders.cpu().numpy()
+    s_tau = float(kendall_tau_vs_raster(o))
+    return dict(teacher_tau_vs_l2r=round(t_tau, 4), teacher_abs_tau=round(abs(t_tau), 4),
+                src_node=src_node, rollout_tau_vs_l2r=round(s_tau, 4),
+                rollout_entropy=round(float(ent), 4), rollout_unique=int(diversity(o)))

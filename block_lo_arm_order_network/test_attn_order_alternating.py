@@ -61,3 +61,20 @@ def test_run_distill_matches_factored_path():
     # cross-config sanity (distinct N/seed/n_orders from the Task-1 test): the strong forward
     # chain in _toy_B must be recovered with high top-1 agreement at this config too.
     assert diag["top1"] >= 0.7
+
+
+def test_refresh_diagnostics_keys_and_source_node():
+    from attn_order_distill import distill_order_mlp, refresh_diagnostics
+    B = _toy_B(N=16, seed=3)
+    mlp, _ = distill_order_mlp(B, mlp=None, n_orders=40, tau_T=0.5, tau_train=0.5,
+                              epochs=20, lr=1e-3, batch_states=64, seed=3, device="cpu")
+    d = refresh_diagnostics(B, mlp, tau=0.5, top_k=4, src_rho=0.3, seed=20000, K=64, device="cpu")
+    for k in ("teacher_tau_vs_l2r", "teacher_abs_tau", "src_node",
+              "rollout_tau_vs_l2r", "rollout_entropy", "rollout_unique"):
+        assert k in d
+    assert 0 <= d["src_node"] < 16
+    assert 1 <= d["rollout_unique"] <= 64
+    # C-D+L teacher on B=A.T of a forward-chain A picks sinks first (known reverse-chain behavior,
+    # documented in MEMORY.md: "reverse chain(free-run top1=0.97)"). tau_vs_l2r is strongly negative;
+    # abs_tau captures magnitude. Use abs_tau > 0 to assert non-trivial ordering.
+    assert d["teacher_abs_tau"] > 0.0
