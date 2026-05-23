@@ -9,7 +9,9 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from train_attn_order_mlp import OrderMLP, make_dataset, kl_terms, mean_teacher_entropy
+from train_attn_order_mlp import (
+    OrderMLP, make_dataset, kl_terms, mean_teacher_entropy, kendall_tau_vs_raster, diversity,
+)
 
 
 def distill_order_mlp(B, *, mlp=None, n_orders=200, tau_T=0.5, tau_train=0.5,
@@ -66,13 +68,17 @@ def distill_order_mlp(B, *, mlp=None, n_orders=200, tau_T=0.5, tau_train=0.5,
 
 
 def refresh_diagnostics(B, mlp, *, tau=0.5, top_k=4, src_rho=0.3, seed=0, K=128, device="cpu"):
-    """Snapshot the current B / teacher / distilled-beta at a refresh step (attention-only)."""
+    """Snapshot the current B / teacher / distilled-beta at a refresh step (attention-only).
+
+    `tau` is the sampling temperature applied to BOTH the teacher rollouts and the MLP
+    (source_start) rollouts, so the two are compared under matched conditions.
+    """
+    # attn_order_mlp_policy / attn_order_teacher are imported lazily to keep any circular-import
+    # hazard contained here (train_attn_order_mlp imports this module lazily inside run()).
     import attn_order_mlp_policy as P
     from attn_order_teacher import rollout_order
-    from train_attn_order_mlp import kendall_tau_vs_raster, diversity
 
-    B = np.ascontiguousarray(np.asarray(B, dtype=np.float32))
-    N = B.shape[0]
+    B = np.ascontiguousarray(np.asarray(B, dtype=np.float64))
 
     teach = np.stack([rollout_order(B, tau_T=tau, seed=int(seed) + s, mode="C-D+L", standardize=True)
                       for s in range(K)])
