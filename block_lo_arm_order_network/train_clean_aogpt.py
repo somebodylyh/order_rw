@@ -35,6 +35,7 @@ from clean_training_protocol import (
     verify_clean_coordinate_round_trip,
 )
 from directed_graph_policy import build_directed_graph, sample_order, sample_orders_batched_torch
+from attn_order_mlp_policy import load_order_mlp, sample_orders_batched_mlp, sample_orders_batched_position
 from training_utils import (
     AOGPT,
     AOGPTConfig,
@@ -205,7 +206,31 @@ def sample_random_physical_orders(batch_size, seed, global_step, micro_step, dev
     return torch.tensor(np.stack(rows), dtype=torch.long, device=device)
 
 
-def sample_rw_physical_orders(batch_size, B, policy, params, seed, global_step, micro_step, device, bag_idx=0):
+def sample_rw_physical_orders(batch_size, B, policy, params, seed, global_step, micro_step, device, bag_idx=0, mlp=None):
+    if policy == "position_only":
+        base_seed = (
+            int(seed) * 100000000
+            + int(global_step) * 10000
+            + int(micro_step) * 1000
+            + int(bag_idx) * 100
+        )
+        return sample_orders_batched_position(
+            N, batch_size, base_seed, device,
+            pos_tau=float(params["pos_tau"]), top_k=int(params.get("top_k", 4) or 0),
+        )
+    if policy == "mlp_cdl":
+        base_seed = (
+            int(seed) * 100000000
+            + int(global_step) * 10000
+            + int(micro_step) * 1000
+            + int(bag_idx) * 100
+        )
+        return sample_orders_batched_mlp(
+            B, batch_size, mlp, params["orientation"], base_seed, device,
+            tau=float(params["mlp_tau"]), tau_start=float(params.get("tau_start", 0.1)),
+            top_k=int(params.get("top_k", 4) or 0), src_rho=float(params.get("src_rho", 0.0)),
+            alpha_dep=float(params.get("alpha_dep", 0.5)),
+        )
     if policy == "progressive_rw_v3" and device.type == "cuda":
         base_seed = (
             int(seed) * 100000000
@@ -249,7 +274,7 @@ def order_loss(model, idx_batch, physical_orders, clean_perm, device):
 
 
 @torch.no_grad()
-def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, args, alpha):
+def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, args, alpha, rw_mlp=None):
     model.eval()
     device = next(model.parameters()).device
 
@@ -297,15 +322,27 @@ def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, 
 
     unstructured_model_orders = []
     rw_model_orders = []
+    n_eval = idx_eval_model.size(0)
     for seed in args.eval_order_seeds:
-        random_rows = []
-        rw_rows = []
-        for seq_idx in range(idx_eval_model.size(0)):
-            random_rows.append(np.random.default_rng(int(seed) * 10000 + seq_idx).permutation(N))
-            rw_order, _ = sample_order(B, rw_policy, rw_params, seed=int(seed) * 10000 + seq_idx)
-            rw_rows.append(rw_order)
+        random_rows = [np.random.default_rng(int(seed) * 10000 + seq_idx).permutation(N)
+                       for seq_idx in range(n_eval)]
         unstructured_phys = torch.tensor(np.stack(random_rows), dtype=torch.long)
-        rw_phys = torch.tensor(np.stack(rw_rows), dtype=torch.long)
+        if rw_policy == "position_only":
+            rw_phys = sample_orders_batched_position(
+                N, n_eval, int(seed) * 10000, device,
+                pos_tau=float(rw_params["pos_tau"]), top_k=int(rw_params.get("top_k", 4) or 0),
+            ).cpu().long()
+        elif rw_policy == "mlp_cdl":
+            rw_phys = sample_orders_batched_mlp(
+                B, n_eval, rw_mlp, rw_params["orientation"], int(seed) * 10000, device,
+                tau=float(rw_params["mlp_tau"]), tau_start=float(rw_params.get("tau_start", 0.1)),
+                top_k=int(rw_params.get("top_k", 4) or 0), src_rho=float(rw_params.get("src_rho", 0.0)),
+                alpha_dep=float(rw_params.get("alpha_dep", 0.5)),
+            ).cpu().long()
+        else:
+            rw_rows = [sample_order(B, rw_policy, rw_params, seed=int(seed) * 10000 + seq_idx)[0]
+                       for seq_idx in range(n_eval)]
+            rw_phys = torch.tensor(np.stack(rw_rows), dtype=torch.long)
         unstructured_model_orders.append(physical_blocks_to_model_blocks(unstructured_phys, clean_perm))
         rw_model_orders.append(physical_blocks_to_model_blocks(rw_phys, clean_perm))
 
@@ -524,18 +561,39 @@ def parse_args(default_run_kind="baseline"):
     p.add_argument("--alpha-start", type=float, default=0.0)
     p.add_argument("--alpha-target", type=float, default=0.9)
     p.add_argument("--alpha-warmup-steps", type=int, default=10000)
+    p.add_argument("--alpha-ramp-from-resume", action="store_true",
+                   help="ramp alpha over alpha_warmup_steps starting at the resume point (skip the "
+                        "absolute-step resume-alpha compensation). Reproduces the v3 continuation schedule "
+                        "(alpha 0->0.9 over the 10k continuation), required for a clean v3 comparison.")
     p.add_argument("--tau-start", type=float, default=0.1)
     p.add_argument("--tau-step", type=float, default=0.1)
     p.add_argument("--rw-top-k", type=int, default=4)
     p.add_argument("--rw-order-bag-k", type=int, default=1)
     p.add_argument("--rw-policy", type=str, default="progressive_rw",
-                   choices=["progressive_rw", "progressive_rw_v2", "progressive_rw_v3"])
+                   choices=["progressive_rw", "progressive_rw_v2", "progressive_rw_v3", "mlp_cdl", "position_only"])
+    p.add_argument("--pos-tau", type=float, default=0.1,
+                   help="positional-prior temperature for rw-policy=position_only "
+                        "(logits[v]=-v/pos_tau); calibrate to match source_start avg_step_entropy. "
+                        "Phase-2 §6 entropy-matched position-only attribution control.")
     p.add_argument("--rw-lam", type=float, default=0.75,
                    help="λ trade-off for dependency penalty (v2/v3)")
     p.add_argument("--rw-rho", type=float, default=0.2,
                    help="ρ global readiness prior strength (v3 only)")
     p.add_argument("--epsilon-uniform", type=float, default=0.0,
                    help="Epsilon-uniform exploration mixing (0=disabled, 0.15=recommended)")
+    # --- distilled Attn-Order MLP policy (rw-policy=mlp_cdl) ---
+    p.add_argument("--mlp-path", type=str, default=None,
+                   help="Phase-1 distilled OrderMLP state_dict (.pt) for rw-policy=mlp_cdl")
+    p.add_argument("--mlp-orientation", type=str, default="original",
+                   choices=["original", "reversed", "source_start"],
+                   help="orientation control for the MLP order policy (Phase-2 §1b)")
+    p.add_argument("--mlp-tau", type=float, default=0.5,
+                   help="per-step sampling temperature for the (z-scored) MLP policy")
+    p.add_argument("--mlp-src-rho", type=float, default=0.3,
+                   help="readiness direction-prior strength for orientation=source_start")
+    p.add_argument("--mlp-graph", type=str, default=None,
+                   help="fixed A_global .npy used as the MLP substrate B (must match the "
+                        "distillation graph; e.g. v3's ckpt20000 A_global_eval.npy)")
     return p.parse_args()
 
 
@@ -630,7 +688,9 @@ def main(default_run_kind="baseline"):
     # alpha_for_step measures local_step = global_step - start_step,
     # so a resume makes local_step jump back to 0.  Compensate by
     # advancing alpha_start to whatever alpha should be at start_step.
-    if start_step > 0:
+    # --alpha-ramp-from-resume skips this so the warmup ramps from the resume point
+    # (the v3 continuation schedule: alpha 0->0.9 over the 10k continuation).
+    if start_step > 0 and not args.alpha_ramp_from_resume:
         current_alpha = alpha_for_step(start_step, 0, args)
         args.alpha_start = current_alpha
 
@@ -656,9 +716,42 @@ def main(default_run_kind="baseline"):
     if args.epsilon_uniform > 0.0:
         rw_params["epsilon_uniform"] = float(args.epsilon_uniform)
 
+    rw_mlp = None
+    if rw_policy == "mlp_cdl":
+        if not args.mlp_path:
+            raise SystemExit("--rw-policy mlp_cdl requires --mlp-path")
+        rw_params.update({
+            "orientation": args.mlp_orientation,
+            "mlp_tau": float(args.mlp_tau),
+            "src_rho": float(args.mlp_src_rho) if args.mlp_orientation == "source_start" else 0.0,
+            "mlp_path": str(args.mlp_path),
+        })
+        rw_mlp = load_order_mlp(args.mlp_path, device)
+        log(f"Loaded distilled MLP policy: {args.mlp_path} orientation={args.mlp_orientation} "
+            f"tau={args.mlp_tau} top_k={args.rw_top_k} src_rho={rw_params['src_rho']}")
+    if rw_policy == "position_only":
+        rw_params["pos_tau"] = float(args.pos_tau)
+        if args.refresh_interval > 0:
+            raise SystemExit("position_only uses no graph B; do not set --refresh-interval > 0")
+        log(f"[position_only] pos_tau={args.pos_tau} top_k={args.rw_top_k}; no graph B / MLP "
+            f"(positional prior only) — entropy-matched attribution control for source_start")
+
     idx_eval_model = idx_model[split["eval_indices"]]
-    if args.run_kind in {"graph_rw", "graph_rw_bag"}:
-        idx_train = idx_model[split["train_indices"]]
+    idx_train = idx_model[split["train_indices"]]
+    if rw_policy == "mlp_cdl":
+        if args.refresh_interval > 0:
+            raise SystemExit("mlp_cdl requires a fixed B; do not set --refresh-interval > 0")
+        if not args.mlp_graph:
+            raise SystemExit("--rw-policy mlp_cdl requires --mlp-graph (the fixed A_global substrate)")
+        A_global = np.load(args.mlp_graph).astype(np.float32)
+        np.fill_diagonal(A_global, 0.0)
+        B = build_directed_graph(A_global)
+        log(f"[mlp_cdl] loaded FIXED B from {args.mlp_graph} (shape {tuple(A_global.shape)}); no refresh.")
+    elif rw_policy == "position_only":
+        A_global = np.zeros((N, N), dtype=np.float32)
+        B = A_global  # placeholder; the position sampler ignores B entirely
+        log("[position_only] no graph substrate; zero-A placeholder B (sampler is positional only).")
+    elif args.run_kind in {"graph_rw", "graph_rw_bag"}:
         if args.refresh_data_source == "random_train":
             extract_n = min(args.refresh_n_chunks, len(idx_train))
             rng = np.random.RandomState(start_step + args.seed)
@@ -719,7 +812,7 @@ def main(default_run_kind="baseline"):
         nonlocal last_metrics
         log(f"[Eval @ {global_step}] alpha={alpha:.4f}")
         metrics = evaluate_orders(
-            model, idx_eval_model, clean_perm, B, rw_policy, rw_params, args, alpha
+            model, idx_eval_model, clean_perm, B, rw_policy, rw_params, args, alpha, rw_mlp=rw_mlp
         )
         last_metrics = metrics
         with eval_curve_path.open("a", newline="") as f:
@@ -782,7 +875,8 @@ def main(default_run_kind="baseline"):
                 loss = order_loss(model, idx_batch, l2r, clean_perm, device)
             elif args.run_kind == "graph_rw":
                 rw_phys = sample_rw_physical_orders(
-                    args.batch_size, B, rw_policy, rw_params, args.seed, global_step, micro_step, device
+                    args.batch_size, B, rw_policy, rw_params, args.seed, global_step, micro_step, device,
+                    mlp=rw_mlp,
                 )
                 choose_rng = torch.Generator(device=device)
                 choose_rng.manual_seed(args.seed * 100000000 + global_step * 1000 + micro_step)
@@ -797,7 +891,7 @@ def main(default_run_kind="baseline"):
                     for bag_idx in range(args.rw_order_bag_k):
                         rw_phys = sample_rw_physical_orders(
                             args.batch_size, B, rw_policy, rw_params, args.seed,
-                            global_step, micro_step, device, bag_idx=bag_idx
+                            global_step, micro_step, device, bag_idx=bag_idx, mlp=rw_mlp,
                         )
                         rw_total = rw_total + order_loss(model, idx_batch, rw_phys, clean_perm, device)
                     weighted = weighted + alpha * rw_total / float(args.rw_order_bag_k)
