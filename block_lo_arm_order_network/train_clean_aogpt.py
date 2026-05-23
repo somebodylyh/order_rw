@@ -599,6 +599,18 @@ def parse_args(default_run_kind="baseline"):
     p.add_argument("--mlp-graph", type=str, default=None,
                    help="fixed A_global .npy used as the MLP substrate B (must match the "
                         "distillation graph; e.g. v3's ckpt20000 A_global_eval.npy)")
+    p.add_argument("--mlp-alternating", action="store_true",
+                   help="alternating mlp_cdl: at each --refresh-interval re-extract B from current "
+                        "theta and re-distill/finetune beta on it, then sample with it. Requires "
+                        "--refresh-interval>0; B/beta are born at the first refresh (no --mlp-graph).")
+    p.add_argument("--mlp-refresh-mode", choices=["finetune", "scratch"], default="finetune",
+                   help="alternating: warm-start beta from the previous beta (finetune) or re-init (scratch).")
+    p.add_argument("--mlp-distill-n-orders", type=int, default=200)
+    p.add_argument("--mlp-distill-tau-t", type=float, default=0.5)
+    p.add_argument("--mlp-distill-tau-train", type=float, default=0.5)
+    p.add_argument("--mlp-distill-epochs", type=int, default=60)
+    p.add_argument("--mlp-distill-lr", type=float, default=1e-3)
+    p.add_argument("--mlp-distill-batch-states", type=int, default=256)
     return p.parse_args()
 
 
@@ -723,17 +735,28 @@ def main(default_run_kind="baseline"):
 
     rw_mlp = None
     if rw_policy == "mlp_cdl":
-        if not args.mlp_path:
-            raise SystemExit("--rw-policy mlp_cdl requires --mlp-path")
         rw_params.update({
             "orientation": args.mlp_orientation,
             "mlp_tau": float(args.mlp_tau),
             "src_rho": float(args.mlp_src_rho) if args.mlp_orientation == "source_start" else 0.0,
-            "mlp_path": str(args.mlp_path),
+            "mlp_path": str(args.mlp_path) if args.mlp_path else None,
         })
-        rw_mlp = load_order_mlp(args.mlp_path, device)
-        log(f"Loaded distilled MLP policy: {args.mlp_path} orientation={args.mlp_orientation} "
-            f"tau={args.mlp_tau} top_k={args.rw_top_k} src_rho={rw_params['src_rho']}")
+        if args.mlp_alternating:
+            if args.refresh_interval <= 0:
+                raise SystemExit("--mlp-alternating requires --refresh-interval > 0")
+            if args.mlp_graph:
+                raise SystemExit("--mlp-alternating must NOT take --mlp-graph (B is born from refresh, "
+                                 "no future-B leakage)")
+            rw_mlp = load_order_mlp(args.mlp_path, device) if args.mlp_path else None  # optional seed
+            log(f"[mlp_cdl ALTERNATING] mode={args.mlp_refresh_mode}; beta "
+                f"{'seeded from --mlp-path' if args.mlp_path else 'born at first refresh'}; "
+                f"orientation={args.mlp_orientation} tau={args.mlp_tau} src_rho={rw_params['src_rho']}")
+        else:
+            if not args.mlp_path:
+                raise SystemExit("--rw-policy mlp_cdl (fixed) requires --mlp-path")
+            rw_mlp = load_order_mlp(args.mlp_path, device)
+            log(f"Loaded distilled MLP policy: {args.mlp_path} orientation={args.mlp_orientation} "
+                f"tau={args.mlp_tau} top_k={args.rw_top_k} src_rho={rw_params['src_rho']}")
     if rw_policy == "position_only":
         rw_params["pos_tau"] = float(args.pos_tau)
         if args.refresh_interval > 0:
@@ -744,14 +767,20 @@ def main(default_run_kind="baseline"):
     idx_eval_model = idx_model[split["eval_indices"]]
     idx_train = idx_model[split["train_indices"]]
     if rw_policy == "mlp_cdl":
-        if args.refresh_interval > 0:
-            raise SystemExit("mlp_cdl requires a fixed B; do not set --refresh-interval > 0")
-        if not args.mlp_graph:
-            raise SystemExit("--rw-policy mlp_cdl requires --mlp-graph (the fixed A_global substrate)")
-        A_global = np.load(args.mlp_graph).astype(np.float32)
-        np.fill_diagonal(A_global, 0.0)
-        B = build_directed_graph(A_global)
-        log(f"[mlp_cdl] loaded FIXED B from {args.mlp_graph} (shape {tuple(A_global.shape)}); no refresh.")
+        if args.mlp_alternating:
+            A_global = np.zeros((N, N), dtype=np.float32)   # placeholder; first refresh overwrites
+            B = A_global
+            log("[mlp_cdl ALTERNATING] placeholder zero-B; first refresh extracts B from theta + "
+                "distills beta. Use --refresh-ema-beta 0.0 so B is the fresh extraction.")
+        else:
+            if args.refresh_interval > 0:
+                raise SystemExit("fixed mlp_cdl requires a fixed B; do not set --refresh-interval > 0")
+            if not args.mlp_graph:
+                raise SystemExit("--rw-policy mlp_cdl requires --mlp-graph (the fixed A_global substrate)")
+            A_global = np.load(args.mlp_graph).astype(np.float32)
+            np.fill_diagonal(A_global, 0.0)
+            B = build_directed_graph(A_global)
+            log(f"[mlp_cdl] loaded FIXED B from {args.mlp_graph} (shape {tuple(A_global.shape)}); no refresh.")
     elif rw_policy == "position_only":
         A_global = np.zeros((N, N), dtype=np.float32)
         B = A_global  # placeholder; the position sampler ignores B entirely

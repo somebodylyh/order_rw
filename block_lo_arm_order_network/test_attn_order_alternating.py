@@ -80,6 +80,25 @@ def test_refresh_diagnostics_keys_and_source_node():
     assert d["teacher_abs_tau"] > 0.0
 
 
+def test_parse_args_alternating_flags():
+    import sys
+    from train_clean_aogpt import parse_args        # signature: parse_args(default_run_kind="baseline")
+    argv = ["--run-kind", "graph_rw", "--rw-policy", "mlp_cdl", "--mlp-alternating",
+            "--mlp-refresh-mode", "scratch", "--refresh-interval", "5000",
+            "--mlp-distill-epochs", "40", "--alpha-warmup-start", "5000"]
+    old = sys.argv
+    try:
+        sys.argv = ["prog"] + argv
+        args = parse_args()
+    finally:
+        sys.argv = old
+    assert args.mlp_alternating is True
+    assert args.mlp_refresh_mode == "scratch"
+    assert args.refresh_interval == 5000
+    assert args.mlp_distill_epochs == 40
+    assert args.alpha_warmup_start == 5000
+
+
 def test_alpha_warmup_start_schedule():
     import types
     from train_clean_aogpt import alpha_for_step
