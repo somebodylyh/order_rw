@@ -399,7 +399,7 @@ def write_report():
                 if v is None:
                     return "—"
                 try:
-                    return format(float(v), fmt)
+                    return format(int(v) if fmt == "d" else float(v), fmt)
                 except (TypeError, ValueError):
                     return str(v)
 
