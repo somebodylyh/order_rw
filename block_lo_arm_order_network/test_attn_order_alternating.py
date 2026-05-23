@@ -78,3 +78,19 @@ def test_refresh_diagnostics_keys_and_source_node():
     # documented in MEMORY.md: "reverse chain(free-run top1=0.97)"). tau_vs_l2r is strongly negative;
     # abs_tau captures magnitude. Use abs_tau > 0 to assert non-trivial ordering.
     assert d["teacher_abs_tau"] > 0.0
+
+
+def test_alpha_warmup_start_schedule():
+    import types
+    from train_clean_aogpt import alpha_for_step
+    args = types.SimpleNamespace(run_kind="graph_rw", alpha_start=0.0, alpha_target=0.9,
+                                 alpha_warmup_steps=10000, alpha_warmup_start=5000)
+    assert alpha_for_step(0, 0, args) == 0.0
+    assert alpha_for_step(5000, 0, args) == 0.0          # still warmup
+    assert abs(alpha_for_step(10000, 0, args) - 0.45) < 1e-6   # halfway through ramp
+    assert abs(alpha_for_step(15000, 0, args) - 0.9) < 1e-6    # ramp done
+    assert abs(alpha_for_step(30000, 0, args) - 0.9) < 1e-6    # plateau
+    # default (offset 0) must be unchanged from old behavior
+    args0 = types.SimpleNamespace(run_kind="graph_rw", alpha_start=0.0, alpha_target=0.9,
+                                  alpha_warmup_steps=10000, alpha_warmup_start=0)
+    assert abs(alpha_for_step(5000, 0, args0) - 0.45) < 1e-6

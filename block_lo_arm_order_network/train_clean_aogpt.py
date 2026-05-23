@@ -158,7 +158,8 @@ def refresh_rw_graph(model, idx_chunks, clean_perm, device, A_global_old, n_chun
 def alpha_for_step(global_step, start_step, args):
     if args.run_kind not in {"graph_rw", "graph_rw_bag"}:
         return 0.0
-    local_step = max(0, int(global_step) - int(start_step))
+    offset = int(getattr(args, "alpha_warmup_start", 0) or 0)
+    local_step = max(0, int(global_step) - int(start_step) - offset)
     warmup = max(int(args.alpha_warmup_steps), 1)
     frac = min(1.0, local_step / warmup)
     return float(args.alpha_start + frac * (args.alpha_target - args.alpha_start))
@@ -561,6 +562,10 @@ def parse_args(default_run_kind="baseline"):
     p.add_argument("--alpha-start", type=float, default=0.0)
     p.add_argument("--alpha-target", type=float, default=0.9)
     p.add_argument("--alpha-warmup-steps", type=int, default=10000)
+    p.add_argument("--alpha-warmup-start", type=int, default=0,
+                   help="hold alpha at alpha_start for this many steps (relative to start_step) "
+                        "BEFORE the linear ramp begins. From-0 alternating: random-order warmup "
+                        "before the MLP-order curriculum (e.g. 5000).")
     p.add_argument("--alpha-ramp-from-resume", action="store_true",
                    help="ramp alpha over alpha_warmup_steps starting at the resume point (skip the "
                         "absolute-step resume-alpha compensation). Reproduces the v3 continuation schedule "
