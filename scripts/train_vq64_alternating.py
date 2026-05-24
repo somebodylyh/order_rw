@@ -96,3 +96,166 @@ def evaluate_with_mlp(model, val_tokens, B, *, mlp, device, batch_size, max_eval
         losses.append(float(loss.item()))
     cols["val_mlp_order"] = float(np.mean(losses))
     return cols
+
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--data-train", required=True)
+    p.add_argument("--data-val", required=True)
+    p.add_argument("--meta", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.add_argument("--max-steps", type=int, default=30000)
+    p.add_argument("--warmup-start", type=int, default=3000, help="alpha=0 until this step (random warmup)")
+    p.add_argument("--alpha-ramp", type=int, default=10000)
+    p.add_argument("--alpha-max", type=float, default=0.9)
+    p.add_argument("--refresh-interval", type=int, default=3000)
+    p.add_argument("--first-refresh", type=int, default=3000, help="step of the first refresh (== warmup end)")
+    p.add_argument("--extract-n-images", type=int, default=500)
+    p.add_argument("--extract-m-passes", type=int, default=3)
+    p.add_argument("--mlp-tau", type=float, default=0.5)
+    p.add_argument("--mlp-top-k", type=int, default=4)
+    p.add_argument("--mlp-refresh-mode", choices=["finetune", "scratch"], default="finetune")
+    p.add_argument("--distill-n-orders", type=int, default=200)
+    p.add_argument("--distill-epochs", type=int, default=60)
+    p.add_argument("--distill-tau-t", type=float, default=0.5)
+    p.add_argument("--distill-tau-train", type=float, default=0.5)
+    p.add_argument("--batch-size", type=int, default=16)
+    p.add_argument("--grad-accum", type=int, default=16)
+    p.add_argument("--lr", type=float, default=1e-4)
+    p.add_argument("--min-lr", type=float, default=1e-5)
+    p.add_argument("--warmup-iters", type=int, default=100)
+    p.add_argument("--weight-decay", type=float, default=0.1)
+    p.add_argument("--beta1", type=float, default=0.9)
+    p.add_argument("--beta2", type=float, default=0.99)
+    p.add_argument("--grad-clip", type=float, default=1.0)
+    p.add_argument("--eval-interval", type=int, default=1000)
+    p.add_argument("--max-eval-batches", type=int, default=16)
+    p.add_argument("--save-steps", type=str, default="3000,15000,30000")
+    p.add_argument("--device", default="cuda:0")
+    p.add_argument("--seed", type=int, default=42)
+    return p.parse_args()
+
+
+def main():
+    args = parse_args()
+    out = Path(args.output_dir); out.mkdir(parents=True, exist_ok=True)
+    torch.manual_seed(args.seed); np.random.seed(args.seed)
+    rng = np.random.default_rng(args.seed)
+    device = torch.device(args.device)
+
+    with open(args.meta, "rb") as f: meta = pickle.load(f)
+    tokens_per_image = int(meta["tokens_per_image"]); assert tokens_per_image == N_BLOCKS
+    train_mm = np.memmap(args.data_train, dtype=np.uint16, mode="r")
+    val_mm = np.memmap(args.data_val, dtype=np.uint16, mode="r")
+    n_train = len(train_mm) // N_BLOCKS
+    n_val = min(2000, len(val_mm) // N_BLOCKS)
+    val_tokens = torch.from_numpy(
+        np.asarray(val_mm[:n_val * N_BLOCKS], dtype=np.int64).reshape(n_val, N_BLOCKS))
+
+    model = AOGPT(AOGPTConfig(**DEFAULT_MODEL_ARGS)).to(device)   # FROM-0 random init
+    model_args = dict(DEFAULT_MODEL_ARGS)
+    optimizer = model.configure_optimizers(args.weight_decay, args.lr,
+                                           (args.beta1, args.beta2), args.device.split(":")[0])
+    model.train()
+
+    json.dump(vars(args), open(out / "config.json", "w"), indent=2)
+    tsv = out / "eval_curve.tsv"
+    header = ("step\ttrain_loss\talpha\tlr\tval_random\tval_raster\tval_hilbert\t"
+              "val_Bcov_balanced\tval_distance_only_coverage\tval_rw_top4_eps0\t"
+              "val_rw_eps015\tval_rw_topk8\tval_mlp_order\n")
+    if not tsv.exists(): tsv.write_text(header)
+    log_f = open(out / "train_log.txt", "a")
+    def log(m): print(m, flush=True); log_f.write(m + "\n"); log_f.flush()
+    save_steps = {int(x) for x in args.save_steps.split(",") if x}
+
+    rw_mlp = None          # born at first refresh
+    B = np.zeros((N_BLOCKS, N_BLOCKS), dtype=np.float64)   # placeholder until first refresh
+    next_refresh = args.first_refresh
+    log(f"[start] FROM-0 alternating max_steps={args.max_steps} warmup_start={args.warmup_start} "
+        f"refresh_interval={args.refresh_interval} eff_batch={args.batch_size*args.grad_accum}")
+
+    def get_batch():
+        idxs = rng.integers(0, n_train, size=args.batch_size)
+        toks = np.stack([np.asarray(train_mm[i*N_BLOCKS:(i+1)*N_BLOCKS], dtype=np.int64) for i in idxs])
+        return torch.from_numpy(toks).to(device, non_blocking=True)
+
+    def run_eval(step, train_loss, lr, alpha):
+        cols = evaluate_with_mlp(model, val_tokens, B, mlp=rw_mlp, device=device,
+                                 batch_size=args.batch_size, max_eval_batches=args.max_eval_batches,
+                                 step=step, tau=args.mlp_tau, top_k=args.mlp_top_k)
+        with open(tsv, "a") as f:
+            f.write(f"{step}\t{train_loss:.4f}\t{alpha:.4f}\t{lr:.2e}\t"
+                    f"{cols['val_random']:.4f}\t{cols['val_raster']:.4f}\t{cols['val_hilbert']:.4f}\t"
+                    f"{cols['val_Bcov_balanced']:.4f}\t{cols['val_distance_only_coverage']:.4f}\t"
+                    f"{cols['val_rw_top4_eps0']:.4f}\t{cols['val_rw_eps015']:.4f}\t"
+                    f"{cols['val_rw_topk8']:.4f}\t{cols['val_mlp_order']:.4f}\n")
+        log(f"[eval] step={step} train={train_loss:.4f} a={alpha:.3f} "
+            f"rnd={cols['val_random']:.4f} ras={cols['val_raster']:.4f} mlp={cols['val_mlp_order']:.4f}")
+
+    t0 = time.time(); running = []
+    for step in range(args.max_steps + 1):
+        lr_now = get_lr(step, args)
+        for g in optimizer.param_groups: g["lr"] = lr_now
+        alpha = get_alpha_alt(step, warmup_start=args.warmup_start, ramp=args.alpha_ramp,
+                              alpha_max=args.alpha_max)
+
+        if step > 0:
+            optimizer.zero_grad(set_to_none=True)
+            for micro in range(args.grad_accum):
+                x = get_batch()
+                random_orders = torch.stack([torch.randperm(N_BLOCKS, device=device)
+                                             for _ in range(args.batch_size)])
+                use_mlp = (rw_mlp is not None) and (alpha > 0.0)
+                if not use_mlp:
+                    block_orders = random_orders
+                else:
+                    mlp_orders = P.sample_orders_batched_mlp(
+                        B, args.batch_size, rw_mlp, "original",
+                        base_seed=args.seed * 100000000 + step * 1000 + micro,
+                        device=device, tau=args.mlp_tau, top_k=args.mlp_top_k)
+                    crng = torch.Generator(device=device)
+                    crng.manual_seed(args.seed * 7 + step * 1000 + micro)
+                    pick = torch.rand(args.batch_size, generator=crng, device=device) < alpha
+                    block_orders = torch.where(pick.unsqueeze(1), mlp_orders, random_orders)
+                loss = _forward_with_block_orders(model, x, block_orders,
+                                                  fixed_token_perm=None, inv_block_perm=None)
+                (loss / args.grad_accum).backward()
+                running.append(float(loss.item()))
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+            optimizer.step()
+
+        if step % args.eval_interval == 0:
+            run_eval(step, float(np.mean(running[-100:])) if running else float("nan"), lr_now, alpha)
+
+        # ---- refresh + distill (mirror train_clean_aogpt.py:1008-1049) ----
+        if step > 0 and step >= next_refresh and step <= args.max_steps:
+            B = extract_B_from_model(model, train_mm, tokens_per_image, args.extract_n_images,
+                                     args.extract_m_passes, args.device, seed=args.seed + step)
+            np.save(out / f"A_global_step{step}.npy", B.T)   # A = B^T
+            init = rw_mlp if (args.mlp_refresh_mode == "finetune" and rw_mlp is not None) else None
+            seed_r = args.seed * 100000 + step
+            rw_mlp, ddiag = distill_order_mlp(
+                B, mlp=init, n_orders=args.distill_n_orders, tau_T=args.distill_tau_t,
+                tau_train=args.distill_tau_train, epochs=args.distill_epochs,
+                seed=seed_r, device=str(device))
+            rdiag = image_refresh_diagnostics(B, rw_mlp, tau=args.mlp_tau, top_k=args.mlp_top_k,
+                                              seed=seed_r + 1, device=str(device))
+            torch.save(rw_mlp.state_dict(), out / f"beta_step{step}.pt")
+            with (out / "refresh_diagnostics.jsonl").open("a") as f:
+                f.write(json.dumps(dict(step=int(step), refresh_mode=args.mlp_refresh_mode,
+                                        **ddiag, **rdiag)) + "\n")
+            log(f"[Refresh+Distill @ {step}] val_kl={ddiag['val_kl']} top1={ddiag['top1']} "
+                f"top4={ddiag['top4']} | p_le1={rdiag['p_le1']} top4_follow={rdiag['top4_follow']} "
+                f"B_edge={rdiag['B_edge_ratio']} ent={rdiag['rollout_entropy']}")
+            next_refresh = step + args.refresh_interval
+
+        if step > 0 and step in save_steps:
+            torch.save({"model": model.state_dict(), "model_args": model_args, "step": step,
+                        "config": vars(args)}, out / f"ckpt_step{step}.pt")
+            log(f"[save] ckpt_step{step}.pt")
+
+    log(f"[done] step {args.max_steps}; eval_curve={tsv}"); log_f.close()
+
+
+if __name__ == "__main__":
+    main()
