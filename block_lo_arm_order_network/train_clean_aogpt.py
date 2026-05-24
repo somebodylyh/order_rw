@@ -792,12 +792,31 @@ def main(default_run_kind="baseline"):
     idx_train = idx_model[split["train_indices"]]
     if rw_policy == "mlp_cdl":
         if args.mlp_alternating:
-            # placeholder until the first refresh; the refresh loop (re-extract B + re-distill beta)
-            # overwrites B and trains rw_mlp — that wiring lives in the refresh block, not here.
-            A_global = np.zeros((N, N), dtype=np.float32)
-            B = A_global
-            log("[mlp_cdl ALTERNATING] placeholder zero-B; first refresh extracts B from theta + "
-                "distills beta. Use --refresh-ema-beta 0.0 so B is the fresh extraction.")
+            if start_step > 0:
+                # Resume: re-extract B from the current (resumed) model so the MLP has a real
+                # substrate immediately, instead of a zero placeholder that wastes steps.
+                if args.refresh_data_source == "random_train":
+                    extract_n = min(args.refresh_n_chunks, len(idx_train))
+                    rng = np.random.RandomState(start_step + args.seed)
+                    extract_chunks = idx_train[rng.choice(len(idx_train), size=extract_n, replace=False)]
+                    log(f"[mlp_cdl ALTERNATING resume] Extracting B from current model on "
+                        f"{extract_n} random train chunks...")
+                else:
+                    extract_n = min(args.refresh_n_chunks, len(idx_eval_model))
+                    extract_chunks = idx_eval_model
+                    log(f"[mlp_cdl ALTERNATING resume] Extracting B from current model on "
+                        f"{extract_n} eval chunks...")
+                B, A_global, elapsed, _ = refresh_rw_graph(
+                    model, extract_chunks, clean_perm, device, None,
+                    n_chunks=extract_n, ema_beta=0.0,
+                )
+                log(f"[mlp_cdl ALTERNATING resume] B extracted in {elapsed:.1f}s; "
+                    f"MLP-guided sampling active immediately.")
+            else:
+                A_global = np.zeros((N, N), dtype=np.float32)
+                B = A_global
+                log("[mlp_cdl ALTERNATING] placeholder zero-B; first refresh extracts B from theta + "
+                    "distills beta. Use --refresh-ema-beta 0.0 so B is the fresh extraction.")
         else:
             if args.refresh_interval > 0:
                 raise SystemExit("fixed mlp_cdl requires a fixed B; do not set --refresh-interval > 0")
