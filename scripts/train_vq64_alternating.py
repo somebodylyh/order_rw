@@ -56,3 +56,13 @@ def extract_B_from_model(model, data_tokens, tokens_per_image, n_images, m_passe
         model.train()
     B = build_directed_graph(np.ascontiguousarray(A.astype(np.float64)))
     return B
+
+
+def get_alpha_alt(step, *, warmup_start, ramp, alpha_max):
+    """0 until warmup_start; linear ramp to alpha_max over `ramp` steps; then flat."""
+    if step < warmup_start:
+        return 0.0
+    if ramp <= 0:
+        return alpha_max
+    frac = (step - warmup_start) / float(ramp)
+    return float(min(alpha_max, alpha_max * max(0.0, frac)))

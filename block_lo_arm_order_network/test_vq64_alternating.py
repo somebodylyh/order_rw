@@ -73,3 +73,17 @@ def test_extract_B_from_model_shape_and_determinism():
     assert np.allclose(np.diag(B1), 0.0)
     assert np.isfinite(B1).all()
     assert np.allclose(B1, B2), "same seed must give identical B"
+
+
+# ---- Task 3: alpha schedule ----
+
+def test_alpha_schedule_delayed_warmup():
+    T = _load_trainer()
+    # warmup_start=3000, ramp=10000, alpha_max=0.9  -> 0 until 3k, 0.9 at 13k, flat after
+    f = lambda s: T.get_alpha_alt(s, warmup_start=3000, ramp=10000, alpha_max=0.9)
+    assert f(0) == 0.0
+    assert f(2999) == 0.0
+    assert f(3000) == 0.0
+    assert abs(f(8000) - 0.45) < 1e-6   # halfway through ramp
+    assert abs(f(13000) - 0.9) < 1e-6
+    assert abs(f(30000) - 0.9) < 1e-6
