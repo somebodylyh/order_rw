@@ -38,3 +38,38 @@ def test_image_refresh_diagnostics_keys_and_locality():
     assert rec["p_le1"] > 0.10, rec["p_le1"]
     assert rec["B_edge_ratio"] > 1.3, rec["B_edge_ratio"]
     assert 0 < rec["rollout_unique"] <= 32
+
+
+# ---- Task 2: extraction wrapper tests ----
+
+import importlib.util
+import pytest as _pytest_module  # noqa: E402
+
+
+def _load_trainer():
+    spec = importlib.util.spec_from_file_location(
+        "train_vq64_alternating", str(_REPO / "scripts" / "train_vq64_alternating.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+CKPT = _REPO / "probe_results_image/e2_vq_round2_20k/cont_random/ckpt_step20000.pt"
+VAL  = _REPO / "block_lo_arm_order_network/data/Imagenet32VQ_f4_800k_seq64/val.bin"
+
+
+@_pytest_module.mark.skipif(not (CKPT.exists() and VAL.exists()), reason="needs image ckpt+data")
+def test_extract_B_from_model_shape_and_determinism():
+    T = _load_trainer()
+    import torch
+    dev = "cuda:0" if torch.cuda.is_available() else "cpu"
+    model, model_args = T.build_or_load_model_for_extraction(str(CKPT), dev)
+    data = np.memmap(str(VAL), dtype=np.uint16, mode="r")
+    B1 = T.extract_B_from_model(model, data, tokens_per_image=64, n_images=20, m_passes=2,
+                                device=dev, seed=123)
+    B2 = T.extract_B_from_model(model, data, tokens_per_image=64, n_images=20, m_passes=2,
+                                device=dev, seed=123)
+    assert B1.shape == (64, 64)
+    assert np.allclose(np.diag(B1), 0.0)
+    assert np.isfinite(B1).all()
+    assert np.allclose(B1, B2), "same seed must give identical B"
