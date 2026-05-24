@@ -87,3 +87,27 @@ def test_alpha_schedule_delayed_warmup():
     assert abs(f(8000) - 0.45) < 1e-6   # halfway through ramp
     assert abs(f(13000) - 0.9) < 1e-6
     assert abs(f(30000) - 0.9) < 1e-6
+
+
+# ---- Task 4: eval with val_mlp_order ----
+
+def test_evaluate_with_mlp_order_columns_and_guard():
+    T = _load_trainer()
+    import torch
+    dev = "cpu"
+    model = T.AOGPT(T.AOGPTConfig(**T.DEFAULT_MODEL_ARGS)).to(dev).eval()
+    val_tokens = torch.randint(0, T.DEFAULT_MODEL_ARGS["vocab_size"], (8, 64), dtype=torch.long)
+    B = build_directed_graph(_local_A())
+
+    # before first refresh: mlp=None -> val_mlp_order present, equals val_random (guard)
+    cols0 = T.evaluate_with_mlp(model, val_tokens, B, mlp=None, device=dev,
+                                batch_size=4, max_eval_batches=2, step=0, tau=0.5, top_k=4)
+    assert "val_mlp_order" in cols0
+    assert abs(cols0["val_mlp_order"] - cols0["val_random"]) < 1e-6
+
+    # after a (toy) distill: mlp present -> val_mlp_order is a finite NLL
+    mlp, _ = distill_order_mlp(B, mlp=None, n_orders=20, epochs=3, seed=0, device=dev)
+    cols1 = T.evaluate_with_mlp(model, val_tokens, B, mlp=mlp, device=dev,
+                                batch_size=4, max_eval_batches=2, step=0, tau=0.5, top_k=4)
+    assert np.isfinite(cols1["val_mlp_order"])
+    assert set(["val_random", "val_raster", "val_mlp_order"]).issubset(cols1)

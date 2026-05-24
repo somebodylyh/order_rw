@@ -66,3 +66,33 @@ def get_alpha_alt(step, *, warmup_start, ramp, alpha_max):
         return alpha_max
     frac = (step - warmup_start) / float(ramp)
     return float(min(alpha_max, alpha_max * max(0.0, frac)))
+
+
+@torch.no_grad()
+def evaluate_with_mlp(model, val_tokens, B, *, mlp, device, batch_size, max_eval_batches,
+                      step, tau=0.5, top_k=4):
+    """8 fixed-order NLLs (reused) + val_mlp_order. mlp=None -> val_mlp_order == val_random."""
+    raster_order = torch.arange(N_BLOCKS, device=device)
+    cols = {f"val_{k}": v for k, v in evaluate_7orders(
+        model, val_tokens, B, raster_order, device, batch_size, max_eval_batches, step,
+        fixed_token_perm=None, inv_block_perm=None).items()}
+
+    if mlp is None:
+        cols["val_mlp_order"] = cols["val_random"]
+        return cols
+
+    model.eval()
+    V = val_tokens.shape[0]
+    n_batches = min(max_eval_batches, math.ceil(V / batch_size))
+    losses = []
+    for bi in range(n_batches):
+        s, e = bi * batch_size, min((bi + 1) * batch_size, V)
+        x = val_tokens[s:e].to(device)
+        mlp_orders = P.sample_orders_batched_mlp(
+            B, x.shape[0], mlp, "original", base_seed=7_000_000 + step + bi,
+            device=torch.device(device), tau=tau, top_k=top_k)
+        loss = _forward_with_block_orders(model, x, mlp_orders,
+                                          fixed_token_perm=None, inv_block_perm=None)
+        losses.append(float(loss.item()))
+    cols["val_mlp_order"] = float(np.mean(losses))
+    return cols
