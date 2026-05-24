@@ -22,17 +22,19 @@ import attn_order_mlp_policy as P
 from train_vq64_round2 import _forward_with_block_orders, evaluate_7orders, get_lr
 
 N_BLOCKS = 64
-DEFAULT_MODEL_ARGS = dict(block_size=64, vocab_size=8192, n_layer=4, n_head=8,
-                          n_embd=256, dropout=0.0, bias=False,
-                          block_order_block_len=1, order_impl="block")
+GRID = 8  # 8×8 block grid (both for 1-token and 4-token block_len)
+DEFAULT_MODEL_ARGS = dict(vocab_size=8192, n_layer=4, n_head=8,
+                          n_embd=256, dropout=0.0, bias=False, order_impl="block")
 
 
 def build_or_load_model_for_extraction(ckpt_path, device):
     """Test/utility: load an existing AOGPT ckpt (used only by extraction tests)."""
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     ma = ckpt["model_args"]
-    keys = list(DEFAULT_MODEL_ARGS.keys())
-    model_args = {k: ma[k] for k in keys if k in ma}
+    # Use the ckpt's own block_size/block_order_block_len + shared defaults for the rest
+    model_args = dict(DEFAULT_MODEL_ARGS,
+                      block_size=ma["block_size"],
+                      block_order_block_len=ma.get("block_order_block_len", 1))
     model = AOGPT(AOGPTConfig(**model_args))
     sd = ckpt["model"]
     if all(k.startswith("_orig_mod.") for k in sd):
@@ -133,6 +135,7 @@ def parse_args():
     p.add_argument("--save-steps", type=str, default="3000,15000,30000")
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--block-len", type=int, default=None, help="tokens per block (1=8x8 single-token, 4=2x2 patch); inferred from meta if omitted")
     return p.parse_args()
 
 
@@ -144,16 +147,19 @@ def main():
     device = torch.device(args.device)
 
     with open(args.meta, "rb") as f: meta = pickle.load(f)
-    tokens_per_image = int(meta["tokens_per_image"]); assert tokens_per_image == N_BLOCKS
+    tokens_per_image = int(meta["tokens_per_image"])
+    block_len = args.block_len if args.block_len is not None else int(meta.get("block_order_block_len", 1))
+    block_size = N_BLOCKS * block_len
+    assert tokens_per_image == block_size, f"tokens_per_image={tokens_per_image} != block_size={block_size}"
     train_mm = np.memmap(args.data_train, dtype=np.uint16, mode="r")
     val_mm = np.memmap(args.data_val, dtype=np.uint16, mode="r")
-    n_train = len(train_mm) // N_BLOCKS
-    n_val = min(2000, len(val_mm) // N_BLOCKS)
+    n_train = len(train_mm) // block_size
+    n_val = min(2000, len(val_mm) // block_size)
     val_tokens = torch.from_numpy(
-        np.asarray(val_mm[:n_val * N_BLOCKS], dtype=np.int64).reshape(n_val, N_BLOCKS))
+        np.asarray(val_mm[:n_val * block_size], dtype=np.int64).reshape(n_val, block_size))
 
-    model = AOGPT(AOGPTConfig(**DEFAULT_MODEL_ARGS)).to(device)   # FROM-0 random init
-    model_args = dict(DEFAULT_MODEL_ARGS)
+    model_args = dict(DEFAULT_MODEL_ARGS, block_size=block_size, block_order_block_len=block_len)
+    model = AOGPT(AOGPTConfig(**model_args)).to(device)   # FROM-0 random init
     optimizer = model.configure_optimizers(args.weight_decay, args.lr,
                                            (args.beta1, args.beta2), args.device.split(":")[0])
     model.train()
@@ -176,7 +182,7 @@ def main():
 
     def get_batch():
         idxs = rng.integers(0, n_train, size=args.batch_size)
-        toks = np.stack([np.asarray(train_mm[i*N_BLOCKS:(i+1)*N_BLOCKS], dtype=np.int64) for i in idxs])
+        toks = np.stack([np.asarray(train_mm[i*block_size:(i+1)*block_size], dtype=np.int64) for i in idxs])
         return torch.from_numpy(toks).to(device, non_blocking=True)
 
     def run_eval(step, train_loss, lr, alpha):

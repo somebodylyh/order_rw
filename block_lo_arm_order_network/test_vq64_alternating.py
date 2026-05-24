@@ -12,6 +12,11 @@ from train_attn_order_mlp import OrderMLP
 from attn_order_distill import distill_order_mlp
 import attn_order_image_diag as D
 
+# Test config for single-token mode (block_len=1, block_size=64)
+TEST_MODEL_ARGS = dict(block_size=64, vocab_size=8192, n_layer=4, n_head=8,
+                       n_embd=256, dropout=0.0, bias=False,
+                       block_order_block_len=1, order_impl="block")
+
 
 def _local_A(N=64, grid=8, seed=0):
     """A 64x64 with locality: each node attends mostly to its 4-neighbours on an 8x8 grid."""
@@ -95,8 +100,8 @@ def test_evaluate_with_mlp_order_columns_and_guard():
     T = _load_trainer()
     import torch
     dev = "cpu"
-    model = T.AOGPT(T.AOGPTConfig(**T.DEFAULT_MODEL_ARGS)).to(dev).eval()
-    val_tokens = torch.randint(0, T.DEFAULT_MODEL_ARGS["vocab_size"], (8, 64), dtype=torch.long)
+    model = T.AOGPT(T.AOGPTConfig(**TEST_MODEL_ARGS)).to(dev).eval()
+    val_tokens = torch.randint(0, TEST_MODEL_ARGS["vocab_size"], (8, 64), dtype=torch.long)
     B = build_directed_graph(_local_A())
 
     # before first refresh: mlp=None -> val_mlp_order present, equals val_random (guard)
