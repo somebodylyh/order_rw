@@ -49,6 +49,9 @@ def extract_B_from_model(model, data_tokens, tokens_per_image, n_images, m_passe
 
     Reuses extract_image_attention_e2.extract_a_global verbatim; seeds torch so the random
     AO orders (hence the snapshot) are reproducible.
+
+    When block_len > 1, token-level attention (T×T) is aggregated to block-level (64×64)
+    by mean-pooling within each block before building the directed graph.
     """
     was_training = model.training
     model.eval()
@@ -56,6 +59,11 @@ def extract_B_from_model(model, data_tokens, tokens_per_image, n_images, m_passe
     A = extract_a_global(model, data_tokens, tokens_per_image, n_images, m_passes, device)
     if was_training:
         model.train()
+    # Aggregate token-level → block-level when block_len > 1
+    T = A.shape[0]
+    blk_len = T // N_BLOCKS
+    if blk_len > 1:
+        A = A.reshape(N_BLOCKS, blk_len, N_BLOCKS, blk_len).mean(axis=(1, 3))
     B = build_directed_graph(np.ascontiguousarray(A.astype(np.float64)))
     return B
 
