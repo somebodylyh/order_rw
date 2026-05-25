@@ -2,6 +2,7 @@
 See docs/superpowers/specs/2026-05-25-hidden-residual-order-diagnostic-design.md."""
 import numpy as np
 from directed_graph_policy import build_directed_graph
+from attn_order_teacher import rollout_order, teacher_scores
 
 N_BLOCKS = 64
 BLOCK_LEN = 4
@@ -17,9 +18,6 @@ def build_B_set(A_all, frame):
     B_x_list = [build_directed_graph(A_all[i]) for i in range(A_all.shape[0])]
     B_G = build_directed_graph(A_all.mean(axis=0))
     return B_x_list, B_G, frame
-
-
-from attn_order_teacher import rollout_order, teacher_scores
 
 def canonical_states(B_G, t_list=T_LIST):
     """Guard 2: ONE global greedy C-D+L rollout over B_G defines the partial states used
@@ -45,6 +43,8 @@ def residual_target(B_x, B_G, states, frame_x, frame_g, mode="C-D+L"):
     for t, (S, U, last) in states.items():
         q_x, U_x = teacher_scores(B_x, S, U, last, mode=mode)
         q_g, U_g = teacher_scores(B_G, S, U, last, mode=mode)
+        # Defensive: both teacher_scores calls get the same fixed (S,U,last) from
+        # canonical_states, so U_x/U_g must match; this catches any future refactor break.
         assert np.array_equal(U_x, U_g), "candidate sets diverged (state not fixed)"
         out[t] = {"U": U_x, "r": (q_x - q_g), "s_x": q_x, "s_g": q_g}
     return out
@@ -64,14 +64,16 @@ def gate_metrics(A_all, A_half_a, A_half_b, t_list=T_LIST, frame=PHYS_FRAME, snr
         r_sig.append(np.abs(out[t_sig]["r"]).mean())
     r_norm = float(np.mean(r_sig))
     # noise floor: same quantity from two pass-halves' graphs vs each other
-    B_a, _, _ = build_B_set(A_half_a, frame=frame)
-    B_b, _, _ = build_B_set(A_half_b, frame=frame)
     B_a_mean = build_directed_graph(np.asarray(A_half_a, np.float64).mean(0))
     B_b_mean = build_directed_graph(np.asarray(A_half_b, np.float64).mean(0))
     noise = np.abs(residual_target(B_a_mean, B_b_mean, states, frame, frame)[t_sig]["r"]).mean()
     noise_floor = float(noise)
     mean_abs = float(np.mean([np.abs(B_x - B_G).mean() for B_x in B_x_list]))
-    corr = float(np.mean([np.corrcoef(B_x.ravel(), B_G.ravel())[0, 1] for B_x in B_x_list]))
+    def _safe_corr(a, b):
+        if a.std() < 1e-12 or b.std() < 1e-12:
+            return 0.0
+        return float(np.corrcoef(a.ravel(), b.ravel())[0, 1])
+    corr = float(np.mean([_safe_corr(B_x, B_G) for B_x in B_x_list]))
     snr = r_norm / (noise_floor + 1e-9)
     return {"r_norm": r_norm, "noise_floor": noise_floor, "snr": snr,
             "mean_abs_Bx_minus_BG": mean_abs, "corr_Bx_BG": corr,
