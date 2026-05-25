@@ -2,7 +2,6 @@
 """Phase-1 hidden-residual order diagnostic — orchestrator.
 Runs the staged pipeline (pre-gate -> 1a -> 1b -> order-effects) on a clean-line text ckpt.
 NO training. See docs/superpowers/specs/2026-05-25-hidden-residual-order-diagnostic-design.md."""
-from __future__ import annotations
 import argparse, json, sys
 from pathlib import Path
 import numpy as np
@@ -14,12 +13,13 @@ sys.path.insert(0, str(_REPO / "nanogpt-learned-order"))
 
 from AOGPT import AOGPT, AOGPTConfig
 from clean_training_protocol import (build_clean_block_permutation,
-                                     phys_to_model_idx_clean, expand_model_blocks_to_token_order)
+                                     phys_to_model_idx_clean)
 from training_utils import load_train_chunks
 from train_clean_aogpt import extract_A_matrices
 import hidden_residual_graph as G
 import hidden_residual_hidden as Hd
 import hidden_residual_probe as P
+from attn_order_teacher import teacher_components
 
 
 def load_clean_ckpt(path, device):
@@ -30,7 +30,11 @@ def load_clean_ckpt(path, device):
     sd = ckpt["model"]
     if all(k.startswith("_orig_mod.") for k in sd):
         sd = {k[len("_orig_mod."):]: v for k, v in sd.items()}
-    model.load_state_dict(sd, strict=False); model.eval()
+    incompatible = model.load_state_dict(sd, strict=False)
+    if incompatible.missing_keys or incompatible.unexpected_keys:
+        print(f"WARNING load_state_dict: missing={incompatible.missing_keys[:5]} "
+              f"unexpected={incompatible.unexpected_keys[:5]}", flush=True)
+    model.eval()
     # Try several places the permute_seed may be stored
     if isinstance(ckpt.get("config"), dict) and "permute_seed" in ckpt["config"]:
         seed = int(ckpt["config"]["permute_seed"])
@@ -46,10 +50,12 @@ def main():
     p.add_argument("--ckpt", required=True)
     p.add_argument("--tag", required=True)
     p.add_argument("--n-chunks", type=int, default=256)
-    p.add_argument("--m-passes", type=int, default=4)
+    p.add_argument("--m-passes", type=int, default=4, help="attention extraction passes; >=2 required, even preferred (split into 2 halves for noise floor)")
     p.add_argument("--device", default="cpu")
     p.add_argument("--out-root", default=str(_REPO / "block_lo_arm_order_network/probe_results/hidden_residual_diag"))
     args = p.parse_args()
+    if args.m_passes < 2:
+        p.error("--m-passes must be >= 2 (need >=1 pass per half for the split-pass noise floor)")
     dev = torch.device(args.device)
     out = Path(args.out_root) / args.tag; out.mkdir(parents=True, exist_ok=True)
 
@@ -103,7 +109,6 @@ def main():
     r_mat = np.stack([t[t_top]["r"] for t in targets])                       # (n, |U|)
     Ho = h_oracle[:, U_top, :]                                               # (n, |U|, E)
     # B1 global phi: C-D+L components of B_G over U (broadcast across samples)
-    from attn_order_teacher import teacher_components
     S, U, last = states[t_top]
     C, D, L, _ = teacher_components(B_G, S, U, last)
     phi_g = np.stack([C, D, L], axis=1)[None].repeat(len(targets), 0)        # (n,|U|,3)
