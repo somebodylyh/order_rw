@@ -45,3 +45,16 @@ def test_causal_interaction_features_shape():
     feats = build_causal_features(h_state, cand_emb)
     # [emb (P), h_state broadcast (E), emb ⊙ (W h_state) (P)] -> per (n,k)
     assert feats.shape[0] == n * k and feats.shape[1] == P + E + P
+
+def test_order_effect_zero_residual_no_change_and_large_residual_changes():
+    from hidden_residual_probe import order_effect
+    rng = np.random.default_rng(4)
+    N = 64
+    s_g = rng.normal(0, 1, N)
+    # zero residual -> identical order
+    z = order_effect(s_g, np.zeros(N))
+    assert z["tau_vs_global"] > 0.999 and z["argmax_changed"] == 0
+    # large residual -> order changes
+    big = order_effect(s_g, rng.normal(0, 5, N))
+    assert big["tau_vs_global"] < 0.95
+    assert 0.0 <= big["topk_changed_ratio"] <= 1.0

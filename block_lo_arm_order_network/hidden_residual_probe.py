@@ -55,3 +55,22 @@ def residual_probe_causal(r, causal_feats, seed=0):
     """1b causal head: R^2 of predicting r from build_causal_features output."""
     r = np.asarray(r, np.float64)
     return {"R2_causal": _r2_flat(causal_feats, r.reshape(-1), seed)}
+
+from scipy.stats import kendalltau
+
+def order_effect(s_g, delta_h, top_k=8):
+    """Compare descending-score orders from s_g vs s_g+delta_h (single state, N candidates)."""
+    s_g = np.asarray(s_g, np.float64); delta_h = np.asarray(delta_h, np.float64)
+    order_g = np.argsort(-s_g); order_h = np.argsort(-(s_g + delta_h))
+    tau = float(kendalltau(order_g, order_h).correlation)
+    rank_g = np.empty_like(order_g); rank_g[order_g] = np.arange(len(s_g))
+    rank_h = np.empty_like(order_h); rank_h[order_h] = np.arange(len(s_g))
+    displacement = float(np.abs(rank_g - rank_h).mean())
+    topk_changed = float(len(set(order_g[:top_k].tolist()) ^ set(order_h[:top_k].tolist())) / (2 * top_k))
+    argmax_changed = int(order_g[0] != order_h[0])
+    # margin ratio: |delta_h| vs the gap between adjacent global scores
+    gaps = np.abs(np.diff(np.sort(s_g)[::-1]))
+    margin_ratio = float(np.abs(delta_h).mean() / (gaps.mean() + 1e-9))
+    return {"tau_vs_global": tau, "mean_displacement": displacement,
+            "topk_changed_ratio": topk_changed, "argmax_changed": argmax_changed,
+            "margin_ratio": margin_ratio}
