@@ -17,3 +17,20 @@ def build_B_set(A_all, frame):
     B_x_list = [build_directed_graph(A_all[i]) for i in range(A_all.shape[0])]
     B_G = build_directed_graph(A_all.mean(axis=0))
     return B_x_list, B_G, frame
+
+
+from attn_order_teacher import rollout_order
+
+def canonical_states(B_G, t_list=T_LIST):
+    """Guard 2: ONE global greedy C-D+L rollout over B_G defines the partial states used
+    for EVERY sample. Returns {t: (S_t:tuple, U_t:tuple, last:int|None)}."""
+    order = rollout_order(np.asarray(B_G, dtype=np.float64), mode="C-D+L",
+                          greedy=True, standardize=True)
+    order = [int(v) for v in order]
+    states = {}
+    for t in t_list:
+        S = tuple(order[:t])
+        U = tuple(order[t:])
+        last = order[t - 1] if t > 0 else None
+        states[t] = (S, U, last)
+    return states
