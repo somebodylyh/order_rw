@@ -48,3 +48,31 @@ def residual_target(B_x, B_G, states, frame_x, frame_g, mode="C-D+L"):
         assert np.array_equal(U_x, U_g), "candidate sets diverged (state not fixed)"
         out[t] = {"U": U_x, "r": (q_x - q_g), "s_x": q_x, "s_g": q_g}
     return out
+
+
+def gate_metrics(A_all, A_half_a, A_half_b, t_list=T_LIST, frame=PHYS_FRAME, snr_threshold=1.0):
+    """Pre-gate: does per-sample B_x vary, and is r_x above the split-pass noise floor?
+    A_all: all-pass mean substrate; A_half_a/A_half_b: the two pass-halves (2-vs-2 at M=4).
+    Returns dict of metrics + bool 'passed'."""
+    B_x_list, B_G, fr = build_B_set(A_all, frame=frame)
+    states = canonical_states(B_G, t_list=t_list)
+    # signal: mean over samples of |r_x| at the largest probed t (most context)
+    t_sig = max(t_list)
+    r_sig = []
+    for B_x in B_x_list:
+        out = residual_target(B_x, B_G, states, fr, fr)
+        r_sig.append(np.abs(out[t_sig]["r"]).mean())
+    r_norm = float(np.mean(r_sig))
+    # noise floor: same quantity from two pass-halves' graphs vs each other
+    B_a, _, _ = build_B_set(A_half_a, frame=frame)
+    B_b, _, _ = build_B_set(A_half_b, frame=frame)
+    B_a_mean = build_directed_graph(np.asarray(A_half_a, np.float64).mean(0))
+    B_b_mean = build_directed_graph(np.asarray(A_half_b, np.float64).mean(0))
+    noise = np.abs(residual_target(B_a_mean, B_b_mean, states, frame, frame)[t_sig]["r"]).mean()
+    noise_floor = float(noise)
+    mean_abs = float(np.mean([np.abs(B_x - B_G).mean() for B_x in B_x_list]))
+    corr = float(np.mean([np.corrcoef(B_x.ravel(), B_G.ravel())[0, 1] for B_x in B_x_list]))
+    snr = r_norm / (noise_floor + 1e-9)
+    return {"r_norm": r_norm, "noise_floor": noise_floor, "snr": snr,
+            "mean_abs_Bx_minus_BG": mean_abs, "corr_Bx_BG": corr,
+            "passed": bool(snr >= snr_threshold and r_norm > noise_floor)}

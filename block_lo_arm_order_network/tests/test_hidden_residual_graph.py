@@ -53,3 +53,19 @@ def test_residual_target_frame_guard():
     states = canonical_states(B_G, t_list=[0])
     with pytest.raises(AssertionError):
         residual_target(B_G, B_G, states, "model_block", PHYS_FRAME)
+
+def test_gate_fails_when_no_persample_variation_passes_when_present():
+    from hidden_residual_graph import build_B_set, canonical_states, gate_metrics, PHYS_FRAME, N_BLOCKS
+    rng = np.random.default_rng(3)
+    base = rng.random((N_BLOCKS, N_BLOCKS)).astype(np.float32); np.fill_diagonal(base, 0.0)
+    # NO per-sample variation: every sample identical (B_x == B_G) -> gate fail
+    A_same = np.stack([base] * 8)
+    g_same = gate_metrics(A_same, A_same[:4], A_same[4:], t_list=[0, 16], frame=PHYS_FRAME)
+    assert g_same["passed"] is False
+    assert g_same["r_norm"] < g_same["noise_floor"] + 1e-6
+    # strong per-sample variation -> gate pass
+    A_var = np.stack([base + rng.normal(0, 0.4, base.shape).astype(np.float32) for _ in range(8)])
+    for a in A_var: np.fill_diagonal(a, 0.0)
+    g_var = gate_metrics(A_var, A_var[:4], A_var[4:], t_list=[0, 16], frame=PHYS_FRAME)
+    assert g_var["passed"] is True
+    assert g_var["mean_abs_Bx_minus_BG"] > g_same["mean_abs_Bx_minus_BG"]
