@@ -27,10 +27,9 @@ def test_causal_hidden_per_t_shape():
     torch.manual_seed(0)
     N, bl, E = 4, 2, 16
     m, cfg = _tiny_model(N, bl, E)
-    clean_perm = build_clean_block_permutation(N, seed=42)
     idx_model = torch.randint(0, 32, (3, N * bl))
     canon = torch.arange(N).unsqueeze(0).expand(3, -1).contiguous()
-    Hc = extract_causal_hidden(m, idx_model, clean_perm, torch.device("cpu"), canon, t_list=[0, 2])
+    Hc = extract_causal_hidden(m, idx_model, torch.device("cpu"), canon, t_list=[0, 2])
     assert set(Hc.keys()) == {0, 2}
     assert Hc[0].shape == (3, E) and Hc[2].shape == (3, E)
 

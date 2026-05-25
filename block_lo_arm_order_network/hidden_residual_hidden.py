@@ -6,9 +6,6 @@ import numpy as np
 import torch
 from clean_training_protocol import expand_model_blocks_to_token_order
 
-BLOCK_LEN = 4
-
-@torch.no_grad()
 def _block_len_from(model):
     return int(model.block_order_block_len)
 
@@ -31,7 +28,7 @@ def extract_oracle_hidden(model, idx_model, clean_perm, device, order_model_bloc
     return h_blk_phys
 
 @torch.no_grad()
-def extract_causal_hidden(model, idx_model, clean_perm, device, canonical_order_model_blocks, t_list):
+def extract_causal_hidden(model, idx_model, device, canonical_order_model_blocks, t_list):
     """Returns {t: (n, E)} predictor hidden at the start of block-step t under the FIXED canonical
     order (same order for every sample -> guard 2). predictor hidden is in reveal-rank frame."""
     model.eval()
@@ -43,5 +40,6 @@ def extract_causal_hidden(model, idx_model, clean_perm, device, canonical_order_
     res = {}
     for t in t_list:
         rank = t * bl                     # first token rank of block-step t
+        assert rank < pred.shape[1], f"t={t} out of range (rank {rank} >= T {pred.shape[1]})"
         res[t] = pred[:, rank, :].cpu().numpy()
     return res
