@@ -10,6 +10,7 @@ import torch
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "block_lo_arm_order_network"))
 sys.path.insert(0, str(_REPO / "nanogpt-learned-order"))
+sys.path.insert(0, str(_REPO / "image_order"))
 sys.path.insert(0, str(_REPO / "scripts"))
 
 from AOGPT import AOGPTConfig, AOGPT
@@ -23,8 +24,8 @@ from train_vq64_round2 import _forward_with_block_orders, evaluate_7orders, get_
 
 N_BLOCKS = 64
 GRID = 8  # 8×8 block grid (both for 1-token and 4-token block_len)
-DEFAULT_MODEL_ARGS = dict(vocab_size=8192, n_layer=4, n_head=8,
-                          n_embd=256, dropout=0.0, bias=False, order_impl="block")
+DEFAULT_MODEL_ARGS = dict(vocab_size=8192, n_layer=8, n_head=8,
+                          n_embd=512, dropout=0.0, bias=False, order_impl="block")
 
 
 def build_or_load_model_for_extraction(ckpt_path, device):
@@ -144,6 +145,7 @@ def parse_args():
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--block-len", type=int, default=None, help="tokens per block (1=8x8 single-token, 4=2x2 patch); inferred from meta if omitted")
+    p.add_argument("--resume-from", default=None, help="path to ckpt_step{N}.pt to resume from")
     return p.parse_args()
 
 
@@ -166,13 +168,48 @@ def main():
     val_tokens = torch.from_numpy(
         np.asarray(val_mm[:n_val * block_size], dtype=np.int64).reshape(n_val, block_size))
 
-    model_args = dict(DEFAULT_MODEL_ARGS, block_size=block_size, block_order_block_len=block_len)
-    model = AOGPT(AOGPTConfig(**model_args)).to(device)   # FROM-0 random init
-    optimizer = model.configure_optimizers(args.weight_decay, args.lr,
-                                           (args.beta1, args.beta2), args.device.split(":")[0])
-    model.train()
+    start_step = 0
+    rw_mlp = None
+    B = np.zeros((N_BLOCKS, N_BLOCKS), dtype=np.float64)
 
-    json.dump(vars(args), open(out / "config.json", "w"), indent=2)
+    if args.resume_from:
+        ckpt = torch.load(args.resume_from, map_location=device, weights_only=False)
+        model_args = ckpt["model_args"]
+        block_len = model_args.get("block_order_block_len", 1)
+        block_size = model_args["block_size"]
+        model = AOGPT(AOGPTConfig(**model_args)).to(device)
+        sd = ckpt["model"]
+        if all(k.startswith("_orig_mod.") for k in sd):
+            sd = {k[len("_orig_mod."):]: v for k, v in sd.items()}
+        model.load_state_dict(sd, strict=False)
+        optimizer = model.configure_optimizers(args.weight_decay, args.lr,
+                                               (args.beta1, args.beta2), args.device.split(":")[0])
+        if "optimizer" in ckpt:
+            optimizer.load_state_dict(ckpt["optimizer"])
+        start_step = ckpt.get("step", 0)
+        # Try to load latest beta + B
+        beta_path = out / f"beta_step{start_step}.pt"
+        if beta_path.exists():
+            from train_attn_order_mlp import OrderMLP
+            rw_mlp = OrderMLP()
+            rw_mlp.load_state_dict(torch.load(beta_path, map_location=device, weights_only=False))
+            rw_mlp.eval()
+        a_path = out / f"A_global_step{start_step}.npy"
+        if a_path.exists():
+            B = np.load(a_path).T.copy()   # saved as B^T
+            np.fill_diagonal(B, 0.0)
+        model.train()
+    else:
+        model_args = dict(DEFAULT_MODEL_ARGS, block_size=block_size, block_order_block_len=block_len)
+        model = AOGPT(AOGPTConfig(**model_args)).to(device)
+        optimizer = model.configure_optimizers(args.weight_decay, args.lr,
+                                               (args.beta1, args.beta2), args.device.split(":")[0])
+        model.train()
+
+    next_refresh = args.first_refresh if not args.resume_from else (
+        start_step + args.refresh_interval - (start_step % args.refresh_interval))
+
+    json.dump({**vars(args), "start_step": start_step}, open(out / "config.json", "w"), indent=2)
     tsv = out / "eval_curve.tsv"
     header = ("step\ttrain_loss\talpha\tlr\tval_random\tval_raster\tval_hilbert\t"
               "val_Bcov_balanced\tval_distance_only_coverage\tval_rw_top4_eps0\t"
@@ -182,10 +219,9 @@ def main():
     def log(m): print(m, flush=True); log_f.write(m + "\n"); log_f.flush()
     save_steps = {int(x) for x in args.save_steps.split(",") if x}
 
-    rw_mlp = None          # born at first refresh
-    B = np.zeros((N_BLOCKS, N_BLOCKS), dtype=np.float64)   # placeholder until first refresh
-    next_refresh = args.first_refresh
-    log(f"[start] FROM-0 alternating max_steps={args.max_steps} warmup_start={args.warmup_start} "
+    tag = "RESUME" if args.resume_from else "FROM-0"
+    log(f"[start] {tag} alternating max_steps={args.max_steps} start_step={start_step} "
+        f"warmup_start={args.warmup_start} alpha_ramp={args.alpha_ramp} alpha_max={args.alpha_max} "
         f"refresh_interval={args.refresh_interval} eff_batch={args.batch_size*args.grad_accum}")
 
     def get_batch():
@@ -207,13 +243,13 @@ def main():
             f"rnd={cols['val_random']:.4f} ras={cols['val_raster']:.4f} mlp={cols['val_mlp_order']:.4f}")
 
     t0 = time.time(); running = []
-    for step in range(args.max_steps + 1):
+    for step in range(start_step, args.max_steps + 1):
         lr_now = get_lr(step, args)
         for g in optimizer.param_groups: g["lr"] = lr_now
         alpha = get_alpha_alt(step, warmup_start=args.warmup_start, ramp=args.alpha_ramp,
                               alpha_max=args.alpha_max)
 
-        if step > 0:
+        if step > start_step:
             optimizer.zero_grad(set_to_none=True)
             for micro in range(args.grad_accum):
                 x = get_batch()
@@ -242,7 +278,7 @@ def main():
             run_eval(step, float(np.mean(running[-100:])) if running else float("nan"), lr_now, alpha)
 
         # ---- refresh + distill (mirror train_clean_aogpt.py:1008-1049) ----
-        if step > 0 and step >= next_refresh and step <= args.max_steps:
+        if step > start_step and step >= next_refresh and step <= args.max_steps:
             B = extract_B_from_model(model, train_mm, tokens_per_image, args.extract_n_images,
                                      args.extract_m_passes, args.device, seed=args.seed + step)
             np.save(out / f"A_global_step{step}.npy", B.T)   # A = B^T
@@ -263,7 +299,7 @@ def main():
                 f"B_edge={rdiag['B_edge_ratio']} ent={rdiag['rollout_entropy']}")
             next_refresh = step + args.refresh_interval
 
-        if step > 0 and step in save_steps:
+        if step > start_step and step in save_steps:
             torch.save({"model": model.state_dict(), "model_args": model_args, "step": step,
                         "config": vars(args)}, out / f"ckpt_step{step}.pt")
             log(f"[save] ckpt_step{step}.pt")
