@@ -3,6 +3,7 @@
 import numpy as np
 from sklearn.linear_model import RidgeCV, LogisticRegression
 from sklearn.model_selection import cross_val_score
+from scipy.stats import kendalltau
 
 def representation_probe(H, labels, kind="classification", seed=0):
     """Cross-validated probe score for hidden H -> labels, with a shuffled-hidden control.
@@ -14,15 +15,19 @@ def representation_probe(H, labels, kind="classification", seed=0):
     else:
         est = RidgeCV(alphas=np.logspace(-3, 3, 13))
         scoring = "r2"
+    if len(labels) < 5:
+        raise ValueError(f"representation_probe needs >= 5 samples for cv=5, got {len(labels)}")
     score = float(cross_val_score(est, H, labels, cv=5, scoring=scoring).mean())
     rng = np.random.default_rng(seed)
     H_shuf = H[rng.permutation(len(H))]
     control = float(cross_val_score(est, H_shuf, labels, cv=5, scoring=scoring).mean())
     return {"score": score, "shuffled_control": control, "kind": kind}
 
-def _r2_flat(X, y, seed=0):
+def _r2_flat(X, y):
     y_flat = np.asarray(y, np.float64).reshape(-1)
     X_flat = np.ascontiguousarray(np.asarray(X, np.float64)).reshape(len(y_flat), -1)
+    if len(y_flat) < 5:
+        raise ValueError(f"_r2_flat needs >= 5 samples for cv=5, got {len(y_flat)}")
     est = RidgeCV(alphas=np.logspace(-3, 3, 13))
     return float(cross_val_score(est, X_flat, y_flat, cv=5, scoring="r2").mean())
 
@@ -39,28 +44,30 @@ def build_causal_features(h_state, cand_emb, W=None, seed=0):
     feats = np.concatenate([cand_emb, h_b, inter], axis=2)  # (n,k,P+E+P)
     return feats.reshape(n * k, P + E + P)
 
-def residual_probe(r, H_oracle, phi_global, pos_id, seed=0):
+def residual_probe(r, H_oracle, phi_global, pos_id, seed=0):  # seed kept for API symmetry; the Ridge CV here is deterministic (cv=5, no shuffle)
     """1b: predict residual target r (n,k) from baselines and oracle hidden.
     Returns R^2 for B0 (mean), B1 (global phi), B2 (pos/id), oracle ([phi_global, h_v])."""
     r = np.asarray(r, np.float64); n, k = r.shape
     y = r.reshape(-1)
-    R2_B0 = 0.0  # mean-only predictor has R^2 = 0 by definition on held-out
-    R2_B1 = _r2_flat(np.asarray(phi_global).reshape(n * k, -1), y, seed)
-    R2_B2 = _r2_flat(np.asarray(pos_id).reshape(n * k, -1), y, seed)
+    R2_B0 = 0.0  # anchor: mean-only predictor (cross-validated R^2 of a constant is ~0)
+    R2_B1 = _r2_flat(np.asarray(phi_global).reshape(n * k, -1), y)
+    R2_B2 = _r2_flat(np.asarray(pos_id).reshape(n * k, -1), y)
     Xo = np.concatenate([np.asarray(phi_global), np.asarray(H_oracle)], axis=2).reshape(n * k, -1)
-    R2_oracle = _r2_flat(Xo, y, seed)
+    R2_oracle = _r2_flat(Xo, y)
     return {"R2_B0": R2_B0, "R2_B1": R2_B1, "R2_B2": R2_B2, "R2_oracle": R2_oracle}
 
-def residual_probe_causal(r, causal_feats, seed=0):
+def residual_probe_causal(r, causal_feats, seed=0):  # seed kept for API symmetry; the Ridge CV here is deterministic (cv=5, no shuffle)
     """1b causal head: R^2 of predicting r from build_causal_features output."""
     r = np.asarray(r, np.float64)
-    return {"R2_causal": _r2_flat(causal_feats, r.reshape(-1), seed)}
-
-from scipy.stats import kendalltau
+    return {"R2_causal": _r2_flat(causal_feats, r.reshape(-1))}
 
 def order_effect(s_g, delta_h, top_k=8):
     """Compare descending-score orders from s_g vs s_g+delta_h (single state, N candidates)."""
-    s_g = np.asarray(s_g, np.float64); delta_h = np.asarray(delta_h, np.float64)
+    s_g = np.asarray(s_g, np.float64)
+    if s_g.shape[0] < 2:
+        raise ValueError(f"order_effect requires N >= 2 candidates, got {s_g.shape[0]}")
+    top_k = min(top_k, s_g.shape[0])
+    delta_h = np.asarray(delta_h, np.float64)
     order_g = np.argsort(-s_g); order_h = np.argsort(-(s_g + delta_h))
     tau = float(kendalltau(order_g, order_h).correlation)
     rank_g = np.empty_like(order_g); rank_g[order_g] = np.arange(len(s_g))
