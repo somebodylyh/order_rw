@@ -146,3 +146,61 @@ def paired_cos(C, E):
     num = (C * E).sum(axis=1)
     den = np.linalg.norm(C, axis=1) * np.linalg.norm(E, axis=1) + 1e-12
     return (num / den).astype(np.float64)
+
+
+from attn_order_teacher import teacher_scores
+from graph_normalize import shift_nonneg as _shift_nonneg
+
+MODE = "C-D+L"
+
+
+def _zscore(v):
+    v = np.asarray(v, dtype=np.float64)
+    sd = v.std()
+    return (v - v.mean()) / (sd if sd > 0 else 1.0)
+
+
+def _residualize_vec(y, x):
+    """OLS residual of y on [1, x] (length-M vectors); returns y - fit (removes the position component)."""
+    y = np.asarray(y, dtype=np.float64); x = np.asarray(x, dtype=np.float64)
+    X = np.column_stack([np.ones_like(x), x])
+    beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+    return y - X @ beta
+
+
+def causal_score_mix_rollout(B_A, B_pos, gamma, path, ctx_fn, cand_emb_fn,
+                             hidden_off_at_t0=True, record=None):
+    """Shared greedy phys-frame order with per-step gamma-mix of A-only (C-D+L on B_A) and the
+    dynamic hidden branch. path='X': ctx_fn(S,cand)->(M,E) per-candidate, s_H=paired_cos; path='Y':
+    ctx_fn(S,cand)->(E,) shared, s_H=dynamic_score_cos. gamma=0 (or t=0 with hidden_off_at_t0) ->
+    A-only == graph_order.cdl_order(B_A)."""
+    A = _shift_nonneg(B_A)
+    N = A.shape[0]
+    S, U, last, order = [], list(range(N)), None, []
+    for t in range(N):
+        if len(U) == 1:
+            v = U[0]
+        else:
+            qa, cand = teacher_scores(A, S, U, last, mode=MODE)
+            cand = list(cand)
+            score = _zscore(qa)
+            use_hidden = gamma != 0.0 and not (hidden_off_at_t0 and t == 0)
+            if use_hidden:
+                E_U = cand_emb_fn(cand)
+                ctx = ctx_fn(S, cand)
+                if path == "X":
+                    s_H = paired_cos(ctx, E_U)
+                elif path == "Y":
+                    s_H = dynamic_score_cos(ctx, E_U)
+                else:
+                    raise ValueError(f"unknown path {path}")
+                pos_vec = (B_pos[last, cand] if last is not None
+                           else np.zeros(len(cand), dtype=np.float64))
+                s_H_resid = _residualize_vec(s_H, pos_vec)
+                score = score + gamma * _zscore(s_H_resid)
+                if record is not None:
+                    record.append({"t": t, "s_H_std": float(np.std(s_H)),
+                                   "chosen": int(cand[int(np.argmax(score))])})
+            v = int(cand[int(np.argmax(score))])
+        order.append(v); S.append(v); U.remove(v); last = v
+    return np.asarray(order, dtype=np.int64)

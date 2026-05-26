@@ -5,6 +5,7 @@ for p in ["block_lo_arm_order_network", "nanogpt-learned-order", "scripts"]:
     sys.path.insert(0, str(ROOT / p))
 from AOGPT import AOGPT, AOGPTConfig
 import causal_hidden_rollout as CHR
+import graph_order as GO
 
 
 def _tiny(N=4, BL=2, V=16, E=8, n_layer=2, n_head=2):
@@ -105,3 +106,39 @@ def test_paired_cos_per_candidate():
     assert np.isclose(s[0], 1.0)      # aligned
     assert np.isclose(s[1], 0.0)      # orthogonal
     assert np.isclose(s[2], -1.0)     # anti-aligned
+
+
+def _ring(N, w=5.0):
+    B = np.zeros((N, N))
+    for i in range(N):
+        B[i, (i + 1) % N] = w
+    return B + B.T
+
+
+def test_gamma0_equals_static_cdl_order_pathX():
+    N = 6; B_A = _ring(N, 5.0); B_pos = _ring(N, 1.0)
+    ctx_fn = lambda S, cand: np.zeros((len(cand), 4))      # X: (M,E)
+    cand_emb_fn = lambda cand: np.zeros((len(cand), 4))
+    o = CHR.causal_score_mix_rollout(B_A, B_pos, 0.0, "X", ctx_fn, cand_emb_fn)
+    assert np.array_equal(o, GO.cdl_order(B_A, greedy=True))
+
+
+def test_gamma0_equals_static_cdl_order_pathY():
+    N = 6; B_A = _ring(N, 5.0); B_pos = _ring(N, 1.0)
+    ctx_fn = lambda S, cand: np.zeros(4)                   # Y: (E,)
+    cand_emb_fn = lambda cand: np.zeros((len(cand), 4))
+    o = CHR.causal_score_mix_rollout(B_A, B_pos, 0.0, "Y", ctx_fn, cand_emb_fn)
+    assert np.array_equal(o, GO.cdl_order(B_A, greedy=True))
+
+
+def test_pathX_gamma_changes_order_when_hidden_disagrees():
+    N = 6; B_A = _ring(N, 5.0); B_pos = np.zeros((N, N))
+    def ctx_fn(S, cand):                                    # c_t^(v): align the largest-id candidate
+        C = np.zeros((len(cand), 2))
+        for j, v in enumerate(cand):
+            C[j] = [1.0, 0.0] if v == max(cand) else [-1.0, 0.0]
+        return C
+    cand_emb_fn = lambda cand: np.tile([1.0, 0.0], (len(cand), 1)).astype(float)  # all e_v=[1,0]
+    o0 = CHR.causal_score_mix_rollout(B_A, B_pos, 0.0, "X", ctx_fn, cand_emb_fn)
+    o2 = CHR.causal_score_mix_rollout(B_A, B_pos, 2.0, "X", ctx_fn, cand_emb_fn)
+    assert not np.array_equal(o0, o2)
