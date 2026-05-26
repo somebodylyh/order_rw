@@ -45,12 +45,44 @@ gives an improvement > 2× the A-only seed noise floor).
    position-independent hidden graph. Text `B_A` sharpness is *below* its null (z = −29 to −61),
    matching the known "text B_A has collapsed ≈ L2R / diffuse" observation.
 
-## Decision
+## Decision (scoped — this closes the *static param-free* hidden route, not "hidden is useless")
 
 Across primary (clean) + sculpted (mlp) text and the image primary, the frozen evidence does **not**
-support a position-independent hidden relational graph. This reinforces the residual line's clean
-negative ([[hidden_residual_diag_line]]): at 4L/8H (text) and 8L/8H (image) scale, the hidden state
-encodes order-relevant relations only through position, which `B_A` already captures.
+support a position-independent **static cosine** hidden relational graph. Two scoping caveats keep
+this from being read as "hidden has no order signal":
+
+1. **Symmetry is a confound, not just a result.** `B_H = cos(h_u,h_v)` is symmetric; order needs
+   direction (`u→v ≠ v→u`). The C-D+L rollout *does* produce a directed order, but all direction is
+   injected by the readout heuristic (start + greedy), identically for `B_A` and `B_H` — the *edge
+   weights* of cosine carry no direction. So cosine can only say "which blocks cluster," never "which
+   way to traverse." We have falsified the **symmetric** part of hidden geometry (post-position), not
+   hidden order content in general.
+2. **Attention already IS the frozen asymmetric hidden transition.** A single-step attention logit is
+   `q(h_i)·k(h_j)` — exactly the asymmetric hidden-transition score one would build by hand, using the
+   model's own projections. `B_A` is derived from it. So any param-free asymmetric hidden probe with
+   the model's q,k reduces to (a slice of) `B_A`, which the diagnostic already uses as the primary
+   graph. There is no *additional* param-free hidden signal to find.
+
+**Falsified (closed) — the two param-free hidden-geometry probes:**
+- hidden as **scalar residual predictor** (`s = s_G + Δs_H(v,x)`) → null ([[hidden_residual_diag_line]]).
+- hidden as **static symmetric cosine graph** (`B_H = cos`) → null (this Stage A).
+
+**NOT falsified (open) — all require training, i.e. they are the research program, not a diagnostic:**
+- learned **bilinear** edge `h_u^⊤ W h_v` (asymmetric) / **edge-MLP** `g([h_u,h_v,h_u−h_v,h_u⊙h_v])`.
+- **context-dependent dynamic controller** `s(v,x)=f(φ(B_A,·), h_v, h_{S_t}, h_{last})` — uses the
+  *un-collapsed* per-step attention/hidden rather than the single collapsed `B_A` (text `B_A` has
+  collapsed ≈ L2R), so it is **not** subsumed by static `B_A`. This is the most promising next line.
+- larger-model hidden geometry.
+
+Other similarity variants (dot-product, RBF) stay symmetric → expected to behave like cosine; **not
+prioritized**. Confidence/uncertainty inputs **de-prioritized** (the attention-only MLP is already
+saturated by structural signal — see [[text_phase0_residual_gate_result.md]]).
+
+**Paper framing:** *Stage-A hidden-graph diagnostic shows that a static cosine-similarity graph over
+hidden states is dominated by positional structure and provides no complementary order signal beyond
+the attention graph. This closes the static, parameter-free hidden-graph route at the current scale,
+but leaves open a more expressive context-dependent controller in which hidden states condition the
+order policy dynamically, rather than being compressed into a fixed symmetric pairwise graph.*
 
 **Gated next steps (NOT triggered):**
 - **Stage-2 causal** (`extract_causal_hidden`, t∈{0,16,32,48}): gate = any Stage-A oracle WIN. All
