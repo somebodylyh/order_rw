@@ -106,3 +106,27 @@ def pooled_context_hidden(model, idx_model, prefix_blocks, completion_blocks, bl
         p = B.mean(dim=1) if pool == "mean" else B[:, -1, :]
         outs.append(p.float().cpu().numpy())
     return np.concatenate(outs, axis=0)
+
+
+@torch.no_grad()
+def candidate_embeddings(model, idx_model, model_block_ids, block_len, mode, device):
+    """Returns (n, len(model_block_ids), E) candidate embeddings in model embedding space.
+    mode='content_token': mean of the block's input token embeddings (wte only, NO positional)
+                          -> content-aware (sees candidate content; report labels accordingly).
+    mode='content_free' : the block's first-position positional embedding (wpe), broadcast over
+                          samples -> no candidate content."""
+    model.eval()
+    idx = idx_model.to(device)
+    n = idx.shape[0]
+    bids = list(model_block_ids)
+    if mode == "content_token":
+        cols = []
+        for b in bids:
+            toks = idx[:, b * block_len:(b + 1) * block_len]          # (n, BL) model-frame
+            cols.append(model.transformer.wte(toks).mean(dim=1))      # (n, E) token-only
+        return torch.stack(cols, dim=1).float().cpu().numpy()         # (n, M, E)
+    if mode == "content_free":
+        pos = torch.tensor([b * block_len + 1 for b in bids], device=device)  # +1: [None] offset
+        emb = model.transformer.wpe(pos)                              # (M, E)
+        return emb.unsqueeze(0).expand(n, -1, -1).float().cpu().numpy()
+    raise ValueError(f"unknown mode {mode}")

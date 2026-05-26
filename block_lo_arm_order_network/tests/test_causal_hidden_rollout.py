@@ -64,3 +64,23 @@ def test_pooled_context_hidden_shape_and_completion_invariant():
     assert float(cos.min()) > 0.99999          # Path-Y context depends only on S_t
     pe = CHR.pooled_context_hidden(m, idx, [], [0, 1, 2, 3, 4, 5, 6, 7], BL, "cpu")
     assert pe.shape == (n, E) and np.allclose(pe, 0.0)
+
+
+def test_candidate_embeddings_content_token_shape_and_no_pos():
+    torch.manual_seed(0); N, BL, V, E, n = 4, 2, 16, 8, 3
+    m = _tiny(N, BL, V, E)
+    idx = torch.randint(0, V, (n, N * BL))
+    E_cand = CHR.candidate_embeddings(m, idx, list(range(N)), BL, mode="content_token", device="cpu")
+    assert E_cand.shape == (n, N, E)
+    blk0_tokens = idx[:, 0:BL]                               # model-frame block 0 tokens
+    expect0 = m.transformer.wte(blk0_tokens).mean(dim=1).detach().numpy()
+    assert np.allclose(E_cand[:, 0, :], expect0, atol=1e-5)
+
+
+def test_candidate_embeddings_content_free_is_sample_invariant():
+    torch.manual_seed(0); N, BL, V, E, n = 4, 2, 16, 8, 3
+    m = _tiny(N, BL, V, E)
+    idx = torch.randint(0, V, (n, N * BL))
+    E_free = CHR.candidate_embeddings(m, idx, list(range(N)), BL, mode="content_free", device="cpu")
+    assert E_free.shape == (n, N, E)
+    assert np.allclose(E_free[0], E_free[1]) and np.allclose(E_free[0], E_free[2])
