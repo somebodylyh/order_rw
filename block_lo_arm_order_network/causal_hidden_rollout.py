@@ -130,3 +130,19 @@ def candidate_embeddings(model, idx_model, model_block_ids, block_len, mode, dev
         emb = model.transformer.wpe(pos)                              # (M, E)
         return emb.unsqueeze(0).expand(n, -1, -1).float().cpu().numpy()
     raise ValueError(f"unknown mode {mode}")
+
+
+def dynamic_score_cos(p, E_cand):
+    """Path Y (shared context): p (E,), E_cand (M, E) -> (M,) cosine of p with each candidate."""
+    p = np.asarray(p, dtype=np.float64); E_cand = np.asarray(E_cand, dtype=np.float64)
+    pn = p / (np.linalg.norm(p) + 1e-12)
+    cn = E_cand / (np.linalg.norm(E_cand, axis=1, keepdims=True) + 1e-12)
+    return (cn @ pn).astype(np.float64)
+
+
+def paired_cos(C, E):
+    """Path X (candidate-conditioned): C (M, E), E (M, E) -> (M,) row-wise cosine cos(C[j], E[j])."""
+    C = np.asarray(C, dtype=np.float64); E = np.asarray(E, dtype=np.float64)
+    num = (C * E).sum(axis=1)
+    den = np.linalg.norm(C, axis=1) * np.linalg.norm(E, axis=1) + 1e-12
+    return (num / den).astype(np.float64)

@@ -84,3 +84,24 @@ def test_candidate_embeddings_content_free_is_sample_invariant():
     E_free = CHR.candidate_embeddings(m, idx, list(range(N)), BL, mode="content_free", device="cpu")
     assert E_free.shape == (n, N, E)
     assert np.allclose(E_free[0], E_free[1]) and np.allclose(E_free[0], E_free[2])
+
+
+def test_dynamic_score_cos_direction():
+    # Path Y: one shared context p, broadcast over candidates
+    p = np.array([1.0, 0.0, 0.0])
+    E_cand = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]])
+    s = CHR.dynamic_score_cos(p, E_cand)
+    assert s.shape == (3,)
+    assert s[0] > s[1] > s[2]
+    assert np.isclose(s[0], 1.0) and np.isclose(s[2], -1.0)
+
+
+def test_paired_cos_per_candidate():
+    # Path X: each candidate has its own context row; cosine is row-wise paired
+    C = np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 0.0]])
+    E = np.array([[1.0, 0.0], [1.0, 0.0], [-1.0, 0.0]])
+    s = CHR.paired_cos(C, E)
+    assert s.shape == (3,)
+    assert np.isclose(s[0], 1.0)      # aligned
+    assert np.isclose(s[1], 0.0)      # orthogonal
+    assert np.isclose(s[2], -1.0)     # anti-aligned
