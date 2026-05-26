@@ -238,7 +238,8 @@ Else **NULL**. (Computed from **Level 1 only**; Level 2 and the per-sample audit
 | WIN | WIN | **Case A** — design trained context-dependent controller (both modalities). |
 | WIN | NULL | **Case A (text-only)** — proceed with text controller; note modality-specific; image NULL does **not** block it. |
 | WIN | worse-than-A-only | **Case A (text-only)** + **flag modality-specific risk** for image. |
-| NULL | (any) | **Case B** — `B_A` already absorbs order signal at this scale; pivot away from hidden. |
+| NULL | NULL | **Case B** — `B_A` already absorbs order signal at this scale; pivot away from hidden. |
+| NULL | WIN | **Case B for text**, but image controller may merit its **own** line (image order signal is genuinely there) — record as a separate candidate, do not fold into the text decision. |
 | NULL-shared + per-sample signal | — | **Case C** — pursue per-sample controller, not shared curriculum. |
 
 Rationale: text order signal is directional/L2R; image is geometric/locality — they differ by nature,
@@ -300,3 +301,42 @@ case), and the γ=0 ≡ A-only invariant of the rollout. CLI smoke (mirror T7) f
 4. **§6** — per-step vector-level residualization/z-score reuse of `graph_normalize` (which operates on
    N×N graphs) — adapt to candidate-vector slices; confirm the `γ=0 ≡ A-only` invariant holds exactly.
 5. **§9** — text phys→model order frame conversion before NLL (the T7 smoke gate).
+
+---
+
+## §14 Implementation-plan must cover (review clarifications — non-blocking, but mandatory in the plan)
+
+1. **`t=0` start-node handling (explicit).** At `t=0`, `S_t=∅`, so `c_0` is a BOS / predictor-start
+   state, not a context summary. The plan must decide and state: either (a) the hidden branch is OFF
+   at `t=0` (`s_H^resid = 0`; the start node is chosen by A-only / source_start exactly as the static
+   baselines do), or (b) it is ON, in which case the start-node behavior is reported separately and
+   the content-aware `e_v` leakage at the first step is called out. Text direction depends heavily on
+   the start anchor — this must not be left ambiguous. **Default recommendation:** hidden branch OFF
+   at `t=0` (start node from A-only/source_start), so γ only affects `t≥1` — keeps the start identical
+   across γ and isolates the dynamic-hidden effect to mid-rollout transitions.
+2. **`γ=0` ≡ static `B_A` C-D+L via the SAME code path.** The `γ=0` rollout must invoke the identical
+   `teacher_scores`/normalization/`shift_nonneg` used by the Level-0 static `B_A` C-D+L baseline (no
+   parallel C-D+L reimplementation). **Required regression test:** `causal_score_mix_rollout(..., γ=0)
+   order == cdl_order(B_A)` exactly (or NLL matches within numerical tolerance). A `γ>0` "improvement"
+   over a subtly-different `γ=0` path would be an artifact, not signal.
+3. **Per-step position residualization on the candidate vector (not the N×N graph).** `s_H(v|S_t)` is a
+   step-dependent vector over `U_t`, not a static `64×64` graph. Residualize it **per step** against a
+   position score vector for the current candidate set — e.g. OLS of `s_H(·|S_t)` on
+   `B_pos[last, U_t]` and/or `mean_{u∈S_t} B_pos[u, U_t]`, recomputed each step. Do **not** mechanically
+   reuse Stage-A's pairwise `B_H_resid` (graph-level) logic. The position-control (§6 i) is likewise a
+   per-step `B_pos`-vector-driven rollout.
+4. **Shared-greedy aggregation records dispersion, not just the mean.** Besides `mean_n(c_t)` used for
+   scoring, save per step: per-candidate score **std** across the `n_roll` samples, top-candidate
+   **agreement** (fraction of samples whose argmax = the chosen block), per-step **entropy**, and
+   per-sample score **variance**. Purpose: if the mean-aggregated shared order is NULL but dispersion
+   is high, the signal may be **sample-specific** (Case C), not absent — this prevents the mean rollout
+   from false-killing dynamic hidden, and feeds the per-sample audit interpretation.
+5. **model-attn (q·k) is secondary best-effort; never blocks cos-emb.** cos-emb is REQUIRED and alone
+   answers the core question. q·k is attempted only if the `W_q/W_k` hook is clean; if it exceeds
+   expected intrusiveness or the layer/head semantics are unclear, **skip it and record the reason** —
+   its absence affects only the learned-bilinear variant's coverage, not the spec's main conclusion.
+6. **Image never blocks the text-only controller.** Keep the §10 decision matrix: text WIN + image
+   NULL → text-only controller is valid; text WIN + image worse-than-A-only → flag modality-specific
+   risk; image WIN → bonus, not a precondition for the text route; text NULL + image WIN → image may
+   merit its own separate line. text (directional/L2R) and image (geometric/locality) order signals
+   differ by nature; do not require one hidden controller to win both.
