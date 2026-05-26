@@ -204,3 +204,83 @@ def causal_score_mix_rollout(B_A, B_pos, gamma, path, ctx_fn, cand_emb_fn,
             v = int(cand[int(np.argmax(score))])
         order.append(v); S.append(v); U.remove(v); last = v
     return np.asarray(order, dtype=np.int64)
+
+
+def position_control_rollout(B_A, B_pos, gamma):
+    """Control: s_H replaced by the pure position slice B_pos[last, U] (no hidden)."""
+    A = _shift_nonneg(B_A); N = A.shape[0]
+    S, U, last, order = [], list(range(N)), None, []
+    for t in range(N):
+        if len(U) == 1:
+            v = U[0]
+        else:
+            qa, cand = teacher_scores(A, S, U, last, mode=MODE); cand = list(cand)
+            score = _zscore(qa)
+            if gamma != 0.0 and last is not None:
+                score = score + gamma * _zscore(B_pos[last, cand])
+            v = int(cand[int(np.argmax(score))])
+        order.append(v); S.append(v); U.remove(v); last = v
+    return np.asarray(order, dtype=np.int64)
+
+
+def shuffled_hidden_rollout(B_A, B_pos, gamma, path, ctx_fn, cand_emb_fn, seed=0,
+                            hidden_off_at_t0=True):
+    """Control: same pipeline as causal_score_mix_rollout but s_H_resid is permuted each step
+    (value-multiset matched), destroying its candidate alignment."""
+    rng = np.random.default_rng(seed)
+    A = _shift_nonneg(B_A); N = A.shape[0]
+    S, U, last, order = [], list(range(N)), None, []
+    for t in range(N):
+        if len(U) == 1:
+            v = U[0]
+        else:
+            qa, cand = teacher_scores(A, S, U, last, mode=MODE); cand = list(cand)
+            score = _zscore(qa)
+            use_hidden = gamma != 0.0 and not (hidden_off_at_t0 and t == 0)
+            if use_hidden:
+                E_U = cand_emb_fn(cand); ctx = ctx_fn(S, cand)
+                s_H = paired_cos(ctx, E_U) if path == "X" else dynamic_score_cos(ctx, E_U)
+                pos_vec = (B_pos[last, cand] if last is not None
+                           else np.zeros(len(cand), dtype=np.float64))
+                s_H_resid = _residualize_vec(s_H, pos_vec)
+                perm = rng.permutation(len(s_H_resid))
+                score = score + gamma * _zscore(s_H_resid[perm])
+            v = int(cand[int(np.argmax(score))])
+        order.append(v); S.append(v); U.remove(v); last = v
+    return np.asarray(order, dtype=np.int64)
+
+
+def _kendall_tau(a, b):
+    a = np.asarray(a); b = np.asarray(b); n = len(a)
+    ra = np.empty(n); ra[a] = np.arange(n)
+    rb = np.empty(n); rb[b] = np.arange(n)
+    conc = 0; disc = 0
+    for i in range(n):
+        for j in range(i + 1, n):
+            s = np.sign(ra[i] - ra[j]) * np.sign(rb[i] - rb[j])
+            conc += s > 0; disc += s < 0
+    tot = n * (n - 1) / 2
+    return (conc - disc) / tot if tot > 0 else 1.0
+
+
+def order_diversity(orders):
+    """orders: (k, N). Returns mean pairwise |kendall tau| + unique fraction."""
+    orders = np.asarray(orders); k = orders.shape[0]
+    taus = [abs(_kendall_tau(orders[i], orders[j])) for i in range(k) for j in range(i + 1, k)]
+    uniq = len({tuple(o.tolist()) for o in orders})
+    return {"mean_pairwise_kendall_tau": float(np.mean(taus)) if taus else 1.0,
+            "frac_unique": uniq / k}
+
+
+def oracle_nll_greedy_order(per_step_nll_fn, n_blocks):
+    """Level-2 DIAGNOSTIC ONLY (not in the WIN gate, not a teacher). Greedily pick the candidate with
+    the lowest true next-block NLL given the prefix. per_step_nll_fn(prefix, U) -> dict {v: nll}."""
+    S, U, order = [], list(range(n_blocks)), []
+    for _ in range(n_blocks):
+        if len(U) == 1:
+            v = U[0]
+        else:
+            nlls = per_step_nll_fn(S, U)
+            v = min(U, key=lambda c: nlls[c])
+        order.append(v); S.append(v); U.remove(v)
+    return np.asarray(order, dtype=np.int64)

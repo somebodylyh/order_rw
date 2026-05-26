@@ -142,3 +142,37 @@ def test_pathX_gamma_changes_order_when_hidden_disagrees():
     o0 = CHR.causal_score_mix_rollout(B_A, B_pos, 0.0, "X", ctx_fn, cand_emb_fn)
     o2 = CHR.causal_score_mix_rollout(B_A, B_pos, 2.0, "X", ctx_fn, cand_emb_fn)
     assert not np.array_equal(o0, o2)
+
+
+def test_position_control_order_is_permutation():
+    N = 6; B_A = _ring(N, 5.0); B_pos = _ring(N, 1.0)
+    o = CHR.position_control_rollout(B_A, B_pos, gamma=1.0)
+    assert sorted(o.tolist()) == list(range(N))
+
+
+def test_shuffled_hidden_differs_from_real_pathX():
+    N = 6; B_A = _ring(N, 5.0); B_pos = np.zeros((N, N))
+    def ctx_fn(S, cand):
+        C = np.zeros((len(cand), 2))
+        for j, v in enumerate(cand):
+            C[j] = [1.0, 0.0] if v == max(cand) else [-1.0, 0.0]
+        return C
+    cand_emb_fn = lambda cand: np.tile([1.0, 0.0], (len(cand), 1)).astype(float)
+    o_real = CHR.causal_score_mix_rollout(B_A, B_pos, 1.0, "X", ctx_fn, cand_emb_fn)
+    o_shuf = CHR.shuffled_hidden_rollout(B_A, B_pos, 1.0, "X", ctx_fn, cand_emb_fn, seed=0)
+    assert sorted(o_shuf.tolist()) == list(range(N))
+    assert not np.array_equal(o_real, o_shuf)
+
+
+def test_order_diversity_metric():
+    orders = np.array([[0, 1, 2, 3], [0, 1, 2, 3], [3, 2, 1, 0]])
+    d = CHR.order_diversity(orders)
+    assert 0.0 <= d["mean_pairwise_kendall_tau"] <= 1.0
+    assert d["frac_unique"] == 2 / 3
+
+
+def test_oracle_nll_greedy_order_picks_lowest():
+    def f(S, U):
+        return {v: float(v) for v in U}        # lowest nll = smallest block id
+    o = CHR.oracle_nll_greedy_order(f, 4)
+    assert o.tolist() == [0, 1, 2, 3]
