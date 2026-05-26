@@ -35,12 +35,25 @@ def context_hidden_at_step(model, idx_model, prefix_blocks, completion_blocks, b
     return np.concatenate(out_chunks, axis=0)
 
 
+@torch.no_grad()
+def candidate_conditioned_hidden(model, idx_model, prefix_blocks, next_block, other_blocks,
+                                 block_len, device, chunk_size=64):
+    """c_t^(v): predictor hidden conditioned on (S_t=prefix_blocks, sigma(t+1)=next_block).
+    Thin wrapper over context_hidden_at_step with completion=[next_block]+other_blocks; by causal
+    invariance (see causal_invariance_check) other_blocks do not affect the result. Returns (n, E)."""
+    return context_hidden_at_step(model, idx_model, prefix_blocks, [next_block] + list(other_blocks),
+                                  block_len, device, chunk_size)
+
+
 def causal_invariance_check(model, idx_model, n_blocks, block_len, device,
                             t_list=(0, 1, 4, 16, 32, 48, 63), n_patterns=4, seed=0):
-    """PRE-GATE: c_t must depend only on the prefix S_t, not the completion. For each t and
-    several prefix patterns, compare c_t under >=2 completions. Pass iff min cosine > 0.99999."""
+    """Reframed PRE-GATE (Path X): c_t^(v) must be invariant to sigma(t+2..) holding (S_t, v=sigma(t+1))
+    fixed. (It is NOT invariant to v itself — that is the intended candidate-conditioning.) For each t
+    and several prefix patterns, fix v = first remaining block and compare c_t^(v) under >=2 orderings
+    of the REMAINING blocks. Pass iff min cosine > 0.99999. Skips (t, pattern) with <2 remaining-tail
+    blocks (no reordering possible)."""
     rng = np.random.default_rng(seed)
-    min_cos, max_absdiff, fails = 1.0, 0.0, []
+    min_cos, max_absdiff, fails, n_cmp = 1.0, 0.0, [], 0
     for t in t_list:
         if t >= n_blocks:
             continue
@@ -48,18 +61,48 @@ def causal_invariance_check(model, idx_model, n_blocks, block_len, device,
             perm = rng.permutation(n_blocks)
             prefix = perm[:t].tolist()
             rest = perm[t:].tolist()
-            comp_a = rest
-            comp_b = list(reversed(rest))
-            comp_c = rng.permutation(rest).tolist() if len(rest) > 1 else rest
-            c_a = context_hidden_at_step(model, idx_model, prefix, comp_a, block_len, device)
-            for comp in (comp_b, comp_c):
-                c_b = context_hidden_at_step(model, idx_model, prefix, comp, block_len, device)
+            if len(rest) == 0:
+                continue
+            v, tail = rest[0], rest[1:]
+            if len(tail) < 2:
+                continue                                   # no meaningful reordering of the tail
+            c_a = candidate_conditioned_hidden(model, idx_model, prefix, v, tail, block_len, device)
+            variant_tails = [list(reversed(tail)), rng.permutation(tail).tolist()]
+            for tl in variant_tails:
+                c_b = candidate_conditioned_hidden(model, idx_model, prefix, v, tl, block_len, device)
                 num = (c_a * c_b).sum(1)
                 den = np.linalg.norm(c_a, axis=1) * np.linalg.norm(c_b, axis=1) + 1e-12
                 cos = float((num / den).min())
                 ad = float(np.abs(c_a - c_b).max())
-                min_cos = min(min_cos, cos); max_absdiff = max(max_absdiff, ad)
+                min_cos = min(min_cos, cos); max_absdiff = max(max_absdiff, ad); n_cmp += 1
                 if cos <= 0.99999:
                     fails.append({"t": int(t), "cosine": cos, "max_absdiff": ad})
-    return {"passed": len(fails) == 0, "min_cosine": float(min_cos),
-            "max_absdiff": float(max_absdiff), "n_fail": len(fails), "fails": fails[:10]}
+    return {"passed": len(fails) == 0 and n_cmp > 0, "min_cosine": float(min_cos),
+            "max_absdiff": float(max_absdiff), "n_compare": n_cmp, "n_fail": len(fails),
+            "fails": fails[:10]}
+
+
+@torch.no_grad()
+def pooled_context_hidden(model, idx_model, prefix_blocks, completion_blocks, block_len, device,
+                          pool="mean", chunk_size=64):
+    """Path Y CONTROL context: pool of partial-context ORIGINAL hiddens over the revealed prefix
+    blocks S_t. Target-neutral (same vector for every candidate) and depends only on S_t
+    (completion-invariant). pool in {'mean','last'}. Empty prefix -> zeros. Returns (n, E)."""
+    model.eval()
+    n_total = idx_model.shape[0]
+    E = int(model.config.n_embd)
+    if len(prefix_blocks) == 0:
+        return np.zeros((n_total, E), dtype=np.float32)
+    full = list(prefix_blocks) + list(completion_blocks)
+    tok_order = torch.as_tensor(_expand_blocks_to_tokens(full, block_len), dtype=torch.long, device=device)
+    outs = []
+    for i in range(0, n_total, chunk_size):
+        idx = idx_model[i:i + chunk_size].to(device)
+        order = tok_order.unsqueeze(0).expand(idx.shape[0], -1)
+        out = model.forward_fn(idx, order, return_hidden=True, hidden_return_mode="original")
+        H = out[2]                                          # (nc, T+1, E); idx 0 = [None], 1+p = model-pos p
+        blk = [H[:, 1 + b * block_len:1 + (b + 1) * block_len, :].mean(dim=1) for b in prefix_blocks]
+        B = torch.stack(blk, dim=1)                         # (nc, |S_t|, E)
+        p = B.mean(dim=1) if pool == "mean" else B[:, -1, :]
+        outs.append(p.float().cpu().numpy())
+    return np.concatenate(outs, axis=0)
