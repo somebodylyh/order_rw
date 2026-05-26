@@ -750,7 +750,7 @@ def main():
 
     # hidden
     h_oracle = Hd.extract_oracle_hidden(model, idx_model, clean_perm, dev, order_model_full)  # (n,N,E)
-    h_causal = Hd.extract_causal_hidden(model, idx_model, clean_perm, dev, canon_model_t, list(states.keys()))
+    h_causal = Hd.extract_causal_hidden(model, idx_model, dev, canon_model_t, list(states.keys()))
 
     # ---- 1a representation probe: predict residual sign at t=max over candidates (oracle h_v) ----
     t_top = max(states.keys()); U_top = np.asarray(states[t_top][1])
