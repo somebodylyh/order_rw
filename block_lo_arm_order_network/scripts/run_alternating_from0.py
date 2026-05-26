@@ -51,8 +51,9 @@ _MLPA = _REPO / "probe_results/attention_order_mlp"
 OUT_A = _MLPA / "alt_from0_random"
 OUT_B = _MLPA / "alt_from0_v3refresh"
 OUT_C = _MLPA / "alt_from0_mlp_finetune"
+OUT_C_A1 = _MLPA / "alt_from0_mlp_alpha1"   # alpha=1 收尾 ablation（勿覆盖 OUT_C）
 
-_ARM_DIRS = {"random": OUT_A, "v3refresh": OUT_B, "mlp": OUT_C}
+_ARM_DIRS = {"random": OUT_A, "v3refresh": OUT_B, "mlp": OUT_C, "mlp_alpha1": OUT_C_A1}
 
 CONFIG_JSON = _HERE / "probe_results/clean_base_random_perm/config.json"
 
@@ -139,6 +140,14 @@ _ARM_FLAGS = {
         "--mlp-distill-epochs", "60",
     ],
 }
+
+# alpha=1 收尾 ablation：与 mlp(arm C) 完全相同，但:
+#   --alpha-target 0.9→1.0（去掉 10% random 正则）
+#   --alpha-warmup-steps 10000→1（第一个 refresh 后立即 alpha=1，不 gradual ramp）
+_mlp_alpha1_flags = list(_ARM_FLAGS["mlp"])
+_mlp_alpha1_flags[_mlp_alpha1_flags.index("--alpha-target") + 1] = "1.0"
+_mlp_alpha1_flags[_mlp_alpha1_flags.index("--alpha-warmup-steps") + 1] = "1"
+_ARM_FLAGS["mlp_alpha1"] = _mlp_alpha1_flags
 
 
 def build_cmd(arm: str, model_args: dict) -> list:
@@ -234,6 +243,7 @@ def launch(arm: str):
         env=env,
         stdout=open(log_path, "w"),
         stderr=subprocess.STDOUT,
+        start_new_session=True,
     )
 
     # Early NaN guard: poll until we get the first eval row, then decide.
@@ -331,31 +341,82 @@ def _read_refresh_diag(arm_dir: Path) -> list:
     return rows
 
 
+def _write_arm_curve(md: list, label: str, curve: dict):
+    md.append(f"\n### {label}")
+    if not curve:
+        md.append("*(arm not run yet)*")
+        return
+    md += ["| step | alpha | val_ori_l2r_block | lr |", "|---|---|---|---|"]
+    for st in sorted(curve.keys()):
+        e = curve[st]
+        alpha_str = f"{e.get('alpha', float('nan')):.3f}"
+        val_str = _fmt(e.get("val"))
+        lr_str = f"{e.get('lr', float('nan')):.3e}"
+        md.append(f"| {st} | {alpha_str} | {val_str} | {lr_str} |")
+
+
+def _write_refresh_diag_section(md: list, arm_label: str, out_dir: Path):
+    md.append(f"\n## {arm_label} — MLP refresh trajectory (refresh_diagnostics.jsonl)")
+    refresh_rows = _read_refresh_diag(out_dir)
+    if not refresh_rows:
+        md.append("*(No refresh_diagnostics.jsonl found — arm not run yet or refresh not triggered yet.)*")
+        return
+    md += [
+        "| step | val_kl | top1 | rollout_tau_vs_l2r | rollout_entropy | rollout_unique | teacher_tau_vs_l2r |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for row in refresh_rows:
+        def _r(k, fmt=".4f"):
+            v = row.get(k)
+            if v is None:
+                return "—"
+            try:
+                return format(int(v) if fmt == "d" else float(v), fmt)
+            except (TypeError, ValueError):
+                return str(v)
+        md.append(
+            f"| {row.get('step', '—')} "
+            f"| {_r('val_kl')} "
+            f"| {_r('top1')} "
+            f"| {_r('rollout_tau_vs_l2r')} "
+            f"| {_r('rollout_entropy')} "
+            f"| {_r('rollout_unique', 'd') if row.get('rollout_unique') is not None else '—'} "
+            f"| {_r('teacher_tau_vs_l2r')} |"
+        )
+    ttau_vals = [row["teacher_tau_vs_l2r"] for row in refresh_rows if "teacher_tau_vs_l2r" in row]
+    if len(ttau_vals) >= 2:
+        direction = "sharpening (↑)" if ttau_vals[-1] > ttau_vals[0] else "flattening (↓)"
+        md.append(f"\n*teacher_tau_vs_l2r trend: {ttau_vals[0]:.4f} → {ttau_vals[-1]:.4f} ({direction})*")
+
+
 def write_report():
     """(Re)write alt_from0_REPORT.md from whatever eval_curves + diagnostics currently exist."""
     curve_a = ov.load_curve(OUT_A / "eval_curve.tsv")
     curve_b = ov.load_curve(OUT_B / "eval_curve.tsv")
     curve_c = ov.load_curve(OUT_C / "eval_curve.tsv")
+    curve_d = ov.load_curve(OUT_C_A1 / "eval_curve.tsv")
 
     report_steps = [5000, 15000, 30000]
 
     # ── Table: val_ori_l2r_block at key steps ──────────────────────────────────
     md = [
-        "# alt_from0 — three arms from-0 comparison\n",
+        "# alt_from0 — four arms from-0 comparison\n",
         "Arms: **A=random** (baseline), **B=v3refresh** (progressive_rw_v3 from-0), "
-        "**C=mlp_finetune** (mlp_cdl alternating self-bootstrap from-0).\n",
+        "**C=mlp** (mlp_cdl alternating, alpha ramp 0→0.9), "
+        "**D=mlp_alpha1** (same as C but alpha=1.0 from first refresh).\n",
         "Primary metric: **val_ori_l2r_block** (lower = better).\n",
         "## 1. val_ori_l2r_block summary table",
-        "| step | A random | B v3refresh | C mlp | Δ C−A | Δ C−B |",
-        "|---|---|---|---|---|---|",
+        "| step | A random | B v3refresh | C mlp (ramp) | D mlp (α=1) | Δ C−A | Δ D−C |",
+        "|---|---|---|---|---|---|---|",
     ]
 
     for st in report_steps:
         va = curve_a.get(st)
         vb = curve_b.get(st)
         vc = curve_c.get(st)
+        vd = curve_d.get(st)
         md.append(
-            f"| {st} | {_fmt(va)} | {_fmt(vb)} | {_fmt(vc)} | {_delta(vc, va)} | {_delta(vc, vb)} |"
+            f"| {st} | {_fmt(va)} | {_fmt(vb)} | {_fmt(vc)} | {_fmt(vd)} | {_delta(vc, va)} | {_delta(vd, vc)} |"
         )
 
     # ── Curve shape notes ──────────────────────────────────────────────────────
@@ -363,71 +424,36 @@ def write_report():
         "\n## 2. Curve shape (post-warmup monotone check, slopes)",
         f"- **A random:** {_curve_shape_note(curve_a)}",
         f"- **B v3refresh:** {_curve_shape_note(curve_b)}",
-        f"- **C mlp_finetune:** {_curve_shape_note(curve_c)}",
+        f"- **C mlp (ramp):** {_curve_shape_note(curve_c)}",
+        f"- **D mlp (α=1):** {_curve_shape_note(curve_d)}",
     ]
 
     # ── Full curves ────────────────────────────────────────────────────────────
     md += ["\n## 3. Full eval curves"]
-    for label, curve in [("A random", curve_a), ("B v3refresh", curve_b), ("C mlp_finetune", curve_c)]:
-        md.append(f"\n### {label}")
-        if not curve:
-            md.append("*(arm not run yet)*")
-            continue
-        md += ["| step | alpha | val_ori_l2r_block | lr |", "|---|---|---|---|"]
-        for st in sorted(curve.keys()):
-            e = curve[st]
-            alpha_str = f"{e.get('alpha', float('nan')):.3f}"
-            val_str = _fmt(e.get("val"))
-            lr_str = f"{e.get('lr', float('nan')):.3e}"
-            md.append(f"| {st} | {alpha_str} | {val_str} | {lr_str} |")
+    for label, curve in [("A random", curve_a), ("B v3refresh", curve_b),
+                          ("C mlp (ramp)", curve_c), ("D mlp (α=1)", curve_d)]:
+        _write_arm_curve(md, label, curve)
 
     # ── Arm C refresh diagnostics ──────────────────────────────────────────────
-    md += ["\n## 4. Arm C — MLP refresh trajectory (refresh_diagnostics.jsonl)"]
-    refresh_rows = _read_refresh_diag(OUT_C)
-    if not refresh_rows:
-        md.append(
-            "*(No refresh_diagnostics.jsonl found — arm C not run yet or refresh not triggered yet.)*"
-        )
-    else:
-        md += [
-            "| step | val_kl | top1 | rollout_tau_vs_l2r | rollout_entropy | rollout_unique | teacher_tau_vs_l2r |",
-            "|---|---|---|---|---|---|---|",
-        ]
-        for row in refresh_rows:
-            def _r(k, fmt=".4f"):
-                v = row.get(k)
-                if v is None:
-                    return "—"
-                try:
-                    return format(int(v) if fmt == "d" else float(v), fmt)
-                except (TypeError, ValueError):
-                    return str(v)
+    _write_refresh_diag_section(md, "4. Arm C — MLP ramp refresh trajectory", OUT_C)
 
-            md.append(
-                f"| {row.get('step', '—')} "
-                f"| {_r('val_kl')} "
-                f"| {_r('top1')} "
-                f"| {_r('rollout_tau_vs_l2r')} "
-                f"| {_r('rollout_entropy')} "
-                f"| {_r('rollout_unique', 'd') if row.get('rollout_unique') is not None else '—'} "
-                f"| {_r('teacher_tau_vs_l2r')} |"
-            )
-        # teacher_tau sharpness note
-        ttau_vals = [row["teacher_tau_vs_l2r"] for row in refresh_rows if "teacher_tau_vs_l2r" in row]
-        if len(ttau_vals) >= 2:
-            direction = "sharpening (↑)" if ttau_vals[-1] > ttau_vals[0] else "flattening (↓)"
-            md.append(f"\n*teacher_tau_vs_l2r trend: {ttau_vals[0]:.4f} → {ttau_vals[-1]:.4f} ({direction})*")
+    # ── Arm D (alpha=1) refresh diagnostics ────────────────────────────────────
+    _write_refresh_diag_section(md, "5. Arm D — MLP α=1 refresh trajectory", OUT_C_A1)
 
     # ── Verdict guide ──────────────────────────────────────────────────────────
     md += [
-        "\n## 5. Verdict guide",
+        "\n## 6. Verdict guide",
+        "### Self-bootstrap (C vs A/B)",
         "- **C ≪ A and C ≤ B** ⇒ self-bootstrap works: MLP from-0 matches or beats v3.",
         "- **C ≈ B** ⇒ matches v3; alternating adds little overhead over plain progressive_rw_v3.",
-        "- **C ≈ A** ⇒ bootstrap fails; check `teacher_tau_vs_l2r` in the refresh trajectory "
-        "(if it stays near 0, the early teacher provides no useful signal — "
-        "consider longer warmup before first refresh or higher alpha-warmup-start).",
-        "- **C > A** ⇒ MLP interference; verify mlp-distill-epochs/n-orders are not overfitting "
-        "the first noisy teacher.",
+        "- **C ≈ A** ⇒ bootstrap fails; check `teacher_tau_vs_l2r` in the refresh trajectory.",
+        "- **C > A** ⇒ MLP interference; verify mlp-distill-epochs/n-orders are not overfitting.",
+        "",
+        "### Alpha schedule ablation (D vs C)",
+        "- **D < C** ⇒ full MLP trust (α=1) is better; gradual mixing is unnecessary regularization.",
+        "- **D ≈ C** ⇒ alpha schedule doesn't matter; the order policy itself is the key factor.",
+        "- **D > C** ⇒ random mixing / gradual curriculum is load-bearing; α=1 over-specializes "
+        "or suppresses diversity too early.",
         "",
         "*(Report auto-generated by `scripts/run_alternating_from0.py --report-only` "
         "or on completion of each arm.)*",
@@ -451,9 +477,9 @@ def _parse_args(argv=None):
     )
     parser.add_argument(
         "--arm",
-        choices=["random", "v3refresh", "mlp"],
+        choices=["random", "v3refresh", "mlp", "mlp_alpha1"],
         default=None,
-        help="Which arm to launch: random (A), v3refresh (B), or mlp (C).",
+        help="Which arm to launch: random (A), v3refresh (B), mlp (C), or mlp_alpha1 (alpha=1 ablation).",
     )
     parser.add_argument(
         "--report-only",
