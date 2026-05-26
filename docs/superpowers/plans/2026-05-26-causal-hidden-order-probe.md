@@ -14,6 +14,25 @@ Run all tests from repo root: `cd /home/admin/lyuyuhuan/order_lyu && /home/admin
 
 ---
 
+## REVISION (2026-05-27, after CT1 PRE-GATE — see spec §0.5)
+
+CT1 found this is a **target-aware AO** architecture: the predictor hidden at rank `t*BL` is
+AdaLN-conditioned on the next target position, so `c_t = c_t(S_t, v)` where `v=σ(t+1)` (verified:
+fix `(S_t,v)`, vary rest → bit-identical; vary `v` → changes). This **supersedes** the tasks below:
+
+- **Path X (MAIN, the verdict gate):** candidate-conditioned `c_t^{(v)} = context_hidden_at_step(S_t,
+  completion=[v]+rest)` (the existing primitive already computes this — `completion[0]` IS `σ(t+1)`).
+  Score `s_H(v) = paired_cos(C, E_cand)` where `C[j]=c_t^{(U[j])}`, `E_cand[j]=e_{U[j]}` (per-candidate
+  cosine), or qk. **FORBID true-token-likelihood scoring** (Level-2 circularity).
+- **Path Y (CONTROL only, NOT the gate):** target-neutral `p_t = pool_{u∈S_t}(partial-context original
+  hidden)`; `s_H(v)=cos(p_t, e_v)` (shared context). **A Y NULL does not close the line.**
+- **Reframed PRE-GATE (Task 1):** test `c_t^{(v)}` is invariant to `σ(t+2..)` holding `(S_t, v)` fixed
+  (passes). NOT the old "completion-invariant `c_t`".
+- **Affected tasks:** Task 1 (invariance check semantics + add Path-Y pooled helper), Task 3 (add
+  `paired_cos`), Task 4 (rollout: X = per-candidate `c_t^{(v)}`; Y = shared `p_t` control), Task 6/8
+  (X is the gate; Y reported as control; cost-controlled X: text first, `n_roll∈{8,16}`, eval 128–256,
+  `γ∈{0,.5,1}`, cos first). Implement Y first as a cheap pipeline smoke, then X.
+
 ## File Structure
 
 | File | Responsibility |
