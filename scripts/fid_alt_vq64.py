@@ -161,13 +161,17 @@ def main():
     orders = [o.strip() for o in args.orders.split(",") if o.strip()]
 
     model, ckpt = load_model(args.run_dir, args.step, args.device)
-    B_np = np.load(args.run_dir / f"A_global_step{args.step}.npy").T.copy()
-    np.fill_diagonal(B_np, 0.0)
-    B_np = B_np.astype(np.float32)
-    mlp = OrderMLP()
-    mlp.load_state_dict(torch.load(args.run_dir / f"beta_step{args.step}.pt",
-                                   map_location="cpu", weights_only=False))
-    mlp.to(args.device).eval()
+    # B/MLP policy 才需要 A_global+beta；raster/random order 不碰它们（见 build_block_orders 的 raster 分支 = 纯 arange）。
+    # 这样固定-order 训练的模型（如 raster_from0，无 A_global/beta）也能用 --orders raster 算 FID。
+    B_np, mlp = None, None
+    if "mlp" in orders:
+        B_np = np.load(args.run_dir / f"A_global_step{args.step}.npy").T.copy()
+        np.fill_diagonal(B_np, 0.0)
+        B_np = B_np.astype(np.float32)
+        mlp = OrderMLP()
+        mlp.load_state_dict(torch.load(args.run_dir / f"beta_step{args.step}.pt",
+                                       map_location="cpu", weights_only=False))
+        mlp.to(args.device).eval()
 
     inverse_patch_order = torch.from_numpy(
         np.load(args.data_dir / "inverse_patch_order_indices.npy")).long()
