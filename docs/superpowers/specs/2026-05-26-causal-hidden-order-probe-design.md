@@ -35,6 +35,55 @@ dynamic, context-dependent signal the two negatives did not touch.
 
 ---
 
+## §0.5 REVISION (2026-05-27, after CT1 PRE-GATE) — Path X is the main experiment, Path Y is a control
+
+**Finding (verified on the model + a tiny smoke):** this is a **target-aware any-order** architecture.
+`AOGPT_block` conditions every block and the final layer (AdaLN) on `target_pos_emb_final` — the
+TARGET position each sequence slot will predict. The predictor hidden at reveal-rank `t*BL` is
+therefore conditioned on the **next target position σ(t+1)**. Empirically: holding `(S_t, σ(t+1)=v)`
+fixed and varying the rest of the order → predictor hidden is **bit-identical** (max-diff 0.0; the
+real causal precondition); varying `σ(t+1)=v` → it changes (max-diff ~0.01). So:
+
+> **`c_t` is intrinsically candidate-conditioned: `c_t = c_t(S_t, v)`** where `v=σ(t+1)`. This is not
+> future leakage — it is the model being told which position/block it is about to predict.
+
+**Consequence:** the original §3 "single `c_t` per step + arbitrary completion" is ill-defined (it left
+`σ(t+1)` implicit as `completion[0]`). The probe is reframed into three layers:
+
+| layer | context | candidate-conditioned? | role |
+|---|---|---|---|
+| static full-context hidden | `cos(h_u,h_v)` / scalar residual | n/a | **already NEGATIVE** ([[hidden_residual_diag_line]], [[hidden_graph_diag_line]]) |
+| **Path Y** (target-neutral) | `p_t = pool_{u∈S_t}(h_u^{partial})` (partial-context original hiddens) | NO (same `p_t` for all `v`) | **CONTROL / pipeline smoke / ablation — NOT the main gate** |
+| **Path X** (target-aware) | `c_t^{(v)} = predictor hidden(S_t, σ(t+1)=v)` | YES | **MAIN EXPERIMENT — the verdict gate** |
+
+**Decision rules (override §10 where they conflict):**
+- **Path X is the scientific verdict.** WIN/NULL is computed from Path X only (the §10 six-condition
+  gate applies to the X γ-sweep).
+- **Path Y is a control/ablation, never the gate.** A **Y NULL does NOT close the hidden-controller
+  line.** Y exists to (a) validate the residualize/γ-mix/NLL-under-order pipeline cheaply, and (b)
+  show whether a target-neutral context summary alone carries any signal.
+- **Score for X:** `s_H(v) = cos(c_t^{(v)}, e_v)` (primary) or `q(c_t^{(v)})·k(e_v)` (secondary).
+  **FORBIDDEN:** scoring by the true-token likelihood / NLL of `v` (that degenerates into the
+  Level-2 oracle and is circular with the NLL-under-order eval). Only hidden-similarity / qk readouts.
+- **`c_t^{(v)}` depends on `v` only through `v`'s target position** (the predictor has not seen `v`'s
+  tokens — it is predicting them). So across candidates, `c_t^{(v)}` varies positionally; the
+  **position residualization (§6) is essential** to isolate any non-positional order signal.
+
+**Reframed PRE-GATE (§4 supersede):** test that `c_t^{(v)}` is invariant to `σ(t+2..N)` holding
+`(S_t, σ(t+1)=v)` fixed (this is the real causal precondition for Path X, and it **passes** — Test A
+above). Do **not** test the old "completion-invariant `c_t`" (that premise was wrong).
+
+**Cost control for X (it is `Σ_t (N−t) ≈ N²/2 ≈ 2048` candidate-forwards per rolled order):** start
+small — **text only**, `n_roll ∈ {8,16}`, eval subset `128–256`, `γ ∈ {0, 0.5, 1}`, **cos first**
+(qk secondary), one ckpt smoke (text `clean_random@30k` or `alt_mlp@30k`) before scaling. If the X
+smoke cannot beat A-only at all, decide whether to stop; if there is any signal, expand. **Only an X
+NULL closes the line** ("target-aware causal hidden controller has no frozen evidence at this scale").
+
+**Execution order:** implement Path Y first (cheap) to validate the pipeline (residualize, γ-mix,
+NLL, driver, report), but mark Y as non-gate in the report; then small Path X smoke; then full X.
+
+---
+
 ## §1 Question & scope
 
 > On a frozen model, can an order built from **per-step causal hidden** (dynamic, context-dependent,
