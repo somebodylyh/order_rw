@@ -71,6 +71,14 @@ collapsed to ~L2R — reconfirmed live: alt α=1.0 run teacher τ_vs_L2R≈0.97 
 Two ckpts per modality (random-trained vs order-curriculum-trained) answer whether `B_H`
 structure depends on the training curriculum.
 
+**Execution staging** (the image contrast ckpt is still training — do not let it block):
+- **Stage A** (all ckpts ready now): text primary `clean_base_random_perm`, text contrast
+  `alt_from0_mlp_finetune`, image primary `vq64_alt_…_l8h8e512`.
+- **Stage B** (after `vq64_fixed_random_l8h8e512@30k` finishes): image contrast `fixed_random`.
+
+The diagnostic and its verdict are computed per-ckpt, so Stage A produces complete results
+on its own; Stage B is appended when the ckpt lands.
+
 ## 4. The three graphs (N×N, diag = 0)
 
 - **`B_A`** = `directed_graph_policy.build_directed_graph(A_global)` = `Aᵀ` with diagonal
@@ -140,6 +148,9 @@ frozen model's teacher-forced token-avg NLL on a fixed val subset, reusing
 > generated orders (one forward per order), the same metric family as
 > `val_random / val_raster / val_model_order`. It is **not** a per-candidate NLL teacher and
 > does not supervise residuals.
+> **Checkpoint-local:** each ckpt is evaluated with orders generated from *its own*
+> `B_A / B_H / B_pos`. Never score one ckpt's order with another ckpt's model unless the row
+> is explicitly labelled a cross-check (order and model state must match or NLL is meaningless).
 
 ## 7. Stage gating (oracle-first → causal)
 
@@ -171,8 +182,12 @@ and treat differences within that spread as ties (cf. prior single-seed noise-fl
    γ in {0.25,0.5,1} are **no worse** than A-only and at least one is **clearly better**
    (a lone `γ=2` blip does not count);
 5. **control guard**: A+H_resid beats a matched control where `B_H_resid` is replaced by a
-   matched-random residual graph (same off-diag moments) or by `B_pos` itself — i.e. the gain
-   is specific to the hidden graph, not to "adding any second signal".
+   matched-random residual graph or by `B_pos` itself — i.e. the gain is specific to the
+   hidden graph, not to "adding any second signal". The matched-random residual is built by
+   **row-wise / off-diagonal permutation of `B_H_resid`** (after residualization, before
+   readout preprocessing), preserving the off-diagonal value multiset and diag = 0, then run
+   through the **same** shift-to-nonnegative + per-step standardization as `B_H_resid`. This
+   controls for "a second signal of equal strength", not a differently-scaled noise matrix.
 
 Interpretation buckets (per modality):
 - raw `B_H` already structureless → route closed (strong null);
