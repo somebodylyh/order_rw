@@ -48,6 +48,9 @@ def build_text(args, device):
 
     # Path X (MAIN): per-candidate c_t^{(v)} -> (M, E)
     # ctx_fn must return one row per candidate in the same order as cand_phys.
+    # NOTE: Path X makes |U_t| model forwards per rollout step -> O(N^2) total.
+    # For N=64: sum_{t=0}^{63} |U_t| = 64*63/2 = 2016 forwards x n_roll samples.
+    # Acceptable for a frozen diagnostic; CT7 (image) may need a reduced n_roll.
     def ctxX_fn(S_phys, cand_phys):
         prefix_m = p2m(S_phys).tolist()
         cols = []
@@ -156,10 +159,11 @@ def verdict(results):
     nonzero = [g for g in px if g != "gamma0.0"]
     best = max(improved.values())
     best_g = max(px, key=lambda k: a_only - px[k]["nll"])
-    adj = [improved[g] for g in nonzero]
-    # "adjacent gammas don't collapse": require the non-best nonzero gammas to not fall far below A-only.
-    # With 2 nonzero gammas, at least 1 must be non-negative (i.e. >=1 out of max(1, len-1)=1).
-    stable = (best > 0.01) and (sum(d >= -1e-3 for d in adj) >= max(1, len(adj) - 1))
+    nonzero_improvements = [improved[g] for g in nonzero]
+    # Stability rule: at least one non-anchor gamma must not collapse below A-only
+    # (at most one may go negative); and best must clear the 0.01 floor.
+    # With 2 nonzero gammas, at least 1 must be non-negative (>=1 out of max(1, len-1)=1).
+    stable = (best > 0.01) and (sum(d >= -1e-3 for d in nonzero_improvements) >= max(1, len(nonzero_improvements) - 1))
     beats_pos = (a_only - results["controls"]["position"]) < best
     beats_shuf = (a_only - results["controls"]["shuffled_hidden_X"]) < best
     not_l2r = abs(px[best_g]["tau_vs_L2R"]) < 0.95
@@ -190,7 +194,7 @@ def write_report(out_dir, modality, ckpt, pregate, results, verd, ev_mode):
     content_token_caveat = ""
     if ev_mode == "content_token":
         content_token_caveat = (
-            "\n> CAVEAT: content_token e_v sees candidate content -> "
+            "> CAVEAT: content_token e_v sees candidate content -> "
             "NOT a deployable generation-time controller\n"
         )
 
@@ -264,7 +268,11 @@ def main():
     p.add_argument("--n-chunks", type=int, default=16)
     p.add_argument("--n-roll", type=int, default=16)
     p.add_argument("--ev-mode", default="content_token",
-                   choices=["content_token", "content_free"])
+                   choices=["content_token", "content_free"],
+                   help="Candidate embedding mode. content_token (default): e_v = wte of the "
+                        "candidate token — sees candidate content, so results are NOT a "
+                        "deployable generation-time controller. content_free: e_v = wpe "
+                        "positional embedding only — deployment-grade (no token leakage).")
     p.add_argument("--pos-tau", type=float, default=2.0)
     p.add_argument("--n-patterns", type=int, default=4)
     p.add_argument("--eval-batch-size", type=int, default=16)
@@ -290,6 +298,7 @@ def main():
             f"# PRE-GATE FAILED ({args.modality})\n"
             f"Future completion leaks into predictor hidden; "
             f"dynamic-hidden probe invalid.\n"
+            f"Pass threshold: min_cosine > 0.99999\n"
             f"min_cosine={ctx['pregate']['min_cosine']:.6f}\n"
             f"n_fail={ctx['pregate']['n_fail']}\n"
             f"fails={json.dumps(ctx['pregate']['fails'], indent=2)}\n")
