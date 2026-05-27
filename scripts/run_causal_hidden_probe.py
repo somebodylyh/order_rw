@@ -91,7 +91,65 @@ def build_text(args, device):
 
 
 def build_image(args, device):
-    raise NotImplementedError("CT7: image path not yet implemented")
+    import pickle
+    from run_hidden_graph_diag import AOGPT_from_ckpt
+    from directed_graph_policy import build_directed_graph
+
+    ckpt = torch.load(args.ckpt, map_location=device, weights_only=False)
+    model = AOGPT_from_ckpt(ckpt, device)
+
+    with open(args.meta, "rb") as f:
+        meta = pickle.load(f)
+    BL = int(meta.get("block_order_block_len", 1))
+    N = 64
+
+    val = np.fromfile(args.data_val, dtype=np.uint16).reshape(-1, N * BL)
+    idx_eval = torch.from_numpy(val[:args.n_eval].astype(np.int64))
+    idx_roll = torch.from_numpy(val[:args.n_roll].astype(np.int64))
+
+    # B_A from precomputed A_global (identity-framed: phys == model block ids)
+    B_A = build_directed_graph(np.load(args.a_global_path).astype(np.float32))
+
+    # B_pos: Manhattan grid (image locality prior)
+    B_pos = PG.image_manhattan_graph(side=8, tau=args.pos_tau)
+
+    # Path X (MAIN): per-candidate c_t^{(v)} -> (M, E)
+    # Identity-framed: block ids passed straight through (no p2m translation).
+    # Cast to python int to avoid numpy-int indexing surprises inside CHR.
+    def ctxX_fn(S, cand):
+        prefix = [int(b) for b in S]
+        cols = []
+        for v in cand:
+            others = [int(u) for u in cand if int(u) != int(v)]
+            c = CHR.candidate_conditioned_hidden(model, idx_roll, prefix, int(v), others, BL, device)
+            cols.append(c.mean(axis=0))    # (E,)
+        return np.stack(cols, axis=0)      # (M, E)
+
+    # Path Y (CONTROL): shared pooled p_t -> (E,)
+    def ctxY_fn(S, cand):
+        p = CHR.pooled_context_hidden(model, idx_roll, [int(b) for b in S],
+                                      [int(u) for u in cand], BL, device)
+        return p.mean(axis=0)              # (E,)
+
+    # Candidate embeddings -> (M, E)
+    def cand_fn(cand):
+        E_c = CHR.candidate_embeddings(model, idx_roll, [int(u) for u in cand], BL,
+                                       mode=args.ev_mode, device=device)
+        return E_c.mean(axis=0)            # (M, E)
+
+    # nll_fn: identity-framed phys_order passed directly (no block perm remapping needed)
+    nll_fn = lambda phys_order: MIO.nll_under_order_image(
+        model, idx_eval, np.asarray(phys_order, dtype=np.int64), BL, device,
+        batch_size=args.eval_batch_size)
+
+    pregate = CHR.causal_invariance_check(model, idx_roll, N, BL, device,
+                                          n_patterns=args.n_patterns)
+    print(f"[PRE-GATE] passed={pregate['passed']} min_cosine={pregate['min_cosine']:.6f} "
+          f"n_compare={pregate['n_compare']} n_fail={pregate['n_fail']}", flush=True)
+
+    return dict(model=model, B_A=B_A, B_pos=B_pos,
+                ctxX_fn=ctxX_fn, ctxY_fn=ctxY_fn, cand_fn=cand_fn,
+                nll_fn=nll_fn, pregate=pregate, N=N)
 
 
 def run_levels(ctx, args):
