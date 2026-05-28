@@ -68,8 +68,18 @@ def get_lr(global_step, args):
 
 
 @torch.no_grad()
-def extract_A_matrices(model, idx_chunks, clean_perm, device, n_chunks=None):
-    """Extract NxN attention matrices from current model on given chunks."""
+def extract_A_matrices(model, idx_chunks, clean_perm, device, n_chunks=None, seed=None):
+    """Extract NxN attention matrices from current model on given chunks.
+
+    Args:
+        seed: Optional int. When provided, the per-sample random block-reveal
+            permutation is drawn from a CPU torch.Generator seeded with
+            ``int(seed) + i`` (where ``i`` is the chunk index), making B
+            extraction bit-for-bit reproducible across runs. When ``None``
+            (default), falls back to the legacy un-seeded
+            ``torch.randperm(N, device='cpu')`` call, preserving exact
+            backward-compatible behavior for existing callers.
+    """
     if n_chunks is None:
         n_chunks = len(idx_chunks)
     n_chunks = min(n_chunks, len(idx_chunks))
@@ -82,7 +92,12 @@ def extract_A_matrices(model, idx_chunks, clean_perm, device, n_chunks=None):
     for i in range(n_chunks):
         tokens = idx_chunks[i:i+1].to(device)  # (1, 256) model-coordinate tokens
 
-        rand_blocks = torch.randperm(N, device='cpu')
+        if seed is not None:
+            gen = torch.Generator(device='cpu')
+            gen.manual_seed(int(seed) + int(i))
+            rand_blocks = torch.randperm(N, generator=gen, device='cpu')
+        else:
+            rand_blocks = torch.randperm(N, device='cpu')
         token_order = expand_model_blocks_to_token_order(
             rand_blocks.unsqueeze(0), BLOCK_LEN
         ).to(device)
