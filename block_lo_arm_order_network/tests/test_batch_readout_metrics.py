@@ -15,8 +15,8 @@ def test_identity_metrics():
         kendall_tau_batch, pairwise_acc, spearman_rho_batch, top1_acc, first_k_overlap,
     )
     sig = np.tile(np.arange(64), (5, 1))
-    assert kendall_tau_batch(sig, sig) == 1.0
-    assert spearman_rho_batch(sig, sig) == 1.0
+    assert kendall_tau_batch(sig, sig) == pytest.approx(1.0, abs=1e-9)
+    assert spearman_rho_batch(sig, sig) == pytest.approx(1.0, abs=1e-9)
     # rank where node 0 = earliest -> highest logit; pair is correct iff z[i] > z[j]
     rank = sig.copy()
     z = torch.tensor(np.linspace(1, -1, 64))[None].repeat(5, 1)
