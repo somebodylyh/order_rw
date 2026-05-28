@@ -125,11 +125,15 @@ def extract_A_matrices(model, idx_chunks, clean_perm, device, n_chunks=None, see
         phys_tokens = phys_blocks * BLOCK_LEN + (reveal_tokens % BLOCK_LEN)  # (256,)
 
         attn_content = avg_attn[1:, 1:]  # (256, 256)
+        # Vectorized physical-frame remap: equivalent to the legacy
+        #   for rq in range(SEQ_LEN):
+        #       for rk in range(SEQ_LEN):
+        #           attn_phys[phys_tokens[rq], phys_tokens[rk]] += attn_content[rq, rk]
+        # but ~7-10x faster. Bit-identity is pinned by
+        # tests/test_extract_A_remap_vectorized.py across random/identity
+        # permutations, both dtypes, and an explicit collision case.
         attn_phys = np.zeros((SEQ_LEN, SEQ_LEN), dtype=np.float32)
-        for rq in range(SEQ_LEN):
-            pq = phys_tokens[rq]
-            for rk in range(SEQ_LEN):
-                attn_phys[pq, phys_tokens[rk]] += attn_content[rq, rk]
+        np.add.at(attn_phys, (phys_tokens[:, None], phys_tokens[None, :]), attn_content)
 
         # Aggregate to NxN
         A = np.zeros((N, N), dtype=np.float32)
