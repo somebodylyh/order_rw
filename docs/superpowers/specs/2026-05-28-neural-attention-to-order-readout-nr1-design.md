@@ -219,6 +219,29 @@ precedence). Spearman ρ gives a distinct, rank-correlation angle.
 
 All gates are on the **same-ckpt held-out val**, not on cross-ckpt data.
 
+### 5.1b Teacher diversity diagnostic (mandatory report item, not a gate)
+
+Before reporting any NR-1 result, report the teacher-order diversity over
+the training set, so reviewers can interpret a high τ correctly:
+
+| Diversity stat | What it tells us |
+|---|---|
+| unique-σ count over the M graphs | how degenerate the teacher's order distribution is |
+| first-node entropy `H(σ_T[0])` | how anchored the source-start is |
+| distinct first-3 prefixes count | early-order diversity |
+| mean pairwise Kendall τ among σ_T(B_i) | how similar teacher orders are across samples |
+
+This is needed because **high student τ has two qualitatively different
+readings**:
+
+| Teacher diversity | NR-1 student τ high | Reading |
+|---|---|---|
+| **low** (teacher nearly identical across samples) | high | student learned a global attention-induced order prior; per-sample attention-to-order mapping is **not** evidenced |
+| **high** (teacher varies per sample) | high | student learned a per-sample attention-to-order mapping |
+
+Both readings are publishable, but they support different claims, so this
+diagnostic must accompany every τ report.
+
 ### 5.2 Diagnostic metrics (NOT pass/fail; reported only)
 
 | Metric | Used for |
@@ -324,6 +347,17 @@ only the input transform changes.
 
 writing-plans will turn this into a TDD-style execution plan with explicit
 checkpoints between steps 6 ↔ 7 and 7 ↔ 9.
+
+### Model selection policy (mandatory, written into training code)
+
+**Checkpoints and hyperparameters for g_β are selected only by §5.1
+attention-order matching metrics** (Kendall τ, pairwise precedence accuracy,
+Spearman ρ) on same-ckpt held-out val. Frozen-θ NLL is computed and
+reported but is **never** consulted for early stopping, learning-rate
+selection, layer/head count, dropout, or any other choice that affects
+which g_β we ship. This policy is encoded as an assertion in the training
+script: any code path that imports the frozen-θ NLL evaluator must do so
+strictly after the chosen g_β checkpoint is loaded for reporting.
 
 ---
 
