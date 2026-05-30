@@ -38,8 +38,17 @@ cheap score 是 **head pre-selector**,**不是**最终 oracle。就算它不完�
 - 不加 first-eigenvector 等高解释成本的 score;
 - 不引入新 readout 变体。
 
-**红线(继承 BR-1 / NR-1 / stability spec)**:
-- 只用 attention-derived 信息;**严禁 NLL / L2R-raster oracle 进入 readout 或 selection**;
+**红线(继承 BR-1 / NR-1 / stability spec,L2R 边界已收窄)**:
+
+L2R 在本线只是**显微镜,不是老师**——用来定位/验证信号,不当训练标签。三类东西必须分清:
+1. **信号诊断标签 = L2R τ**:只用于分析"哪个 head 含 order 信号、方向是 L2R 还是 anti-L2R",属 diagnostic / measurement / selector validation。**允许**。
+2. **MLP/readout teacher = attention-derived CDL pseudo-order**(`generate_teacher_label`,source-start):MLP 学 `B → σ_CDL`,**不是** `B → [0,1,…,63]`。
+3. **训练时用的 order = `g_β(B) → logits → sample/argsort → σ`**:不把 L2R 直接塞进去。
+
+据此红线为:
+- **训练 / MLP g_β / order generation / NLL / reward / image selection 一律不得使用 ground-truth L2R label 或 NLL**;
+- selector **validation** 可用 expensive CDL τ 与 L2R 作 diagnostic ground truth(证明 cheap score 能召回真信号);
+- ⚠️ 诚实声明:因 cheap score 的主 score 及符号是用 `tau_vs_l2r` 回归校准出来的,本 selector 属 **diagnostic-calibrated head selector**——实验阶段 OK;若写成正式方法,正式路径是 `cheap score top-k → CDL validation → select head`(L2R 只证明 cheap score 能召回真信号,**不在线选 head**),正式 hook 时只使用选出的 head,不把 L2R label 传入 order generation。
 - expensive readout 固定 CDL-source-start(`alpha_dep=0.5`),与既有 teacher 口径一致;
 - `extract_A_matrices` 的 `torch.randperm` **必须播种**(per-seed `torch.Generator`),否则跨 run B 方差污染(见 `cdl_evolution_clean_base_20260527.md`)。
 
@@ -61,16 +70,24 @@ cheap score 是 **head pre-selector**,**不是**最终 oracle。就算它不完�
 - **C3**:过滤 dead/uniform head(readiness 无展开);
 - **C4**:过滤对称 / local-only head(无方向性 → 不可能编码顺序方向)。
 
-过滤阈值 `dead_thresh` / `sym_thresh` **数据驱动校准**:取 step0(随机初始化,无 order 信号)全 head 的 C3 / C4 分布,阈值设在该 null 分布的高分位(如 95th pct)——即"显著高于随机初始化水平"才不被过滤。不预设固定数值,在 `validate_quick_selector.py` 里从 step0 scan 标定后报告。
+### 3.1 符号校准(关键 —— C1/C2 的正负语义不预设)
 
-⚠️ 注:C1 依赖 physical index,带一点 L2R prior 味道——但它**只是 selector diagnostic**,不进入任何 readout/训练,且其方向性会被 C4(无监督)交叉印证。哪个(C1 还是 C2)当主排序 score,由 §5 经验回归决定,不预设。
+⚠️ **绝不预设 C1/C2 的符号方向**。readiness `r(v)=out(v)−α·in(v)` 对 L2R 的几何可能是"低 index 高、高 index 低",因此 `corr(r, phys_index)` 对 L2R-aligned head **可能是负相关**;又因为用的是 `B=Aᵀ`,C2 的"指向前/后"直觉也可能与表面相反。任何"C1>0 即 L2R-aligned"的预设都可能把符号搞反、导致 `best+`/`best−` 互换。
+
+因此 C1/C2 **同时报 raw 与 sign-calibrated 两版**。校准规则:在 calibration split 上选符号约定,使 **positive cheap score 与 expensive `tau_vs_l2r` 正相关**(即 `s_cal = sign(spearman(s_raw, expensive_τ)) · s_raw`)。selector **只用 sign-calibrated 版本**;§5 经验回归既挑主 score(C1 vs C2)也定其符号,均不预设。
+
+### 3.2 过滤阈值
+
+`dead_thresh` / `sym_thresh` **数据驱动校准**:取 step0(随机初始化,无 order 信号)全 head 的 C3 / C4 分布,阈值设在该 null 分布的高分位——即"显著高于随机初始化水平"才不被过滤。**不写死**:default 95th percentile,fallback 90th percentile,并在 `validate_quick_selector.py` 里报告对 90/95 阈值的 sensitivity(避免 step0 偶发高 asymmetry 的 random head 误过滤掉早期弱信号)。
+
+⚠️ 注:C1 依赖 physical index,带一点 L2R prior 味道——但它**只是 selector diagnostic**(见 §2 红线收窄),不进入任何 readout/训练,且其方向性会被 C4(无监督)交叉印证。哪个(C1 还是 C2)当主排序 score,由 §5 经验回归决定,不预设。
 
 ## 4. 选 head 规则(继承硬约束:禁盲取 |score| winner)
 
 ```
-signed_score = best empirical proxy among {C1, C2}   # 由 §5 回归选出
+signed_score = sign-calibrated proxy among {C1, C2}   # 由 §5 回归选出主 score 及其符号(§3.1)
 mask = (C3 > dead_thresh) AND (C4 > sym_thresh)       # 过滤 dead / symmetric head
-best_positive   = argmax_{masked} signed_score        # L2R-aligned,作 order provider
+best_positive   = argmax_{masked} signed_score        # +score 已校准为与 expensive τ 同号 → L2R-aligned,作 order provider
 best_negative   = argmin_{masked} signed_score        # anti-L2R
 pool            = {best_positive} ∪ top2(best_negative)  # 带 sign 标签
 ```
@@ -135,8 +152,9 @@ def select_heads(scores, rule="pool", k=2, dead_thresh=..., sym_thresh=...,
 
 ## 7. TDD 测试要点
 
-- **C1 符号**:构造 out-degree 单调递减图(source 在低 index)→ C1 > 0 且值高;反序图 → C1 < 0。
-- **C2 符号**:构造净位移向后/向前的 B → C2 符号正确。
+- **C1 raw 符号一致性**:构造 out-degree 单调图 + 其反序图,确认 raw C1 在两者上符号相反、量级合理(不预设哪个为正——只测"方向可分")。
+- **C2 raw 符号一致性**:净位移向前 vs 向后的 B,raw C2 符号相反。
+- **sign calibration**:给定一组 (raw_score, expensive_τ),`s_cal = sign(spearman(raw,τ))·raw` 后,`spearman(s_cal, τ) ≥ 0`;构造一个 raw 与 τ 负相关的 case,确认校准后翻正。
 - **C3 过滤**:均匀 / 全零 head → C3 ≈ 0,被 dead-head filter 过滤;C1/C2 在退化图上不崩。
 - **C4 过滤**:对称 B(`B = Bᵀ`)→ C4 ≈ 0,被 directionality filter 过滤;强方向图 → C4 高。
 - **select_heads**:在含一正一负强头的合成 scores 上,返回正确 `best+` / `best−` 且 sign 正确;验证**绝不**返回 `argmax|score|`(构造一个 `|负头| > |正头|` 的 case,确认 best+ 仍是正头)。
