@@ -63,6 +63,62 @@ def _make_chunks(n_chunks, vocab=50, seed=0):
     return torch.randint(0, vocab, (n_chunks, SEQ_LEN), generator=g)
 
 
+def _orig_scalar_A_block(avg_attn, reveal_tokens, inv_perm,
+                         seq_len=SEQ_LEN, num_blocks=N, block_len=4):
+    """Verbatim pre-vectorization attn257_to_A_block (double-loop scatter-add +
+    per-block mean). Reference to pin _attn_to_A_block_vec against, so the
+    vectorization can't silently drift from the canonical extract_A_matrices math.
+    """
+    avg_attn = np.asarray(avg_attn, dtype=np.float32)
+    reveal_tokens = np.asarray(reveal_tokens, dtype=np.int64)
+    inv_perm = np.asarray(inv_perm, dtype=np.int64)
+    model_blocks = reveal_tokens // block_len
+    phys_tokens = inv_perm[model_blocks] * block_len + (reveal_tokens % block_len)
+    attn_phys = np.zeros((seq_len, seq_len), dtype=np.float32)
+    np.add.at(attn_phys, (phys_tokens[:, None], phys_tokens[None, :]), avg_attn[1:, 1:])
+    A = np.zeros((num_blocks, num_blocks), dtype=np.float32)
+    for bi in range(num_blocks):
+        for bj in range(num_blocks):
+            A[bi, bj] = attn_phys[bi * block_len:(bi + 1) * block_len,
+                                  bj * block_len:(bj + 1) * block_len].mean()
+    none_attn = avg_attn[1:, 0]
+    none_block = np.array([none_attn[b * block_len:(b + 1) * block_len].mean()
+                           for b in range(num_blocks)])
+    A += none_block[np.newaxis, :] * 0.1
+    np.fill_diagonal(A, 0.0)
+    return A
+
+
+def test_vec_matches_original_scalar():
+    """Vectorized core reproduces the original double-loop algorithm (fp-close)."""
+    block_len = SEQ_LEN // N
+    g = np.random.default_rng(0)
+    inv_perm = g.permutation(N)
+    # reveal_tokens must be a permutation of [0, SEQ_LEN) (a token_order row).
+    reveal = g.permutation(SEQ_LEN)
+    for _ in range(5):
+        attn = g.random((SEQ_LEN + 1, SEQ_LEN + 1)).astype(np.float32)
+        ref = _orig_scalar_A_block(attn, reveal, inv_perm, block_len=block_len)
+        got = phs.attn257_to_A_block(attn, reveal, inv_perm)
+        assert got.shape == ref.shape
+        assert np.allclose(got, ref, atol=1e-6), np.abs(got - ref).max()
+
+
+def test_vec_leading_dims_match_per_head():
+    """Stacked (L,H,..) vec call == per-(l,h) scalar calls, bit-for-bit."""
+    block_len = SEQ_LEN // N
+    g = np.random.default_rng(1)
+    inv_perm = g.permutation(N)
+    reveal = g.permutation(SEQ_LEN)
+    L, H = 2, 3
+    stack = g.random((L, H, SEQ_LEN + 1, SEQ_LEN + 1)).astype(np.float32)
+    batched = phs._attn_to_A_block_vec(stack, reveal, inv_perm)
+    for l in range(L):
+        for h in range(H):
+            single = phs.attn257_to_A_block(stack[l, h], reveal, inv_perm)
+            assert np.array_equal(batched[l, h], single)
+
+
 def test_batched_equals_loop_reference():
     model, perm, dev = _FakeAOGPT(), _FakePerm(), torch.device("cpu")
     chunks = _make_chunks(6)

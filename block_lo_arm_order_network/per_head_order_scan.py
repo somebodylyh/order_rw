@@ -38,6 +38,59 @@ from batch_readout.diversity_batch import teacher_diversity_stats
 # ---------------------------------------------------------------------------
 # Pure coordinate / metric helpers (unit-tested without a model)
 # ---------------------------------------------------------------------------
+def _attn_to_A_block_vec(attn, reveal_tokens, inv_perm,
+                         seq_len=SEQ_LEN, num_blocks=N, block_len=BLOCK_LEN,
+                         none_weight=0.1):
+    """Vectorized attn257_to_A_block over arbitrary leading dims.
+
+    Same physical-frame remap / block-mean / [None]-source / zero-diagonal math
+    as the scalar path, but applied to a whole stack of attention matrices at
+    once. `reveal_tokens` is a permutation of [0, seq_len) (it is a token_order
+    row), so the reveal->physical token map is a bijection with no collisions —
+    the np.add.at scatter therefore reduces to a plain fancy-index assignment,
+    and the NxN block aggregate becomes a single reshape+mean (no Python loop).
+
+    Args:
+        attn: (..., T+1, T+1) float array; row/col 0 is the [None] sink token.
+        reveal_tokens: (T,) int model-coordinate token positions.
+        inv_perm: (num_blocks,) int model-block -> physical-block map.
+
+    Returns:
+        A: (..., num_blocks, num_blocks) float32, physical frame, zero diagonal.
+    """
+    attn = np.asarray(attn, dtype=np.float32)
+    lead = attn.shape[:-2]
+    K = int(np.prod(lead)) if lead else 1
+    a = attn.reshape(K, seq_len + 1, seq_len + 1)
+
+    reveal_tokens = np.asarray(reveal_tokens, dtype=np.int64)
+    inv_perm = np.asarray(inv_perm, dtype=np.int64)
+    model_blocks = reveal_tokens // block_len
+    phys_blocks = inv_perm[model_blocks]
+    phys_tokens = phys_blocks * block_len + (reveal_tokens % block_len)
+
+    # Bijective remap (phys_tokens is a permutation) => assignment == scatter-add.
+    attn_phys = np.zeros((K, seq_len, seq_len), dtype=np.float32)
+    attn_phys[:, phys_tokens[:, None], phys_tokens[None, :]] = a[:, 1:, 1:]
+
+    # block-mean aggregate: (K, N, bl, N, bl) -> (K, N, N)
+    A = attn_phys.reshape(
+        K, num_blocks, block_len, num_blocks, block_len
+    ).mean(axis=(2, 4))
+
+    # [None] source term — replicated EXACTLY from extract_A_matrices (lines
+    # 146-151): none_block is indexed in model/reveal block order and added to
+    # the physical-frame A columns *without* remap. Kept identical (not "fixed")
+    # so the heavy graph here matches the canonical B used across NR-1/BR-1.
+    none_block = a[:, 1:, 0].reshape(K, num_blocks, block_len).mean(axis=2)  # (K, N)
+    A = A + none_block[:, None, :] * none_weight
+
+    di = np.arange(num_blocks)
+    A[:, di, di] = 0.0
+    A = A.astype(np.float32, copy=False)
+    return A.reshape(lead + (num_blocks, num_blocks)) if lead else A[0]
+
+
 def attn257_to_A_block(avg_attn, reveal_tokens, inv_perm,
                        seq_len=SEQ_LEN, num_blocks=N, block_len=BLOCK_LEN,
                        none_weight=0.1):
@@ -46,6 +99,8 @@ def attn257_to_A_block(avg_attn, reveal_tokens, inv_perm,
     Replicates train_clean_aogpt.extract_A_matrices lines 121-152:
       reveal-frame -> physical-frame token remap, block-mean aggregation,
       none-token ([None]) source term added to columns, diagonal zeroed.
+    Thin scalar wrapper over `_attn_to_A_block_vec` so the per-head loop
+    reference and the batched extractor share one numerically-identical core.
 
     Args:
         avg_attn: (T+1, T+1) array; row/col 0 is the [None] sink token.
@@ -56,37 +111,8 @@ def attn257_to_A_block(avg_attn, reveal_tokens, inv_perm,
     Returns:
         A: (num_blocks, num_blocks) float32, physical frame, zero diagonal.
     """
-    avg_attn = np.asarray(avg_attn, dtype=np.float32)
-    reveal_tokens = np.asarray(reveal_tokens, dtype=np.int64)
-    inv_perm = np.asarray(inv_perm, dtype=np.int64)
-
-    model_blocks = reveal_tokens // block_len
-    phys_blocks = inv_perm[model_blocks]
-    phys_tokens = phys_blocks * block_len + (reveal_tokens % block_len)
-
-    attn_content = avg_attn[1:, 1:]  # (T, T)
-    attn_phys = np.zeros((seq_len, seq_len), dtype=np.float32)
-    np.add.at(attn_phys, (phys_tokens[:, None], phys_tokens[None, :]), attn_content)
-
-    A = np.zeros((num_blocks, num_blocks), dtype=np.float32)
-    for bi in range(num_blocks):
-        i_s, i_e = bi * block_len, (bi + 1) * block_len
-        for bj in range(num_blocks):
-            j_s, j_e = bj * block_len, (bj + 1) * block_len
-            A[bi, bj] = attn_phys[i_s:i_e, j_s:j_e].mean()
-
-    # [None] source term — replicated EXACTLY from extract_A_matrices (lines
-    # 146-151): none_block is indexed in model/reveal block order and added to
-    # the physical-frame A *without* remap. Kept identical (not "fixed") so the
-    # heavy graph here matches the canonical B used across NR-1/BR-1.
-    none_attn = avg_attn[1:, 0]
-    none_block = np.array([
-        none_attn[b * block_len:(b + 1) * block_len].mean() for b in range(num_blocks)
-    ])
-    A += none_block[np.newaxis, :] * none_weight
-
-    np.fill_diagonal(A, 0.0)
-    return A
+    return _attn_to_A_block_vec(avg_attn, reveal_tokens, inv_perm,
+                                seq_len, num_blocks, block_len, none_weight)
 
 
 def _mean_tau_vs(sigmas, ref):
@@ -214,13 +240,12 @@ def _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top):
     avg_attn_heavy = attn_stack[:, top_heads, :, :].mean(axis=(0, 1))
     A_heavy_i = attn257_to_A_block(avg_attn_heavy, reveal_tokens, inv_perm)
 
-    A_lh_i = np.zeros((L, H, N, N), dtype=np.float32)
-    for l in range(L):
-        for h in range(H):
-            A_lh_i[l, h] = attn257_to_A_block(attn_stack[l, h], reveal_tokens, inv_perm)
+    # (L, H, T+1, T+1) -> (L, H, N, N) in one vectorized call (was an L*H loop).
+    A_lh_i = _attn_to_A_block_vec(attn_stack, reveal_tokens, inv_perm)
     return A_lh_i, A_heavy_i
 
 
+@torch.no_grad()
 def extract_per_head_and_heavy_A(model, chunks, clean_perm, device, seed,
                                  n_top=4, fwd_batch=64):
     """Batched per-chunk per-(layer,head) A and top-n_top-head heavy A.
@@ -305,20 +330,40 @@ def scan_checkpoint(ckpt_path, M, batch_size, seed, device="cuda:0",
         "diversity": teacher_diversity_stats(sigma_heavy),
     }
 
+    # Cheap C1-C4 scores from the grand-mean per-head graph (attached per head so
+    # the quick-head-selector validation driver can read cheap-vs-expensive recall
+    # straight from the JSON).
+    from quick_head_selector import cheap_head_scores
+    cheap = cheap_head_scores(A_lh, alpha_dep=alpha_dep)  # {C1..C4: (L,H)}
+
     per_head = []
     for l in range(Ln):
         for h in range(Hn):
             B = _batch_mean_B(A_lh[:, l, h], M, batch_size)
             sig = _orders_from_graphs(B, alpha_dep)
             m = head_order_metrics(sig, sigmas_heavy=sigma_heavy)
-            per_head.append({"layer": l, "head": h, **m})
+            cheap_lh = {k: float(cheap[k][l, h]) for k in ("C1", "C2", "C3", "C4")}
+            per_head.append({"layer": l, "head": h, **m, "cheap": cheap_lh})
     per_head.sort(key=lambda d: abs(d["tau_vs_l2r"]), reverse=True)
+
+    # Persist the mean per-head physical graph + split-half means (L,H,N,N) so
+    # ANY cheap score / cross-modal axis (row-concentration, split-half
+    # reliability, ...) can be recomputed OFFLINE from the JSON, no re-run.
+    n_chunks = A_lh.shape[0]
+    half = n_chunks // 2
+    graphs = {
+        "shape": "L,H,N,N",
+        "A_mean": A_lh.mean(axis=0).astype(np.float32).tolist(),
+        "A_half1": A_lh[:half].mean(axis=0).astype(np.float32).tolist(),
+        "A_half2": A_lh[half:].mean(axis=0).astype(np.float32).tolist(),
+    }
 
     return {
         "config": {"M": M, "batch_size": batch_size, "seed": seed,
                    "ckpt": str(ckpt_path), "L": Ln, "H": Hn, "alpha_dep": alpha_dep},
         "heavy_baseline": heavy,
         "per_head_layer_sorted_by_abs_tau_vs_l2r": per_head,
+        "graphs": graphs,
     }
 
 
