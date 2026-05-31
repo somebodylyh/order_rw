@@ -151,3 +151,44 @@ def select_heads(scores, sign=1.0, rank_score="C1", dead_thresh=0.0,
     return {"best_positive": best_positive,
             "best_negative": best_negative,
             "pool": pool}
+
+
+def spearman_cheap_expensive(cheap_lh, expensive_tau_lh):
+    """Spearman rho between a cheap (L,H) score and expensive tau (L,H).
+
+    NaN pairs (either side) are dropped. Returns nan if < 3 valid pairs.
+    """
+    a = np.asarray(cheap_lh, dtype=np.float64).ravel()
+    b = np.asarray(expensive_tau_lh, dtype=np.float64).ravel()
+    m = ~(np.isnan(a) | np.isnan(b))
+    if m.sum() < 3:
+        return float("nan")
+    rho, _ = spearmanr(a[m], b[m])
+    return float(rho)
+
+
+def recall_at_k(signed_cheap_lh, expensive_tau_lh, k, which="pos"):
+    """Does the cheap top-k contain the expensive winner?
+
+    which="pos": winner = argmax(expensive_tau); cheap top-k = k highest signed.
+    which="neg": winner = argmin(expensive_tau); cheap top-k = k lowest signed.
+    NaN-safe. Returns bool.
+    """
+    s = np.asarray(signed_cheap_lh, dtype=np.float64).ravel()
+    t = np.asarray(expensive_tau_lh, dtype=np.float64).ravel()
+    tmask = ~np.isnan(t)
+    if not tmask.any():
+        return False
+    t_filled_for_pos = np.where(tmask, t, -np.inf)
+    t_filled_for_neg = np.where(tmask, t, np.inf)
+
+    if which == "pos":
+        winner = int(np.argmax(t_filled_for_pos))
+        ranked = np.argsort(np.where(np.isnan(s), -np.inf, s))[::-1]  # high first
+    elif which == "neg":
+        winner = int(np.argmin(t_filled_for_neg))
+        ranked = np.argsort(np.where(np.isnan(s), np.inf, s))          # low first
+    else:
+        raise ValueError(f"which must be 'pos' or 'neg', got {which!r}")
+
+    return winner in set(int(i) for i in ranked[:k])

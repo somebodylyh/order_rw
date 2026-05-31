@@ -149,3 +149,33 @@ def test_select_heads_masks_dead_and_symmetric():
     sel = qhs.select_heads(scores, sign=1.0, rank_score="C1",
                            dead_thresh=1e-6, sym_thresh=1e-6, rule="pool", k=2)
     assert sel["best_positive"] == (0, 1, 1)
+
+
+def test_spearman_cheap_expensive_perfect():
+    cheap = np.array([[1.0, 2.0, 3.0, 4.0]])
+    tau = np.array([[0.1, 0.2, 0.3, 0.4]])
+    assert qhs.spearman_cheap_expensive(cheap, tau) == pytest.approx(1.0)
+
+
+def test_spearman_handles_nan():
+    cheap = np.array([[1.0, 2.0, np.nan, 4.0]])
+    tau = np.array([[0.1, 0.2, 0.3, 0.4]])
+    rho = qhs.spearman_cheap_expensive(cheap, tau)
+    assert rho == pytest.approx(1.0)        # nan pair dropped, rest perfect
+
+
+def test_recall_at_k_positive_hit():
+    # expensive best+ is head (0,3) (max tau). cheap signed top-2 positive must
+    # contain it for recall@2 to be True.
+    signed = np.array([[0.1, 0.2, 0.9, 0.8]])
+    tau = np.array([[0.0, 0.1, 0.5, 0.7]])  # argmax tau = head 3
+    assert qhs.recall_at_k(signed, tau, k=2, which="pos") is True
+    assert qhs.recall_at_k(signed, tau, k=1, which="pos") is False  # cheap top1 = head2
+
+
+def test_recall_at_k_negative_hit():
+    # expensive best- is argmin tau = head 0. cheap signed most-negative top-2
+    # must contain it.
+    signed = np.array([[-0.9, -0.8, 0.2, 0.5]])
+    tau = np.array([[-0.7, -0.5, 0.1, 0.4]])
+    assert qhs.recall_at_k(signed, tau, k=2, which="neg") is True
