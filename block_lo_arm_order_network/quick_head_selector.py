@@ -15,6 +15,7 @@ readiness r(v) = out(v) - alpha*in(v) with out = B.sum(1), in = B.sum(0), alpha=
 (matches attn_order_mlp_policy.readiness_vector used by generate_teacher_label).
 """
 import numpy as np
+from scipy.stats import spearmanr
 
 ALPHA_DEP = 0.5
 
@@ -80,3 +81,22 @@ def cheap_head_scores(A_lh, alpha_dep=ALPHA_DEP):
             for k in out:
                 out[k][l, h] = s[k]
     return out
+
+
+def calibrate_sign(raw, expensive_tau):
+    """Choose a global sign so the score is POSITIVELY aligned with expensive tau.
+
+    raw, expensive_tau: (L, H) arrays. Returns (sign, calibrated) where sign in
+    {+1.0, -1.0} and calibrated = sign * raw. Spec §3.1: positive cheap score is
+    DEFINED to correlate positively with expensive tau_vs_l2r on the calibration
+    split. Degenerate inputs (constant raw / too few pairs) return (+1, raw).
+    """
+    raw = np.asarray(raw, dtype=np.float64)
+    tau = np.asarray(expensive_tau, dtype=np.float64)
+    rf, tf = raw.ravel(), tau.ravel()
+    mask = ~(np.isnan(rf) | np.isnan(tf))
+    if mask.sum() < 3 or np.std(rf[mask]) < 1e-12 or np.std(tf[mask]) < 1e-12:
+        return 1.0, raw.copy()
+    rho, _ = spearmanr(rf[mask], tf[mask])
+    sign = -1.0 if (rho is not None and not np.isnan(rho) and rho < 0) else 1.0
+    return sign, sign * raw

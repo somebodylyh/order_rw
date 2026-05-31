@@ -75,3 +75,29 @@ def test_readiness_matches_cdl_convention():
     r_ref = readiness_vector(B, alpha_dep=0.5)
     r_got = B.sum(axis=1) - 0.5 * B.sum(axis=0)
     assert np.allclose(r_ref, r_got)
+
+
+def test_calibrate_sign_flips_when_anticorrelated():
+    raw = np.array([[3.0, 1.0, -1.0, -3.0]])      # (1,4)
+    tau = np.array([[-0.9, -0.3, 0.3, 0.9]])      # raw is ANTI-correlated with tau
+    sign, cal = qhs.calibrate_sign(raw, tau)
+    assert sign == -1.0
+    from scipy.stats import spearmanr
+    rho, _ = spearmanr(cal.ravel(), tau.ravel())
+    assert rho > 0                                  # calibrated now positively aligned
+
+
+def test_calibrate_sign_keeps_when_correlated():
+    raw = np.array([[-3.0, -1.0, 1.0, 3.0]])
+    tau = np.array([[-0.9, -0.3, 0.3, 0.9]])
+    sign, cal = qhs.calibrate_sign(raw, tau)
+    assert sign == 1.0
+    assert np.allclose(cal, raw)
+
+
+def test_calibrate_sign_degenerate_returns_identity():
+    raw = np.zeros((2, 2))
+    tau = np.array([[0.1, -0.2], [0.3, 0.4]])
+    sign, cal = qhs.calibrate_sign(raw, tau)
+    assert sign == 1.0
+    assert np.allclose(cal, raw)
