@@ -14,6 +14,8 @@ Conventions: per head take physical block graph A (N,N); B = A.T (zero diagonal)
 readiness r(v) = out(v) - alpha*in(v) with out = B.sum(1), in = B.sum(0), alpha=0.5
 (matches attn_order_mlp_policy.readiness_vector used by generate_teacher_label).
 """
+import json
+
 import numpy as np
 from scipy.stats import spearmanr
 
@@ -192,3 +194,29 @@ def recall_at_k(signed_cheap_lh, expensive_tau_lh, k, which="pos"):
         raise ValueError(f"which must be 'pos' or 'neg', got {which!r}")
 
     return winner in set(int(i) for i in ranked[:k])
+
+
+def load_expensive_tau(json_path, L=4, H=8):
+    """Parse one per-head scan JSON into a (L, H) tau_vs_l2r array.
+
+    Schema (per_head_order_scan.scan_checkpoint output):
+        {"per_head_layer_sorted_by_abs_tau_vs_l2r": [{layer, head, tau_vs_l2r, ...}]}
+    Missing (layer, head) entries are NaN.
+    """
+    with open(json_path) as f:
+        d = json.load(f)
+    arr = np.full((L, H), np.nan, dtype=np.float64)
+    for e in d["per_head_layer_sorted_by_abs_tau_vs_l2r"]:
+        arr[int(e["layer"]), int(e["head"])] = float(e["tau_vs_l2r"])
+    return arr
+
+
+def null_quantile_threshold(null_scores, pct=95):
+    """Threshold at the `pct` percentile of a step0 null score distribution.
+
+    Spec §3.2: dead_thresh / sym_thresh are set so only heads significantly above
+    the random-init level survive. default pct=95, fallback pct=90.
+    """
+    vals = np.asarray(null_scores, dtype=np.float64).ravel()
+    vals = vals[~np.isnan(vals)]
+    return float(np.percentile(vals, pct))

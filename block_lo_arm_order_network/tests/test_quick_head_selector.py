@@ -179,3 +179,38 @@ def test_recall_at_k_negative_hit():
     signed = np.array([[-0.9, -0.8, 0.2, 0.5]])
     tau = np.array([[-0.7, -0.5, 0.1, 0.4]])
     assert qhs.recall_at_k(signed, tau, k=2, which="neg") is True
+
+
+def test_load_expensive_tau_parses_schema(tmp_path):
+    import json
+    payload = {"config": {"L": 2, "H": 2},
+               "per_head_layer_sorted_by_abs_tau_vs_l2r": [
+                   {"layer": 0, "head": 0, "tau_vs_l2r": 0.5},
+                   {"layer": 0, "head": 1, "tau_vs_l2r": -0.3},
+                   {"layer": 1, "head": 0, "tau_vs_l2r": 0.1},
+                   {"layer": 1, "head": 1, "tau_vs_l2r": -0.7}]}
+    p = tmp_path / "scan.json"
+    p.write_text(json.dumps(payload))
+    arr = qhs.load_expensive_tau(str(p), L=2, H=2)
+    assert arr.shape == (2, 2)
+    assert arr[0, 0] == 0.5 and arr[1, 1] == -0.7
+
+
+def test_load_expensive_tau_missing_head_is_nan(tmp_path):
+    import json
+    payload = {"per_head_layer_sorted_by_abs_tau_vs_l2r": [
+        {"layer": 0, "head": 0, "tau_vs_l2r": 0.4}]}
+    p = tmp_path / "scan.json"
+    p.write_text(json.dumps(payload))
+    arr = qhs.load_expensive_tau(str(p), L=2, H=2)
+    assert arr[0, 0] == 0.4
+    assert np.isnan(arr[0, 1]) and np.isnan(arr[1, 0])
+
+
+def test_null_quantile_threshold():
+    # step0 null distribution -> threshold at the given percentile
+    null_vals = np.array([[0.0, 0.1, 0.2, 0.3, 0.4, 1.0]])
+    thr95 = qhs.null_quantile_threshold(null_vals, pct=95)
+    thr90 = qhs.null_quantile_threshold(null_vals, pct=90)
+    assert thr95 == pytest.approx(np.percentile(null_vals, 95))
+    assert thr90 <= thr95
