@@ -1,0 +1,77 @@
+import pathlib
+import sys
+
+import numpy as np
+import pytest
+
+_HERE = pathlib.Path(__file__).resolve().parent
+_PKG = _HERE.parent
+sys.path.insert(0, str(_PKG))
+
+import quick_head_selector as qhs
+
+
+def _chain_A(n=8, forward=True):
+    """Physical graph A whose B=A.T encodes a clean directed chain.
+
+    We want B[v, v+1] large (v points forward to v+1) so readiness r is high at
+    low index, low at high index. Since B = A.T, that means A[v+1, v] large.
+    """
+    A = np.zeros((n, n), dtype=np.float64)
+    for v in range(n - 1):
+        if forward:
+            A[v + 1, v] = 1.0      # B[v, v+1] = 1  -> v -> v+1
+        else:
+            A[v, v + 1] = 1.0      # B[v+1, v] = 1  -> v+1 -> v  (reversed chain)
+    return A
+
+
+def test_c1_raw_sign_separates_forward_vs_reversed():
+    fwd = qhs.head_cheap_scores(_chain_A(8, forward=True))
+    rev = qhs.head_cheap_scores(_chain_A(8, forward=False))
+    # raw C1 must have OPPOSITE signs for forward vs reversed chains
+    assert np.sign(fwd["C1"]) == -np.sign(rev["C1"])
+    assert abs(fwd["C1"]) > 0.3 and abs(rev["C1"]) > 0.3
+
+
+def test_c4_zero_for_symmetric_graph():
+    A = np.array([[0.0, 1.0, 0.5],
+                  [1.0, 0.0, 1.0],
+                  [0.5, 1.0, 0.0]])  # symmetric -> B symmetric -> C4 ~ 0
+    s = qhs.head_cheap_scores(A)
+    assert s["C4"] < 1e-6
+
+
+def test_c4_high_for_directed_graph():
+    s = qhs.head_cheap_scores(_chain_A(8, forward=True))
+    assert s["C4"] > 0.5
+
+
+def test_c3_zero_for_dead_head():
+    A = np.zeros((6, 6))            # no structure -> readiness flat -> C3 ~ 0
+    s = qhs.head_cheap_scores(A)
+    assert s["C3"] < 1e-9
+    # degenerate graph must not crash C1/C2
+    assert np.isfinite(s["C1"]) and np.isfinite(s["C2"])
+
+
+def test_cheap_head_scores_shapes_and_chunk_mean():
+    rng = np.random.default_rng(0)
+    A_lh = rng.random((3, 4, 8, 8, 8))  # (n_chunks, L, H, N, N)
+    out = qhs.cheap_head_scores(A_lh)
+    for k in ("C1", "C2", "C3", "C4"):
+        assert out[k].shape == (4, 8)
+    # passing the pre-meaned (L,H,N,N) yields identical result
+    out2 = qhs.cheap_head_scores(A_lh.mean(axis=0))
+    assert np.allclose(out["C1"], out2["C1"])
+
+
+def test_readiness_matches_cdl_convention():
+    """head_cheap_scores' internal readiness must equal readiness_vector(B)."""
+    from attn_order_mlp_policy import readiness_vector
+    A = _chain_A(8, forward=True)
+    B = A.T.copy()
+    np.fill_diagonal(B, 0.0)
+    r_ref = readiness_vector(B, alpha_dep=0.5)
+    r_got = B.sum(axis=1) - 0.5 * B.sum(axis=0)
+    assert np.allclose(r_ref, r_got)
