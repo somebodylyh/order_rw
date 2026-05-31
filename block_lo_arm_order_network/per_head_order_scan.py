@@ -1,0 +1,353 @@
+"""Per-(layer, head) order-signal scan — reconstruction of the lost L0H5 scanner.
+
+For one AOGPT checkpoint, forward M*batch_size random-order chunks, build the
+per-(layer, head) batch-mean attention graph B and a top-4-head "heavy" baseline
+graph, run the CDL-source-start readout on each batch-mean graph, then summarise
+the reveal orders with:
+
+  - tau_vs_l2r       : mean Kendall tau between sigma_m and the L2R order.
+  - mean_pairwise_tau: teacher diversity across the M batch orders.
+  - first_step_entropy: entropy of sigma[:, 0] across the M batch orders.
+  - tau_vs_heavy     : mean Kendall tau between a head's sigma_m and the heavy sigma_m.
+
+Coordinate handling (reveal -> physical remap, none-token source term, NxN block
+aggregation, diagonal zeroing) mirrors train_clean_aogpt.extract_A_matrices
+exactly so the per-head and heavy graphs are directly comparable; the only change
+is which attention slice feeds the remap (single head vs. top-4-head average).
+
+Spec: docs/superpowers/specs/2026-05-29-l0h5-cross-ckpt-seed-stability-design.md
+Red lines: attention-only; no NLL / L2R-raster oracle in the readout or selection.
+"""
+import sys
+import pathlib
+
+import numpy as np
+import torch
+from scipy.stats import kendalltau
+
+_ROOT = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(_ROOT))
+
+from training_utils import SEQ_LEN, N, BLOCK_LEN
+from clean_training_protocol import expand_model_blocks_to_token_order
+from neural_readout.extract_b import _load_model_and_chunks
+from neural_readout.teacher_labels import generate_teacher_label
+from batch_readout.diversity_batch import teacher_diversity_stats
+
+
+# ---------------------------------------------------------------------------
+# Pure coordinate / metric helpers (unit-tested without a model)
+# ---------------------------------------------------------------------------
+def attn257_to_A_block(avg_attn, reveal_tokens, inv_perm,
+                       seq_len=SEQ_LEN, num_blocks=N, block_len=BLOCK_LEN,
+                       none_weight=0.1):
+    """Map one (T+1, T+1) attention matrix to a physical-frame NxN block graph.
+
+    Replicates train_clean_aogpt.extract_A_matrices lines 121-152:
+      reveal-frame -> physical-frame token remap, block-mean aggregation,
+      none-token ([None]) source term added to columns, diagonal zeroed.
+
+    Args:
+        avg_attn: (T+1, T+1) array; row/col 0 is the [None] sink token.
+        reveal_tokens: (T,) int, model-coordinate token positions (token_order row).
+        inv_perm: (num_blocks,) int, model-block -> physical-block map.
+        none_weight: scale on the [None] source term (0.1 in extract_A_matrices).
+
+    Returns:
+        A: (num_blocks, num_blocks) float32, physical frame, zero diagonal.
+    """
+    avg_attn = np.asarray(avg_attn, dtype=np.float32)
+    reveal_tokens = np.asarray(reveal_tokens, dtype=np.int64)
+    inv_perm = np.asarray(inv_perm, dtype=np.int64)
+
+    model_blocks = reveal_tokens // block_len
+    phys_blocks = inv_perm[model_blocks]
+    phys_tokens = phys_blocks * block_len + (reveal_tokens % block_len)
+
+    attn_content = avg_attn[1:, 1:]  # (T, T)
+    attn_phys = np.zeros((seq_len, seq_len), dtype=np.float32)
+    np.add.at(attn_phys, (phys_tokens[:, None], phys_tokens[None, :]), attn_content)
+
+    A = np.zeros((num_blocks, num_blocks), dtype=np.float32)
+    for bi in range(num_blocks):
+        i_s, i_e = bi * block_len, (bi + 1) * block_len
+        for bj in range(num_blocks):
+            j_s, j_e = bj * block_len, (bj + 1) * block_len
+            A[bi, bj] = attn_phys[i_s:i_e, j_s:j_e].mean()
+
+    # [None] source term — replicated EXACTLY from extract_A_matrices (lines
+    # 146-151): none_block is indexed in model/reveal block order and added to
+    # the physical-frame A *without* remap. Kept identical (not "fixed") so the
+    # heavy graph here matches the canonical B used across NR-1/BR-1.
+    none_attn = avg_attn[1:, 0]
+    none_block = np.array([
+        none_attn[b * block_len:(b + 1) * block_len].mean() for b in range(num_blocks)
+    ])
+    A += none_block[np.newaxis, :] * none_weight
+
+    np.fill_diagonal(A, 0.0)
+    return A
+
+
+def _mean_tau_vs(sigmas, ref):
+    """Mean Kendall tau between each row of sigmas (M, Nn) and ref (Nn,)."""
+    ref = np.asarray(ref)
+    taus = []
+    for s in sigmas:
+        t, _ = kendalltau(s, ref)
+        if not np.isnan(t):
+            taus.append(t)
+    return float(np.mean(taus)) if taus else float("nan")
+
+
+def _mean_tau_pairwise_vs(sigmas_a, sigmas_b):
+    """Mean Kendall tau between paired rows of two (M, Nn) order arrays."""
+    taus = []
+    for sa, sb in zip(sigmas_a, sigmas_b):
+        t, _ = kendalltau(sa, sb)
+        if not np.isnan(t):
+            taus.append(t)
+    return float(np.mean(taus)) if taus else float("nan")
+
+
+def head_order_metrics(sigmas, sigmas_heavy=None):
+    """Summarise a head's M batch reveal orders.
+
+    Args:
+        sigmas: (M, Nn) int reveal orders for this head.
+        sigmas_heavy: optional (M, Nn) int heavy-baseline orders for tau_vs_heavy.
+
+    Returns dict: tau_vs_l2r, mean_pairwise_tau, first_step_entropy[, tau_vs_heavy].
+    """
+    sigmas = np.asarray(sigmas)
+    M, Nn = sigmas.shape
+    l2r = np.arange(Nn)
+    div = teacher_diversity_stats(sigmas)
+    out = {
+        "tau_vs_l2r": _mean_tau_vs(sigmas, l2r),
+        "mean_pairwise_tau": div["mean_pairwise_tau"],
+        "first_step_entropy": div["first_step_entropy"],
+    }
+    if sigmas_heavy is not None:
+        out["tau_vs_heavy"] = _mean_tau_pairwise_vs(sigmas, np.asarray(sigmas_heavy))
+    return out
+
+
+def _orders_from_graphs(B_batch, alpha_dep=0.5):
+    """Run CDL-source-start readout on each (Nn, Nn) batch-mean graph."""
+    sigmas = np.empty((B_batch.shape[0], B_batch.shape[1]), dtype=np.int64)
+    for m in range(B_batch.shape[0]):
+        sigma, _rank, _Y = generate_teacher_label(B_batch[m], alpha_dep=alpha_dep)
+        sigmas[m] = sigma
+    return sigmas
+
+
+# ---------------------------------------------------------------------------
+# Per-head + heavy attention extraction (requires model)
+# ---------------------------------------------------------------------------
+@torch.no_grad()
+def _extract_per_head_and_heavy_A_loop(model, chunks, clean_perm, device, seed, n_top=4):
+    """Reference (batch=1) extractor — kept verbatim as the golden behaviour the
+    batched `extract_per_head_and_heavy_A` is pinned to (test_per_head_scan_batched).
+
+    Returns:
+        A_lh:    (n_chunks, L, H, N, N) float32
+        A_heavy: (n_chunks, N, N) float32
+    """
+    inv_perm = clean_perm.inv_perm_model_to_phys.cpu().numpy()
+    n_chunks = len(chunks)
+    model.eval()
+
+    A_lh = None
+    A_heavy = np.zeros((n_chunks, N, N), dtype=np.float32)
+
+    for i in range(n_chunks):
+        tokens = chunks[i:i + 1].to(device)
+        gen = torch.Generator(device="cpu")
+        gen.manual_seed(int(seed) + int(i))
+        rand_blocks = torch.randperm(N, generator=gen, device="cpu")
+        token_order = expand_model_blocks_to_token_order(
+            rand_blocks.unsqueeze(0), BLOCK_LEN
+        ).to(device)
+
+        _, _, attn_list = model.forward_fn(tokens, token_order, return_attentions=True)
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        attn_stack = torch.stack(attn_list).squeeze(1).cpu().numpy()  # (L, H, T+1, T+1)
+        L, H = attn_stack.shape[:2]
+        if A_lh is None:
+            A_lh = np.zeros((n_chunks, L, H, N, N), dtype=np.float32)
+
+        reveal_tokens = token_order[0].cpu().numpy()
+
+        # heavy: top-n_top heads by off-diagonal variance, averaged over L + heads
+        head_vars = np.zeros(H)
+        mask = ~np.eye(SEQ_LEN, dtype=bool)
+        for h in range(H):
+            content = attn_stack[:, h, 1:, 1:]
+            offdiag = content[:, mask].reshape(L, SEQ_LEN, SEQ_LEN - 1)
+            head_vars[h] = float(np.var(offdiag))
+        top_heads = np.argsort(head_vars)[-n_top:]
+        avg_attn_heavy = attn_stack[:, top_heads, :, :].mean(axis=(0, 1))
+        A_heavy[i] = attn257_to_A_block(avg_attn_heavy, reveal_tokens, inv_perm)
+
+        for l in range(L):
+            for h in range(H):
+                A_lh[i, l, h] = attn257_to_A_block(
+                    attn_stack[l, h], reveal_tokens, inv_perm
+                )
+
+    return A_lh, A_heavy
+
+
+def _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top):
+    """Per-sample physical-frame A_lh (L,H,N,N) and heavy A (N,N) from one
+    sample's attention stack (L,H,T+1,T+1). Identical math to the loop body."""
+    L, H = attn_stack.shape[:2]
+    head_vars = np.zeros(H)
+    mask = ~np.eye(SEQ_LEN, dtype=bool)
+    for h in range(H):
+        content = attn_stack[:, h, 1:, 1:]
+        offdiag = content[:, mask].reshape(L, SEQ_LEN, SEQ_LEN - 1)
+        head_vars[h] = float(np.var(offdiag))
+    top_heads = np.argsort(head_vars)[-n_top:]
+    avg_attn_heavy = attn_stack[:, top_heads, :, :].mean(axis=(0, 1))
+    A_heavy_i = attn257_to_A_block(avg_attn_heavy, reveal_tokens, inv_perm)
+
+    A_lh_i = np.zeros((L, H, N, N), dtype=np.float32)
+    for l in range(L):
+        for h in range(H):
+            A_lh_i[l, h] = attn257_to_A_block(attn_stack[l, h], reveal_tokens, inv_perm)
+    return A_lh_i, A_heavy_i
+
+
+def extract_per_head_and_heavy_A(model, chunks, clean_perm, device, seed,
+                                 n_top=4, fwd_batch=64):
+    """Batched per-chunk per-(layer,head) A and top-n_top-head heavy A.
+
+    Forwards `fwd_batch` chunks at once instead of one-at-a-time. The per-chunk
+    seeded reveal permutation (manual_seed(seed+i)) and all downstream math are
+    bit-for-bit the same as `_extract_per_head_and_heavy_A_loop` (pinned by
+    test_per_head_scan_batched on a batch-invariant synthetic model); only the
+    forward batching changes, so on a real model results match to fp tolerance.
+
+    Returns:
+        A_lh:    (n_chunks, L, H, N, N) float32
+        A_heavy: (n_chunks, N, N) float32
+    """
+    inv_perm = clean_perm.inv_perm_model_to_phys.cpu().numpy()
+    n_chunks = len(chunks)
+    model.eval()
+
+    # Pre-build the per-chunk seeded reveal token_orders (CPU, deterministic).
+    token_orders = torch.empty((n_chunks, SEQ_LEN), dtype=torch.long)
+    for i in range(n_chunks):
+        gen = torch.Generator(device="cpu")
+        gen.manual_seed(int(seed) + int(i))
+        rand_blocks = torch.randperm(N, generator=gen, device="cpu")
+        token_orders[i] = expand_model_blocks_to_token_order(
+            rand_blocks.unsqueeze(0), BLOCK_LEN
+        )[0]
+
+    A_lh = None
+    A_heavy = np.zeros((n_chunks, N, N), dtype=np.float32)
+
+    for start in range(0, n_chunks, max(1, int(fwd_batch))):
+        stop = min(start + max(1, int(fwd_batch)), n_chunks)
+        tokens = chunks[start:stop].to(device)
+        order = token_orders[start:stop].to(device)
+
+        _, _, attn_list = model.forward_fn(tokens, order, return_attentions=True)
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        # (L, B, H, T+1, T+1)
+        attn_batch = torch.stack(attn_list).cpu().numpy()
+
+        for bi in range(stop - start):
+            i = start + bi
+            attn_stack = attn_batch[:, bi]  # (L, H, T+1, T+1)
+            reveal_tokens = token_orders[i].numpy()
+            A_lh_i, A_heavy_i = _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top)
+            if A_lh is None:
+                A_lh = np.zeros((n_chunks,) + A_lh_i.shape, dtype=np.float32)
+            A_lh[i] = A_lh_i
+            A_heavy[i] = A_heavy_i
+
+    return A_lh, A_heavy
+
+
+def _batch_mean_B(A, M, batch_size):
+    """(n, N, N) per-chunk A -> (M, N, N) batch-mean B = A^T, diagonal zeroed."""
+    Nn = A.shape[-1]
+    grouped = A.reshape(M, batch_size, Nn, Nn).astype(np.float64).mean(axis=1)
+    B = np.transpose(grouped, (0, 2, 1)).astype(np.float32)
+    diag = np.arange(Nn)
+    B[:, diag, diag] = 0.0
+    return B
+
+
+def scan_checkpoint(ckpt_path, M, batch_size, seed, device="cuda:0",
+                    split="train", alpha_dep=0.5):
+    """Full per-head order scan for one checkpoint and one sampling seed.
+
+    Returns a dict matching the original diag_head_layer_scan JSON schema.
+    """
+    total = M * batch_size
+    model, chunks, clean_perm, dev, _ci = _load_model_and_chunks(
+        ckpt_path, total, seed, device, split
+    )
+    A_lh, A_heavy = extract_per_head_and_heavy_A(model, chunks, clean_perm, dev, seed)
+    Ln, Hn = A_lh.shape[1], A_lh.shape[2]
+
+    sigma_heavy = _orders_from_graphs(_batch_mean_B(A_heavy, M, batch_size), alpha_dep)
+    heavy = {
+        "tau_vs_l2r": _mean_tau_vs(sigma_heavy, np.arange(N)),
+        "diversity": teacher_diversity_stats(sigma_heavy),
+    }
+
+    per_head = []
+    for l in range(Ln):
+        for h in range(Hn):
+            B = _batch_mean_B(A_lh[:, l, h], M, batch_size)
+            sig = _orders_from_graphs(B, alpha_dep)
+            m = head_order_metrics(sig, sigmas_heavy=sigma_heavy)
+            per_head.append({"layer": l, "head": h, **m})
+    per_head.sort(key=lambda d: abs(d["tau_vs_l2r"]), reverse=True)
+
+    return {
+        "config": {"M": M, "batch_size": batch_size, "seed": seed,
+                   "ckpt": str(ckpt_path), "L": Ln, "H": Hn, "alpha_dep": alpha_dep},
+        "heavy_baseline": heavy,
+        "per_head_layer_sorted_by_abs_tau_vs_l2r": per_head,
+    }
+
+
+def main():
+    import argparse
+    import json
+
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--ckpt", required=True)
+    p.add_argument("--M", type=int, default=100)
+    p.add_argument("--batch-size", type=int, default=32)
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--device", default="cuda:0")
+    p.add_argument("--split", default="train")
+    p.add_argument("--alpha-dep", type=float, default=0.5)
+    p.add_argument("--out", required=True)
+    args = p.parse_args()
+
+    res = scan_checkpoint(args.ckpt, args.M, args.batch_size, args.seed,
+                          device=args.device, split=args.split, alpha_dep=args.alpha_dep)
+    pathlib.Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    with open(args.out, "w") as f:
+        json.dump(res, f, indent=1)
+    top = res["per_head_layer_sorted_by_abs_tau_vs_l2r"][0]
+    print(f"[{pathlib.Path(args.ckpt).name} seed{args.seed}] "
+          f"heavy tau_vs_l2r={res['heavy_baseline']['tau_vs_l2r']:.4f}  "
+          f"top head L{top['layer']}H{top['head']} tau_vs_l2r={top['tau_vs_l2r']:.4f}")
+    print(f"  saved -> {args.out}")
+
+
+if __name__ == "__main__":
+    main()
