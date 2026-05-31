@@ -101,3 +101,51 @@ def test_calibrate_sign_degenerate_returns_identity():
     sign, cal = qhs.calibrate_sign(raw, tau)
     assert sign == 1.0
     assert np.allclose(cal, raw)
+
+
+def _scores_with(c1, c3=None, c4=None):
+    c1 = np.asarray(c1, dtype=np.float64)
+    if c3 is None:
+        c3 = np.ones_like(c1)        # all heads pass dead filter
+    if c4 is None:
+        c4 = np.ones_like(c1)        # all heads pass symmetry filter
+    return {"C1": c1, "C2": c1.copy(), "C3": np.asarray(c3, float),
+            "C4": np.asarray(c4, float)}
+
+
+def test_select_heads_never_picks_argmax_abs():
+    # negative head has the LARGEST magnitude; best_positive must still be the
+    # positive head, NOT the |score| winner.
+    scores = _scores_with([[0.4, -0.9, 0.1]])
+    sel = qhs.select_heads(scores, sign=1.0, rank_score="C1",
+                           dead_thresh=0.0, sym_thresh=0.0, rule="pool", k=2)
+    assert sel["best_positive"] == (0, 0, 1)        # (layer, head, sign=+1)
+    assert sel["best_negative"][0] == (0, 1, -1)    # strongest anti-L2R head
+
+
+def test_select_heads_pool_contents():
+    scores = _scores_with([[0.4, -0.9, -0.7, 0.2]])
+    sel = qhs.select_heads(scores, sign=1.0, rank_score="C1",
+                           dead_thresh=0.0, sym_thresh=0.0, rule="pool", k=2)
+    pool_heads = {(l, h) for (l, h, _s) in sel["pool"]}
+    assert (0, 0) in pool_heads                      # best_positive
+    assert (0, 1) in pool_heads and (0, 2) in pool_heads   # top-2 negatives
+    assert len(sel["pool"]) == 3
+
+
+def test_select_heads_single_rule():
+    scores = _scores_with([[0.4, -0.9, 0.1]])
+    sel = qhs.select_heads(scores, sign=1.0, rank_score="C1", rule="single")
+    assert sel["pool"] == [(0, 0, 1)]
+
+
+def test_select_heads_masks_dead_and_symmetric():
+    # head (0,0) has top C1 but is DEAD (C3=0); head (0,2) is SYMMETRIC (C4=0).
+    # Only (0,1) survives the masks -> it becomes best_positive.
+    scores = {"C1": np.array([[0.9, 0.5, 0.8]]),
+              "C2": np.array([[0.9, 0.5, 0.8]]),
+              "C3": np.array([[0.0, 1.0, 1.0]]),
+              "C4": np.array([[1.0, 1.0, 0.0]])}
+    sel = qhs.select_heads(scores, sign=1.0, rank_score="C1",
+                           dead_thresh=1e-6, sym_thresh=1e-6, rule="pool", k=2)
+    assert sel["best_positive"] == (0, 1, 1)

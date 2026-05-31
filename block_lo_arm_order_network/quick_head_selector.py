@@ -100,3 +100,54 @@ def calibrate_sign(raw, expensive_tau):
     rho, _ = spearmanr(rf[mask], tf[mask])
     sign = -1.0 if (rho is not None and not np.isnan(rho) and rho < 0) else 1.0
     return sign, sign * raw
+
+
+def select_heads(scores, sign=1.0, rank_score="C1", dead_thresh=0.0,
+                 sym_thresh=0.0, rule="pool", k=2):
+    """Select order heads from cheap scores. NEVER argmax|score| (spec §4).
+
+    Args:
+        scores: dict of (L, H) raw arrays from cheap_head_scores.
+        sign: +1/-1 sign calibration for the ranking score (from calibrate_sign).
+        rank_score: "C1" or "C2" — which signed score to rank by.
+        dead_thresh: heads with C3 <= dead_thresh are masked (dead/uniform).
+        sym_thresh: heads with C4 <= sym_thresh are masked (symmetric/local-only).
+        rule: "pool" -> {best_positive} + top-k negatives; "single" -> {best_positive}.
+        k: number of negative heads in the pool.
+
+    Returns dict:
+        best_positive: (layer, head, +1)   — argmax of signed score over masked heads
+        best_negative: list of (layer, head, -1), strongest anti first (len up to k)
+        pool: list of (layer, head, sign) per `rule`
+    """
+    signed = sign * np.asarray(scores[rank_score], dtype=np.float64)
+    c3 = np.asarray(scores["C3"], dtype=np.float64)
+    c4 = np.asarray(scores["C4"], dtype=np.float64)
+    mask = (c3 > dead_thresh) & (c4 > sym_thresh)
+    if not mask.any():
+        raise ValueError("all heads masked out — relax dead_thresh/sym_thresh")
+
+    masked = np.where(mask, signed, np.nan)
+    flat = masked.ravel()
+    L, H = signed.shape
+
+    pos_i = int(np.nanargmax(flat))
+    best_positive = (pos_i // H, pos_i % H, 1)
+
+    # negatives: most-negative signed scores first, among masked heads
+    order = np.argsort(np.where(np.isnan(flat), np.inf, flat))  # ascending; nan last
+    n_valid = int(mask.sum())
+    neg_idx = [int(i) for i in order[:min(k, n_valid)]]
+    best_negative = [(i // H, i % H, -1) for i in neg_idx]
+
+    if rule == "single":
+        pool = [best_positive]
+    elif rule == "pool":
+        pool = [best_positive] + [hd for hd in best_negative
+                                  if (hd[0], hd[1]) != (best_positive[0], best_positive[1])]
+    else:
+        raise ValueError(f"unknown rule {rule!r}")
+
+    return {"best_positive": best_positive,
+            "best_negative": best_negative,
+            "pool": pool}
