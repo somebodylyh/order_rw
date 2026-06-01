@@ -1,0 +1,171 @@
+# Auto-Order-Head 端到端训练架构 — selector → g_β readout → hook
+
+日期: 2026-06-01
+作者: lyuyuhuan + Claude
+关联记忆: `br1_batch_readout_status.md`, `nr1_neural_readout_plan_status.md`,
+  `quick_head_selector_line.md`, `quick_head_selector_crossmodal_design.md`,
+  `cdl_evolution_clean_base_20260527.md`, `text_training_config.md`
+关联/被取代 spec: `2026-05-30-quick-head-selector-design.md`(本 spec 取代其 C1–C4 主路径,
+  selector 主排序改为 row-concentration;其余红线继承)
+
+## 0. 核心边界(贯穿全文,必须先立)
+
+> **CDL 只活在离线 pretrain(造 teacher)与 validation(当 ruler)。绝不进 hook。**
+>
+> - Pretrain / validation 阶段: `B → CDL → σ_T` 训练并验证 g_β。
+> - Hook 训练阶段: `A_t^{head} → B_t^{head} → g_β → logits → σ_{t+1}`,**没有 CDL、没有 L2R τ、没有 NLL reward,g_β 先 frozen**。
+
+这条边界是整个架构防"feature / objective mismatch"的总闸,任何实现都不得越界。
+
+## 1. 背景与本线要解决的问题
+
+BR-1 / NR-1 / quick-head-selector 已确立(见关联记忆):
+
+- order 信号随训练涌现,且高度 head-specific(head-mean 会正负抵消);
+- 主序 head 的 index **跨 run 漂移**(clean_base 偏 L0H0 族),**不能硬钉**;
+- **盲取 |score| winner 会选到 anti-L2R 反向 head**;
+- 旧 cheap score **C1–C4 裸排召回 winner 失败**(全 ladder R@1=0/40,最好的 C2 R@3=6/40);
+- 真正可用的 cheap 指标是 **row-concentration(边相关)**;
+- ⚠️ 旧 extraction 把 `[None]` sink 以 `none_weight=0.1`、按 model 坐标(不 remap)加进所有列,
+  污染边图,把 row-concentration 的 winner 排名从干净的 rank1/winconc≈0.6 砸到 rank2/0.086。
+
+本线把"选 head"与"读 order"彻底分层,给出端到端 auto-order-head 训练架构:
+
+```
+row-concentration 找候选 head
+  → CDL 只离线验证 / 造 teacher
+  → g_β 学 selected-head B → order
+  → hook 阶段无 CDL,frozen g_β 输出下一步 order
+```
+
+## 2. 范围与红线
+
+**做**: Phase 1(离线 head 选择 + g_β pretrain)、Phase 1.5(MLP generalization gate)、
+Phase 2(training hook scaffold)、selector observe-only 监控。
+
+**红线(继承 BR-1 / NR-1 / stability spec)**:
+- 训练 / g_β 更新 / order generation 一律**不得**使用 ground-truth L2R label、NLL、reward、image distance;
+- L2R τ 只作 **selector validation diagnostic**(证明 cheap score 召回真信号),不在线选 head、不进 hook;
+- expensive readout 固定 **CDL-source-start `alpha_dep=0.5`**,与既有 teacher 口径一致;
+- `extract_A_matrices` 的 `torch.randperm` **必须播种**(per-seed `torch.Generator`),否则跨 run B 方差污染。
+
+## 3. Phase 1 — 离线 pretrain(在 5k checkpoint,用 CDL)
+
+### 3.1 head 选择: row-concentration → top-k → CDL validation → best+
+
+对每个 head `(l,h)` 取 physical-frame block 图 `A`(batch-mean),令 `B = Aᵀ`,diag 置 0。
+
+**主排序 = row-concentration `C_row`**(无符号、几何无关、dead-row→0):
+```
+p_ij = B_ij / (Σ_{k≠i} B_ik + ε)
+C_row = mean_i [ 1 − ( −Σ_{j≠i} p_ij log(p_ij+ε) ) / log(N−1) ]   ;  dead row(行和≈0) → 贡献 0
+```
+
+**简要证明(为何 row-concentration ≈ order head)**:
+一个学到接近确定 reveal 序的 head,其转移图每个 block 强烈指向唯一后继 → 每行质量集中在少数列
+→ 行负熵(归一化)高 → `C_row` 高;反之位置型 / 弥散 head 把注意力摊到多 block → 行接近均匀
+→ `C_row` 低。该判据只依赖"行是否尖锐",**不依赖坐标几何**,故跨模态可移植(text 与 image 通用)。
+它不预设方向(L2R / R2L),只回答"这个 head 是否携带锐利的序"。
+
+**流程**: `C_row` 取 top-k(k=3–5)候选 → 仅对这 k 个 head 跑 CDL readout(`generate_teacher_label`,
+source-start,α=0.5)得真实 σ → `τ_vs_L2R` 符号给**方向**、挑 **best+**(argmax 正 τ)作 order provider。
+**全流程唯一跑 expensive CDL 的地方,且只 3–5 个 head。**
+
+- 旧 **C1 / C3 / C4 移出默认主路径**,仅作 report diagnostics(C1=text-only readiness-pos corr;
+  C3=readiness spread;C4=asymmetry);**C2(signed flow-drift)** 作可选方向辅助 / fallback。代码保留,不进 selector 决策。
+- winner 定义全程统一为 **best+(argmax 正 τ)**,不再用 `argmax|τ|`。
+
+### 3.2 extraction: none→block0(★ B0-pass 条件式)
+
+将旧 `A += none_block·0.1`(model 坐标、不 remap)换成:**把 `[None]`(index 0)折进物理 block 0**
+(query 行 + key 列段平均,无 magic 权重)。
+
+> **条件**: 仅当 B0 实验确认 none→block0 (a) 把 row-concentration 的 winner 排名恢复到 ≈rank1/winconc≈0.6,
+> 且 (b) 能跟踪晚期漂移(50k–60k),才把它定为 **唯一 canonical extraction**:
+> `offline scan = g_β pretrain dataset = hook input extraction` **三处共用同一路径**(防 `B_train ≠ B_hook` mismatch)。
+>
+> B0 未过前,extraction 视为 **unresolved**,Phase 2 hook **blocked**;不得提前写死。
+
+### 3.3 selected-head dataset builder + g_β 训练(复用 NR-1)
+
+在 5k、固定 best+ head 上采多 batch:
+```
+B_batch^{best+} → CDL → σ_T          (teacher label,CDL)
+g_β(B_batch^{best+}) → logits/order   (label = σ_T)
+```
+**复用 NR-1 现有 readout**(`neural_readout/` 的 `graph_transformer_readout.py` / `train_nr1.py` /
+`loss.py` / `eval_metrics.py`,及 `batch_readout/` 的 `model.py` / `pl_sampling.py` / `train_offline.py`)。
+**新增仅两件**: selected-head dataset builder + Phase-1.5 generalization gate。不新写模型结构。
+
+## 4. Phase 1.5 — MLP generalization gate(★接 hook 前必须过,CDL 仅作 ruler)
+
+只看 train loss 不够。必须验证 g_β **泛化**而非记住训练 batch:
+
+- **泛化 A(新数据)**: held-out batch `B_val^{best+} → CDL → σ_T^val`;比 `g_β(B_val)=σ̂` vs `σ_T^val`。
+- **泛化 B(跨 step,optional 但强烈建议)**: `B_10k^{best+} → CDL → σ_T^{10k}`;
+  测 5k 训好的 g_β 对训练漂移后的 B 是否还拟合(cross-step generalization)。
+
+指标(复用 `neural_readout/eval_metrics.py`): **Kendall τ / pairwise acc / Spearman / top-k(first-k) match /
+PL NLL(仅评估,不入 selection)/ teacher diversity**。
+
+descriptive target(报告,不一开始硬杀):
+```
+τ_val ≥ 0.6 ~ 0.7 ,  pairwise_acc ≥ 0.8 ,  teacher diversity 不塌 ,  argsort/sample order 不退化
+```
+**过了才有资格接 Task-15。** 不过 = clean negative(g_β 没学到可移植 readout,hook 必崩),如实报告并停在此。
+
+## 5. Phase 2 — training hook(无 CDL,g_β frozen)
+
+每 step:
+```
+σ_t → forward/backward → A_t^{best+} → B_t^{best+} → g_β(B_t) → logits → σ_{t+1}
+```
+- CDL 不参与、L2R τ 不参与、NLL 不更新 g_β;
+- g_β 参数 frozen,attention 仅作 input;
+- 复用 `batch_readout/integration_hook.py` 的 FrozenBetaHook wrapper。
+
+## 6. selector / 迟滞重选 —— v1 **observe-only**
+
+g_β 是 single-head trained;若 active head 漂到 L1H4,直接切会喂 g_β 分布外的 B → 新 mismatch。故:
+
+- **v1**: `active head = best+@5k` 固定。selector 每 K 步重算 row-concentration top-k,
+  **只监控**(current head 是否衰减 / top-k 是否换 / challenger 是否连续出现),**不实际切换**。
+- 真正切换留 **v2**: 必须对新 head **retrain/finetune g_β** 或升级 **multi-head g_β**。
+- K 由 100-step benchmark gate 定(overhead<30%→更密,>50%→拉大 K);本轮 selector 只读不写,overhead 容忍度高。
+
+## 7. 执行顺序
+
+| 阶段 | 做什么 | 用 CDL? |
+|---|---|---|
+| 1 | 5k 选 best+ head(row-conc top-k → CDL validation) | ✅ scan |
+| 2 | 造 selected-head batch 数据集 | ✅ teacher |
+| 3 | 训 g_β(复用 NR-1) | ✅ label |
+| 4 | held-out batch validation(泛化 A) | ✅ 评估 |
+| 5 | cross-step validation(10k+,泛化 B) | ✅ 评估 |
+| 6 | hook 进训练 | ❌ |
+| 7 | selector / 迟滞(observe-only) | ❌ |
+
+## 8. 组件与文件
+
+| 用途 | 文件 | 状态 |
+|---|---|---|
+| row-concentration 主选择器 + 选 head 规则 | `block_lo_arm_order_network/quick_head_selector.py` | 改: 加 `row_concentration()` 为主,C1/C3/C4 降 diagnostics |
+| none→block0 canonical extraction | `block_lo_arm_order_network/per_head_order_scan.py` | 改(B0-pass 后): 共用于 scan/dataset/hook |
+| selected-head dataset builder | (新增) | 新写 |
+| g_β readout / PL sample / metrics | `neural_readout/*`, `batch_readout/{model,pl_sampling,loss,eval_metrics}.py` | 复用 |
+| MLP generalization gate | (新增,基于 `eval_metrics.py`) | 新写 |
+| FrozenBetaHook | `batch_readout/integration_hook.py` | 复用/包装 |
+| expensive CDL ground truth(ladder) | `batch_readout/logs/per_head_scan/*.json`(9 ckpt×5 seed,已跑完) | 现成 |
+
+## 9. 非目标(YAGNI)
+
+- v1 不做 active head 切换(observe-only);不做 multi-head g_β;不做 g_β 在线更新。
+- 不引入 first-eigenvector / 谱方法;不把 §4 descriptive target 写成 hard gate;不引入 NLL/L2R 进任何训练或 selection。
+- B0 未过前不落地 Phase 2 hook;不物理删除 C1–C4(仅降级)。
+- 不复活原 alt_from0 ckpt(只用现存 `alt_from0_random/ckpt_step5000.pt`)。
+
+## 10. 待定 / 依赖
+
+- **B0 结果(blocking §3.2 与 Phase 2)**: `b0_fast.py` 在跑,确认 none→block0 是否恢复 rank1 + 跟踪晚期漂移。
+- **M 统一**: scan(ladder 用 M=100)与 g_β dataset(需大量 batch)口径需在实现期统一并记录。
+- warmup 长度沿用 5k;K / 监控阈值在搭训练架子时按 benchmark 定。
