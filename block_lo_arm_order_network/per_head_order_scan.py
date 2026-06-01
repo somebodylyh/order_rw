@@ -113,7 +113,7 @@ def _attn_to_A_block_b0_vec(attn, reveal_tokens, inv_perm,
     labels = np.empty(seq_len + 1, dtype=np.int64)
     labels[0] = 0                                              # [None] -> physical block 0
     labels[1:] = phys_blocks
-    counts = np.bincount(labels, minlength=num_blocks).astype(np.float64)  # never 0: every block_len tokens
+    counts = np.bincount(labels, minlength=num_blocks).astype(np.float64)  # every physical block gets block_len revealed tokens (block 0 also gets [None]) -> never 0
     S = np.zeros((num_blocks, seq_len + 1), dtype=np.float64)
     S[labels, np.arange(seq_len + 1)] = 1.0
     S = S / counts[:, None]                                    # segment-mean selection rows

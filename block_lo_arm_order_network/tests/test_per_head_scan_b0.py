@@ -1,7 +1,5 @@
-import importlib.util
 import pathlib
 import numpy as np
-import pytest
 
 from per_head_order_scan import _attn_to_A_block_b0_vec
 from training_utils import SEQ_LEN, N, BLOCK_LEN
