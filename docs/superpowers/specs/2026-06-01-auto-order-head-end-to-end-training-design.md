@@ -51,6 +51,16 @@ Phase 2(training hook scaffold)、selector observe-only 监控。
 
 ## 3. Phase 1 — 离线 pretrain(在 5k checkpoint,用 CDL)
 
+### 3.0 前置 gate: B0 full ladder 复核(进 g_β pretrain 前必须完成)
+
+因 B0 改写了 head 稳定性叙事(§3.2),进入 selected-head dataset + g_β pretrain **之前**必须先跑:
+
+- **B0 extraction full ladder**: 9 ckpt × 5 seed(与现有 OLD ladder 同口径,仅换 none→block0 提取);
+- **OLD vs B0 对比**: (1) rowconc 分布(median / winner conc);(2) top-k pool precision;
+  (3) best+ stability(跨 seed / 跨 step);(4) 晚期(50k–60k)winner 是否仍是 L0H0(验证"漂移=伪影")。
+- **通过判据**: B0 全程 rowconc 健康(median 不塌)、top-k pool precision 高、best+ 跨 seed 稳定。
+- 通过后方可进入 §3.3 selected-head dataset + g_β pretrain。
+
 ### 3.1 head 选择: row-concentration → top-k → CDL validation → best+
 
 对每个 head `(l,h)` 取 physical-frame block 图 `A`(batch-mean),令 `B = Aᵀ`,diag 置 0。
@@ -75,16 +85,43 @@ source-start,α=0.5)得真实 σ → `τ_vs_L2R` 符号给**方向**、挑 **bes
   C3=readiness spread;C4=asymmetry);**C2(signed flow-drift)** 作可选方向辅助 / fallback。代码保留,不进 selector 决策。
 - winner 定义全程统一为 **best+(argmax 正 τ)**,不再用 `argmax|τ|`。
 
-### 3.2 extraction: none→block0(★ B0-pass 条件式)
+**selector 验证判据(主判据改为 top-k pool quality,不再以单一 winner rank 为主)**:
+B0 下 top-k 里常有多个 head 同时 \|τ\|≈0.9–1.0,"exact argmax 是否排第一"噪声大、非失败信号。故:
+
+| 指标 | 定义 | 角色 |
+|---|---|---|
+| **pool precision@k** | top-k 中 \|τ\|≥0.9(或 τ≥0.8)的 head 比例 | **主判据** |
+| **best+ recall@k** | top-k 是否含任一 strong positive head(τ≥0.8) | **主判据** |
+| best_abs recall@k | top-k 是否含任一 strong absolute-order head(\|τ\|≥0.9) | 辅 |
+| max τ in top-k | top-k 里最强 head 的 τ | 辅 |
+| exact argmax rank | 单一 argmax-τ winner 排第几 | **降为附表,不做主判据** |
+
+### 3.2 extraction: none→block0(★ provisional canonical,full ladder 复核 pending)
 
 将旧 `A += none_block·0.1`(model 坐标、不 remap)换成:**把 `[None]`(index 0)折进物理 block 0**
 (query 行 + key 列段平均,无 magic 权重)。
 
-> **条件**: 仅当 B0 实验确认 none→block0 (a) 把 row-concentration 的 winner 排名恢复到 ≈rank1/winconc≈0.6,
-> 且 (b) 能跟踪晚期漂移(50k–60k),才把它定为 **唯一 canonical extraction**:
-> `offline scan = g_β pretrain dataset = hook input extraction` **三处共用同一路径**(防 `B_train ≠ B_hook` mismatch)。
->
-> B0 未过前,extraction 视为 **unresolved**,Phase 2 hook **blocked**;不得提前写死。
+**采纳为 provisional canonical extraction**,理由(B0 实测,2 ckpt × 1 seed,2026-06-01):
+
+| ckpt | 方案 | rowconc med | winner conc | 晚期(60k)winner rank | top-5 \|τ\| |
+|---|---|---|---|---|---|
+| 5000 | OLD(0.1-sink) | 0.001(退化) | 0.092 | — | 0.83/0.99/0.48/0.94/0.08 |
+| 5000 | **B0** | 0.106 | 0.398 | — | **0.90/1.00/0.94/0.94** |
+| 60000 | OLD | 0.000(全死) | 0.001 | **12/32** | 全塌 |
+| 60000 | **B0** | 0.166 | 0.829 | **1/32** | **1.00/1.00/0.94/0.94/0.94** |
+
+- OLD 明显被 none-token 污染:rowconc median≈0,晚期(60k)全死;**不可继续作主口径**。
+- B0 恢复健康分布:median / winner conc / top-k order-head precision 全回来,60k winner rank=1。
+
+> **措辞(provisional,不是 sealed conclusion)**: B0 none→block0 **adopted as the provisional
+> canonical extraction path**,because it fixes the OLD none-token contamination and restores healthy
+> row-concentration distributions. **Full 9-ckpt × 5-seed ladder validation remains required before
+> claiming stability.** 一旦全 ladder 通过,则 `offline scan = g_β pretrain dataset = hook input
+> extraction` **三处共用同一路径**(防 `B_train ≠ B_hook` mismatch)。
+
+⚠️ B0 还**改变了 winner 结论**:OLD 下 60k winner=L1H4,B0 下 60k winner=**L0H0**(τ=1.00,rowconc rank1),
+且 L0H0 在 5k 也是 concentration #1 → 之前"漂移到 L1H4"可能是 OLD 伪影(见 §6)。这正是必须 full ladder
+复核的原因——**B0 不只是小修,它改写了 head 稳定性叙事**。该复核是 Phase 1 的前置 gate(§3.0)。
 
 ### 3.3 selected-head dataset builder + g_β 训练(复用 NR-1)
 
@@ -124,19 +161,25 @@ descriptive target(报告,不一开始硬杀):
 - g_β 参数 frozen,attention 仅作 input;
 - 复用 `batch_readout/integration_hook.py` 的 FrozenBetaHook wrapper。
 
-## 6. selector / 迟滞重选 —— v1 **observe-only**
+## 6. selector / 迟滞重选 —— v1 **observe-only**(rationale: safety/monitoring,非 confirmed drift)
 
-g_β 是 single-head trained;若 active head 漂到 L1H4,直接切会喂 g_β 分布外的 B → 新 mismatch。故:
+> OLD extraction suggested late-stage head drift(L0H6→L1H4),but B0 indicates **part of this drift may be
+> an extraction artifact**(B0 下 L0H0 在 5k 与 60k 都是头号 order head)。Therefore hysteresis is retained
+> as a **safety / monitoring** mechanism,**not yet as a required active-switching mechanism**。
+
+g_β 是 single-head trained;若 active head 真切到别的 head,会喂 g_β 分布外的 B → 新 mismatch。故:
 
 - **v1**: `active head = best+@5k` 固定。selector 每 K 步重算 row-concentration top-k,
   **只监控**(current head 是否衰减 / top-k 是否换 / challenger 是否连续出现),**不实际切换**。
 - 真正切换留 **v2**: 必须对新 head **retrain/finetune g_β** 或升级 **multi-head g_β**。
+- "漂移是否真实"由 §3.0 B0 full ladder 复核回答;在此之前迟滞定位为保险,不假设漂移已确认。
 - K 由 100-step benchmark gate 定(overhead<30%→更密,>50%→拉大 K);本轮 selector 只读不写,overhead 容忍度高。
 
 ## 7. 执行顺序
 
 | 阶段 | 做什么 | 用 CDL? |
 |---|---|---|
+| **0** | **B0 full ladder 复核(9ckpt×5seed,§3.0 前置 gate)** | ✅ scan |
 | 1 | 5k 选 best+ head(row-conc top-k → CDL validation) | ✅ scan |
 | 2 | 造 selected-head batch 数据集 | ✅ teacher |
 | 3 | 训 g_β(复用 NR-1) | ✅ label |
@@ -166,6 +209,9 @@ g_β 是 single-head trained;若 active head 漂到 L1H4,直接切会喂 g_β �
 
 ## 10. 待定 / 依赖
 
-- **B0 结果(blocking §3.2 与 Phase 2)**: `b0_fast.py` 在跑,确认 none→block0 是否恢复 rank1 + 跟踪晚期漂移。
+- **B0 2-ckpt 结果已出(2026-06-01)**: none→block0 救活 rowconc 分布、60k winner rank=1,采纳为 provisional
+  canonical(§3.2)。**下一步 = §3.0 B0 full ladder(9ckpt×5seed)复核**,是进 g_β pretrain 的前置 gate。
 - **M 统一**: scan(ladder 用 M=100)与 g_β dataset(需大量 batch)口径需在实现期统一并记录。
 - warmup 长度沿用 5k;K / 监控阈值在搭训练架子时按 benchmark 定。
+- ⚠️ B0 提取热点: per-chunk naive einsum 慢,full ladder 跑前需把 `b0` 提取向量化(einsum `optimize=True`
+  已用;ladder 规模需进一步 batch 化,参照 OLD ladder 的向量化经验 18min→5:36)。
