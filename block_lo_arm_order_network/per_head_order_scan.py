@@ -91,6 +91,39 @@ def _attn_to_A_block_vec(attn, reveal_tokens, inv_perm,
     return A.reshape(lead + (num_blocks, num_blocks)) if lead else A[0]
 
 
+def _attn_to_A_block_b0_vec(attn, reveal_tokens, inv_perm,
+                            seq_len=SEQ_LEN, num_blocks=N, block_len=BLOCK_LEN):
+    """none→block0 physical-frame block graph, vectorized over leading dims.
+
+    Folds the [None] token (index 0) into physical block 0 (both its query row
+    and key column) via a normalized segment-selection matrix, then segment-means
+    the (T+1,T+1) attention into (N,N). No magic none_weight, no coordinate
+    mismatch (everything is mapped to the physical frame before aggregation).
+    Diagonal zeroed. Mirrors b0_fast.py::agg_b0 for arbitrary leading dims; the
+    per-chunk reference pins this bit-for-bit (test_per_head_scan_b0).
+    """
+    attn = np.asarray(attn, dtype=np.float64)
+    lead = attn.shape[:-2]
+    K = int(np.prod(lead)) if lead else 1
+    a = attn.reshape(K, seq_len + 1, seq_len + 1)
+
+    reveal_tokens = np.asarray(reveal_tokens, dtype=np.int64)
+    inv_perm = np.asarray(inv_perm, dtype=np.int64)
+    phys_blocks = inv_perm[reveal_tokens // block_len]          # (T,) physical block per revealed token
+    labels = np.empty(seq_len + 1, dtype=np.int64)
+    labels[0] = 0                                              # [None] -> physical block 0
+    labels[1:] = phys_blocks
+    counts = np.bincount(labels, minlength=num_blocks).astype(np.float64)  # never 0: every block_len tokens
+    S = np.zeros((num_blocks, seq_len + 1), dtype=np.float64)
+    S[labels, np.arange(seq_len + 1)] = 1.0
+    S = S / counts[:, None]                                    # segment-mean selection rows
+    A = np.einsum("bt,ktu,cu->kbc", S, a, S, optimize=True)    # (K, N, N)
+    di = np.arange(num_blocks)
+    A[:, di, di] = 0.0
+    A = A.astype(np.float32, copy=False)
+    return A.reshape(lead + (num_blocks, num_blocks)) if lead else A[0]
+
+
 def attn257_to_A_block(avg_attn, reveal_tokens, inv_perm,
                        seq_len=SEQ_LEN, num_blocks=N, block_len=BLOCK_LEN,
                        none_weight=0.1):
