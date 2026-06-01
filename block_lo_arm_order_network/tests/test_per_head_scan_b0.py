@@ -1,5 +1,6 @@
 import pathlib
 import numpy as np
+import pytest
 
 from per_head_order_scan import _attn_to_A_block_b0_vec, _per_sample_A, _attn_to_A_block_vec
 from training_utils import SEQ_LEN, N, BLOCK_LEN
@@ -56,3 +57,9 @@ def test_per_sample_A_none_mode_dispatch():
     # B0 path must equal the new B0 aggregator and differ from OLD.
     np.testing.assert_allclose(a_b0, _attn_to_A_block_b0_vec(attn, reveal_tokens, inv_perm), rtol=1e-5, atol=1e-6)
     assert not np.allclose(a_old, a_b0)
+
+
+def test_per_sample_A_unknown_none_mode_raises():
+    attn, reveal_tokens, inv_perm = _random_inputs()
+    with pytest.raises(ValueError):
+        _per_sample_A(attn, reveal_tokens, inv_perm, n_top=4, none_mode="bogus")

@@ -278,7 +278,10 @@ def _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top, none_mode="old"):
 
     # "old" agg == attn257_to_A_block (thin wrapper over _attn_to_A_block_vec
     # with default none_weight), so the OLD path is byte-unchanged.
-    agg = _attn_to_A_block_b0_vec if none_mode == "b0" else _attn_to_A_block_vec
+    _AGG_BY_NONE_MODE = {"old": _attn_to_A_block_vec, "b0": _attn_to_A_block_b0_vec}
+    if none_mode not in _AGG_BY_NONE_MODE:
+        raise ValueError(f"none_mode must be one of {sorted(_AGG_BY_NONE_MODE)}, got {none_mode!r}")
+    agg = _AGG_BY_NONE_MODE[none_mode]
     A_heavy_i = agg(avg_attn_heavy, reveal_tokens, inv_perm)
 
     # (L, H, T+1, T+1) -> (L, H, N, N) in one vectorized call (was an L*H loop).
