@@ -259,9 +259,13 @@ def _extract_per_head_and_heavy_A_loop(model, chunks, clean_perm, device, seed, 
     return A_lh, A_heavy
 
 
-def _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top):
+def _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top, none_mode="old"):
     """Per-sample physical-frame A_lh (L,H,N,N) and heavy A (N,N) from one
-    sample's attention stack (L,H,T+1,T+1). Identical math to the loop body."""
+    sample's attention stack (L,H,T+1,T+1). Identical math to the loop body.
+
+    none_mode in {"old","b0"} selects the [None]-handling for BOTH the per-head
+    and heavy block graphs ("old" = canonical 0.1-weighted [None] source term,
+    "b0" = none->physical-block-0 fold)."""
     L, H = attn_stack.shape[:2]
     head_vars = np.zeros(H)
     mask = ~np.eye(SEQ_LEN, dtype=bool)
@@ -271,16 +275,20 @@ def _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top):
         head_vars[h] = float(np.var(offdiag))
     top_heads = np.argsort(head_vars)[-n_top:]
     avg_attn_heavy = attn_stack[:, top_heads, :, :].mean(axis=(0, 1))
-    A_heavy_i = attn257_to_A_block(avg_attn_heavy, reveal_tokens, inv_perm)
+
+    # "old" agg == attn257_to_A_block (thin wrapper over _attn_to_A_block_vec
+    # with default none_weight), so the OLD path is byte-unchanged.
+    agg = _attn_to_A_block_b0_vec if none_mode == "b0" else _attn_to_A_block_vec
+    A_heavy_i = agg(avg_attn_heavy, reveal_tokens, inv_perm)
 
     # (L, H, T+1, T+1) -> (L, H, N, N) in one vectorized call (was an L*H loop).
-    A_lh_i = _attn_to_A_block_vec(attn_stack, reveal_tokens, inv_perm)
+    A_lh_i = agg(attn_stack, reveal_tokens, inv_perm)
     return A_lh_i, A_heavy_i
 
 
 @torch.no_grad()
 def extract_per_head_and_heavy_A(model, chunks, clean_perm, device, seed,
-                                 n_top=4, fwd_batch=64):
+                                 n_top=4, fwd_batch=64, none_mode="old"):
     """Batched per-chunk per-(layer,head) A and top-n_top-head heavy A.
 
     Forwards `fwd_batch` chunks at once instead of one-at-a-time. The per-chunk
@@ -325,7 +333,7 @@ def extract_per_head_and_heavy_A(model, chunks, clean_perm, device, seed,
             i = start + bi
             attn_stack = attn_batch[:, bi]  # (L, H, T+1, T+1)
             reveal_tokens = token_orders[i].numpy()
-            A_lh_i, A_heavy_i = _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top)
+            A_lh_i, A_heavy_i = _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top, none_mode=none_mode)
             if A_lh is None:
                 A_lh = np.zeros((n_chunks,) + A_lh_i.shape, dtype=np.float32)
             A_lh[i] = A_lh_i
@@ -345,7 +353,7 @@ def _batch_mean_B(A, M, batch_size):
 
 
 def scan_checkpoint(ckpt_path, M, batch_size, seed, device="cuda:0",
-                    split="train", alpha_dep=0.5):
+                    split="train", alpha_dep=0.5, none_mode="old"):
     """Full per-head order scan for one checkpoint and one sampling seed.
 
     Returns a dict matching the original diag_head_layer_scan JSON schema.
@@ -354,7 +362,7 @@ def scan_checkpoint(ckpt_path, M, batch_size, seed, device="cuda:0",
     model, chunks, clean_perm, dev, _ci = _load_model_and_chunks(
         ckpt_path, total, seed, device, split
     )
-    A_lh, A_heavy = extract_per_head_and_heavy_A(model, chunks, clean_perm, dev, seed)
+    A_lh, A_heavy = extract_per_head_and_heavy_A(model, chunks, clean_perm, dev, seed, none_mode=none_mode)
     Ln, Hn = A_lh.shape[1], A_lh.shape[2]
 
     sigma_heavy = _orders_from_graphs(_batch_mean_B(A_heavy, M, batch_size), alpha_dep)
@@ -393,7 +401,8 @@ def scan_checkpoint(ckpt_path, M, batch_size, seed, device="cuda:0",
 
     return {
         "config": {"M": M, "batch_size": batch_size, "seed": seed,
-                   "ckpt": str(ckpt_path), "L": Ln, "H": Hn, "alpha_dep": alpha_dep},
+                   "ckpt": str(ckpt_path), "L": Ln, "H": Hn, "alpha_dep": alpha_dep,
+                   "none_mode": none_mode},
         "heavy_baseline": heavy,
         "per_head_layer_sorted_by_abs_tau_vs_l2r": per_head,
         "graphs": graphs,
@@ -412,11 +421,13 @@ def main():
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--split", default="train")
     p.add_argument("--alpha-dep", type=float, default=0.5)
+    p.add_argument("--none-mode", default="old", choices=["old", "b0"])
     p.add_argument("--out", required=True)
     args = p.parse_args()
 
     res = scan_checkpoint(args.ckpt, args.M, args.batch_size, args.seed,
-                          device=args.device, split=args.split, alpha_dep=args.alpha_dep)
+                          device=args.device, split=args.split, alpha_dep=args.alpha_dep,
+                          none_mode=args.none_mode)
     pathlib.Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     with open(args.out, "w") as f:
         json.dump(res, f, indent=1)

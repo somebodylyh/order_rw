@@ -1,7 +1,7 @@
 import pathlib
 import numpy as np
 
-from per_head_order_scan import _attn_to_A_block_b0_vec
+from per_head_order_scan import _attn_to_A_block_b0_vec, _per_sample_A, _attn_to_A_block_vec
 from training_utils import SEQ_LEN, N, BLOCK_LEN
 
 # Load the per-chunk reference agg_b0 from b0_fast.py without running its main loop.
@@ -45,3 +45,14 @@ def test_b0_vec_zero_diagonal_and_no_lead_dim():
     single = _attn_to_A_block_b0_vec(attn[0, 0], reveal_tokens, inv_perm)  # (N,N), no lead dim
     assert single.shape == (N, N)
     assert np.allclose(np.diag(single), 0.0)
+
+
+def test_per_sample_A_none_mode_dispatch():
+    attn, reveal_tokens, inv_perm = _random_inputs()           # (L,H,T+1,T+1)
+    a_old, _ = _per_sample_A(attn, reveal_tokens, inv_perm, n_top=4, none_mode="old")
+    a_b0, _ = _per_sample_A(attn, reveal_tokens, inv_perm, n_top=4, none_mode="b0")
+    # OLD path must equal the existing OLD aggregator exactly (no behavior change).
+    np.testing.assert_allclose(a_old, _attn_to_A_block_vec(attn, reveal_tokens, inv_perm), rtol=1e-5, atol=1e-6)
+    # B0 path must equal the new B0 aggregator and differ from OLD.
+    np.testing.assert_allclose(a_b0, _attn_to_A_block_b0_vec(attn, reveal_tokens, inv_perm), rtol=1e-5, atol=1e-6)
+    assert not np.allclose(a_old, a_b0)
