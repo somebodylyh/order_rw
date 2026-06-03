@@ -16,7 +16,7 @@
 - Modify: `block_lo_arm_order_network/per_head_order_scan.py` (add function after `_attn_to_A_block_vec`, ~line 92)
 - Test: `block_lo_arm_order_network/tests/test_per_head_scan_b0.py` (new)
 
-- [ ] **Step 1: Write the failing test** (bit-match vs the per-chunk reference `b0_fast.agg_b0`)
+- [x] **Step 1: Write the failing test** (bit-match vs the per-chunk reference `b0_fast.agg_b0`)
 
 Create `block_lo_arm_order_network/tests/test_per_head_scan_b0.py`:
 
@@ -72,12 +72,12 @@ def test_b0_vec_zero_diagonal_and_no_lead_dim():
     assert np.allclose(np.diag(single), 0.0)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd block_lo_arm_order_network && python -m pytest tests/test_per_head_scan_b0.py -q`
 Expected: FAIL with `ImportError: cannot import name '_attn_to_A_block_b0_vec'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 In `block_lo_arm_order_network/per_head_order_scan.py`, add immediately after `_attn_to_A_block_vec` (after its `return`, ~line 92):
 
@@ -115,12 +115,12 @@ def _attn_to_A_block_b0_vec(attn, reveal_tokens, inv_perm,
     return A.reshape(lead + (num_blocks, num_blocks)) if lead else A[0]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd block_lo_arm_order_network && python -m pytest tests/test_per_head_scan_b0.py -q`
 Expected: PASS (2 passed).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add block_lo_arm_order_network/per_head_order_scan.py block_lo_arm_order_network/tests/test_per_head_scan_b0.py
@@ -135,7 +135,7 @@ git commit -m "feat(b0): vectorized none->block0 block-graph aggregation, pinned
 - Modify: `block_lo_arm_order_network/per_head_order_scan.py` (`_per_sample_A` ~229, `extract_per_head_and_heavy_A` ~249, `scan_checkpoint` ~314, `main` ~370)
 - Test: `block_lo_arm_order_network/tests/test_per_head_scan_b0.py` (extend)
 
-- [ ] **Step 1: Write the failing test** (dispatch picks the right aggregator; OLD path unchanged)
+- [x] **Step 1: Write the failing test** (dispatch picks the right aggregator; OLD path unchanged)
 
 Append to `tests/test_per_head_scan_b0.py`:
 
@@ -154,12 +154,12 @@ def test_per_sample_A_none_mode_dispatch():
     assert not np.allclose(a_old, a_b0)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd block_lo_arm_order_network && python -m pytest tests/test_per_head_scan_b0.py::test_per_sample_A_none_mode_dispatch -q`
 Expected: FAIL with `TypeError: _per_sample_A() got an unexpected keyword argument 'none_mode'`.
 
-- [ ] **Step 3: Write minimal implementation** (thread `none_mode`, default `"old"`)
+- [x] **Step 3: Write minimal implementation** (thread `none_mode`, default `"old"`)
 
 In `per_head_order_scan.py`, change `_per_sample_A` signature + body (line ~229):
 
@@ -220,12 +220,12 @@ In `main` (line ~374): add the CLI flag and pass it through:
                           none_mode=args.none_mode)
 ```
 
-- [ ] **Step 4: Run test to verify it passes** (and the OLD-path regression test still passes)
+- [x] **Step 4: Run test to verify it passes** (and the OLD-path regression test still passes)
 
 Run: `cd block_lo_arm_order_network && python -m pytest tests/test_per_head_scan_b0.py tests/test_per_head_scan_batched.py -q`
 Expected: PASS (all). The `test_per_head_scan_batched` suite confirms the OLD path is byte-unchanged.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add block_lo_arm_order_network/per_head_order_scan.py block_lo_arm_order_network/tests/test_per_head_scan_b0.py
@@ -239,7 +239,7 @@ git commit -m "feat(b0): none_mode switch through extractor/scan/CLI (default ol
 **Files:**
 - Create: `scripts/run_per_head_order_scan_ladder_b0.sh`
 
-- [ ] **Step 1: Write the driver** (copy of the OLD driver, B0 output dir + `--none-mode b0`)
+- [x] **Step 1: Write the driver** (copy of the OLD driver, B0 output dir + `--none-mode b0`)
 
 Create `scripts/run_per_head_order_scan_ladder_b0.sh`:
 
@@ -299,7 +299,7 @@ done
 echo "[b0-ladder] DONE: $(ls "$OUT_DIR"/ckpt*_seed*.json 2>/dev/null | wc -l) JSON files in $OUT_DIR"
 ```
 
-- [ ] **Step 2: Make executable + smoke ONE job end-to-end** (validates CLI wiring on a real ckpt before the full 45)
+- [x] **Step 2: Make executable + smoke ONE job end-to-end** (validates CLI wiring on a real ckpt before the full 45)
 
 ```bash
 chmod +x scripts/run_per_head_order_scan_ladder_b0.sh
@@ -312,7 +312,7 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
 ```
 Expected: prints `top head L?H? tau_vs_l2r=...` and `saved -> .../ckpt5000_seed0.json`; the JSON's `config.none_mode == "b0"`. Sanity-check against the b0_fast 5k result (winner should be in the L0H0/L0H1/L1H1 τ≈1.0 cluster, NOT the OLD L0H6).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/run_per_head_order_scan_ladder_b0.sh
@@ -325,7 +325,7 @@ git commit -m "chore(b0): B0 none->block0 ladder driver (9 ckpt x 5 seed, separa
 
 **Files:** none (run only)
 
-- [ ] **Step 1: Launch the 45-job ladder in the background**
+- [x] **Step 1: Launch the 45-job ladder in the background**
 
 ```bash
 cd /home/admin/lyuyuhuan/order_lyu
@@ -336,7 +336,7 @@ echo "launched pid=$!"
 ```
 (Task 3 Step 2 already produced `ckpt5000_seed0.json`; the idempotent driver skips it.)
 
-- [ ] **Step 2: Monitor to completion** (watch progress + failures, exit when 45 JSONs exist or the driver dies)
+- [x] **Step 2: Monitor to completion** (watch progress + failures, exit when 45 JSONs exist or the driver dies)
 
 Use the Monitor tool with: `tail -n +1 -F .../per_head_scan_b0/ladder.log | grep --line-buffered -E "scan step=|DONE|Error|Traceback|MISSING"`, or poll:
 ```bash
@@ -351,7 +351,7 @@ Expected: 45 JSON files; `ladder.log` ends with `[b0-ladder] DONE: 45 ...`.
 **Files:**
 - Create: `block_lo_arm_order_network/batch_readout/logs/per_head_scan/b0_ladder_gate.py`
 
-- [ ] **Step 1: Write the gate analysis script** (rowconc health + pool precision + best+ stability + late-winner identity, OLD vs B0)
+- [x] **Step 1: Write the gate analysis script** (rowconc health + pool precision + best+ stability + late-winner identity, OLD vs B0)
 
 Create `block_lo_arm_order_network/batch_readout/logs/per_head_scan/b0_ladder_gate.py`:
 
@@ -437,19 +437,19 @@ print(f"\n§3.0 GATE (B0, step>=5000): min median C={med_min:.3f} (want >0.02), 
 print("PASS" if (med_min > 0.02 and recall > 0.9) else "REVIEW")
 ```
 
-- [ ] **Step 2: Run the gate after the ladder completes**
+- [x] **Step 2: Run the gate after the ladder completes**
 
 Run: `cd block_lo_arm_order_network/batch_readout/logs/per_head_scan && python b0_ladder_gate.py`
 Expected: a per-step OLD vs B0 table + a final `§3.0 GATE ... PASS/REVIEW` line. Read the `top1-head mode` column to confirm whether B0's best head is stable (e.g. L0H0) across steps and whether OLD's "drift to L1H4" was an artifact.
 
-- [ ] **Step 3: Commit the analysis + record the verdict**
+- [x] **Step 3: Commit the analysis + record the verdict**
 
 ```bash
 git add block_lo_arm_order_network/batch_readout/logs/per_head_scan/b0_ladder_gate.py
 git commit -m "feat(b0): OLD-vs-B0 ladder §3.0 gate analysis (rowconc health, pool precision, best+ stability)"
 ```
 
-- [ ] **Step 4: Update the spec §3.2/§3.0 with the full-ladder verdict** (provisional → final, or REVIEW notes), and update memory `quick_head_selector_line.md`.
+- [x] **Step 4: Update the spec §3.2/§3.0 with the full-ladder verdict** (provisional → final, or REVIEW notes), and update memory `quick_head_selector_line.md`.
 
 ---
 

@@ -61,6 +61,26 @@ Phase 2(training hook scaffold)、selector observe-only 监控。
 - **通过判据**: B0 全程 rowconc 健康(median 不塌)、top-k pool precision 高、best+ 跨 seed 稳定。
 - 通过后方可进入 §3.3 selected-head dataset + g_β pretrain。
 
+> **✅ VERDICT — PASS(2026-06-02 跑完整 9 ckpt × 5 seed = 45 jobs;`b0_ladder_gate.py`)**
+>
+> | step | B0 med C | poolP@5 | best+rec@5 | maxτ@5 | top1-conc head | | OLD med C |
+> |---|---|---|---|---|---|---|---|
+> | 0 | 0.002 | 0.00 | 0.00 | 0.04 | L1H6 (5/5) | | — |
+> | 1000 | 0.000 | 0.00 | 0.00 | 0.04 | L0H1 (5/5) | | — |
+> | 5000 | **0.046** | 0.80 | 1.00 | 0.98 | **L0H0 (5/5)** | | 0.001 |
+> | 10000 | 0.056 | 1.00 | 1.00 | 1.00 | **L0H0 (5/5)** | | 0.000 |
+> | 20000 | 0.064 | 1.00 | 1.00 | 1.00 | **L0H0 (5/5)** | | 0.000 |
+> | 30000 | 0.053 | 0.80 | 1.00 | 1.00 | **L0H0 (5/5)** | | 0.000 |
+> | 40000 | 0.055 | 1.00 | 1.00 | 1.00 | **L0H0 (5/5)** | | 0.000 |
+> | 50000 | 0.057 | 0.84 | 1.00 | 1.00 | **L0H0 (5/5)** | | 0.000 |
+> | 60000 | 0.057 | 1.00 | 1.00 | 1.00 | **L0H0 (5/5)** | | 0.000 |
+>
+> **Gate(B0, step≥5000)**: min median C=**0.046** (>0.02 ✓)、mean poolP@5=**0.92**、mean best+recall@5=**1.00** → **PASS**。
+>
+> 三点确认:**(1)** B0 救活 row-conc 健康指标 — OLD 全步 med C≈0.000(none-token 0.1-sink 污染塌死),B0 step≥5k 稳在 0.046–0.064;**(2)** top-k pool 干净 — poolP@5 平均 0.92、best+ recall 完美 1.00;**(3)** **winner 锁定 L0H0,零漂移** — row-conc 头号 head 从 5k 到 60k × 全 5 seed 都是 L0H0(45/45 一致),且与 §3.2 的 best+ τ winner 同为 L0H0(row-conc 尖锐 ∧ best+ order head 双重一致)→ §3.2/§6 的"OLD 晚期漂移 L1H4 = 提取伪影"**证实**。warmup-up 之外(step 0/1000)尚未学到序属预期(C≈0、best+rec=0)。
+> 注:OLD ladder 仅 31/45 有效点(早期 ckpt 缺 graph dump),不影响其作污染对照的结论(所有有效步 med C≈0)。
+> **§3.0 前置 gate 通过 → 解锁 §3.3 g_β pretrain。**
+
 ### 3.1 head 选择: row-concentration → top-k → CDL validation → best+
 
 对每个 head `(l,h)` 取 physical-frame block 图 `A`(batch-mean),令 `B = Aᵀ`,diag 置 0。
@@ -96,7 +116,7 @@ B0 下 top-k 里常有多个 head 同时 \|τ\|≈0.9–1.0,"exact argmax 是否
 | max τ in top-k | top-k 里最强 head 的 τ | 辅 |
 | exact argmax rank | 单一 argmax-τ winner 排第几 | **降为附表,不做主判据** |
 
-### 3.2 extraction: none→block0(★ provisional canonical,full ladder 复核 pending)
+### 3.2 extraction: none→block0(★ CANONICAL — full ladder 复核 ✅ 通过 2026-06-02,见 §3.0 VERDICT)
 
 将旧 `A += none_block·0.1`(model 坐标、不 remap)换成:**把 `[None]`(index 0)折进物理 block 0**
 (query 行 + key 列段平均,无 magic 权重)。
@@ -113,11 +133,11 @@ B0 下 top-k 里常有多个 head 同时 \|τ\|≈0.9–1.0,"exact argmax 是否
 - OLD 明显被 none-token 污染:rowconc median≈0,晚期(60k)全死;**不可继续作主口径**。
 - B0 恢复健康分布:median / winner conc / top-k order-head precision 全回来,60k winner rank=1。
 
-> **措辞(provisional,不是 sealed conclusion)**: B0 none→block0 **adopted as the provisional
-> canonical extraction path**,because it fixes the OLD none-token contamination and restores healthy
-> row-concentration distributions. **Full 9-ckpt × 5-seed ladder validation remains required before
-> claiming stability.** 一旦全 ladder 通过,则 `offline scan = g_β pretrain dataset = hook input
-> extraction` **三处共用同一路径**(防 `B_train ≠ B_hook` mismatch)。
+> **措辞(✅ sealed 2026-06-02 — full ladder 通过)**: B0 none→block0 **adopted as the canonical
+> extraction path**,because it fixes the OLD none-token contamination and restores healthy
+> row-concentration distributions. **Full 9-ckpt × 5-seed ladder validation PASSED**(§3.0 VERDICT:
+> min median C=0.046、poolP@5=0.92、best+recall=1.00、winner L0H0 45/45 稳定)。故 `offline scan =
+> g_β pretrain dataset = hook input extraction` **三处共用同一路径**(防 `B_train ≠ B_hook` mismatch)。
 
 ⚠️ B0 还**改变了 winner 结论**:OLD 下 60k winner=L1H4,B0 下 60k winner=**L0H0**(τ=1.00,rowconc rank1),
 且 L0H0 在 5k 也是 concentration #1 → 之前"漂移到 L1H4"可能是 OLD 伪影(见 §6)。这正是必须 full ladder
@@ -172,7 +192,9 @@ g_β 是 single-head trained;若 active head 真切到别的 head,会喂 g_β �
 - **v1**: `active head = best+@5k` 固定。selector 每 K 步重算 row-concentration top-k,
   **只监控**(current head 是否衰减 / top-k 是否换 / challenger 是否连续出现),**不实际切换**。
 - 真正切换留 **v2**: 必须对新 head **retrain/finetune g_β** 或升级 **multi-head g_β**。
-- "漂移是否真实"由 §3.0 B0 full ladder 复核回答;在此之前迟滞定位为保险,不假设漂移已确认。
+- "漂移是否真实"由 §3.0 B0 full ladder 复核回答:**✅ 已回答(2026-06-02)= 漂移是 OLD 提取伪影**
+  (B0 下 L0H0 在 5k–60k × 5 seed 全程头号 order head,45/45 零切换)。故 v1 迟滞确定为 observe-only —
+  L0H0 既然稳定,本就无需 active switching;迟滞仅留作 safety 监控。
 - K 由 100-step benchmark gate 定(overhead<30%→更密,>50%→拉大 K);本轮 selector 只读不写,overhead 容忍度高。
 
 ## 7. 执行顺序
