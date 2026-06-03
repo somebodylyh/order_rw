@@ -551,7 +551,7 @@ def write_config(output_dir, args, split, clean_perm, rw_policy, rw_params):
 
 def parse_args(default_run_kind="baseline"):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--run-kind", choices=["baseline", "random_continuation", "graph_rw", "graph_rw_bag", "l2r"],
+    p.add_argument("--run-kind", choices=["baseline", "random_continuation", "graph_rw", "graph_rw_bag", "l2r", "frozen_beta"],
                    default=default_run_kind)
     p.add_argument("--resume-ckpt", default="")
     p.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
@@ -650,6 +650,19 @@ def parse_args(default_run_kind="baseline"):
                    help="alternating: Adam learning rate for the per-refresh beta distillation")
     p.add_argument("--mlp-distill-batch-states", type=int, default=256,
                    help="alternating: states per minibatch in the per-refresh beta distillation")
+    # --- frozen-g_β order hook (run-kind=frozen_beta; Phase 2 §5) ---
+    p.add_argument("--frozen-beta-ckpt", type=str, default=None,
+                   help="run-kind=frozen_beta: path to the pretrained g_β checkpoint "
+                        "(g_beta_best.pt). The in-loop order is g_β(B0(selected head)).")
+    p.add_argument("--frozen-beta-head", type=int, nargs=2, default=[0, 0], metavar=("LAYER", "HEAD"),
+                   help="(layer, head) the g_β was pretrained on; must match the dataset head (default L0H0).")
+    p.add_argument("--frozen-beta-mode", choices=["argsort", "sample"], default="argsort",
+                   help="g_β hook order mode: argsort (greedy) or sample (PL, temperature --frozen-beta-tau).")
+    p.add_argument("--frozen-beta-tau", type=float, default=1.0,
+                   help="temperature for --frozen-beta-mode=sample.")
+    p.add_argument("--frozen-beta-refresh", type=int, default=1,
+                   help="recompute the g_β order every N steps (K-step refresh; 1 = every step). "
+                        "Bounds the probe-forward overhead to ~1/N.")
     return p.parse_args()
 
 
@@ -951,6 +964,20 @@ def main(default_run_kind="baseline"):
         metrics0 = run_eval_and_save(0, float("nan"), lr0, alpha0)
         save_ckpt(0, metrics0)
 
+    beta_provider = None
+    if args.run_kind == "frozen_beta":
+        if not args.frozen_beta_ckpt:
+            raise ValueError("run-kind=frozen_beta requires --frozen-beta-ckpt")
+        from batch_readout.hook_order_provider import HookOrderProvider
+        beta_provider = HookOrderProvider(
+            g_beta_ckpt=args.frozen_beta_ckpt, head=tuple(args.frozen_beta_head),
+            clean_perm=clean_perm, refresh_every=args.frozen_beta_refresh,
+            mode=args.frozen_beta_mode, tau=args.frozen_beta_tau,
+            seed=args.seed, device=str(device),
+        )
+        log(f"[frozen_beta] g_β={args.frozen_beta_ckpt} head=L{args.frozen_beta_head[0]}H{args.frozen_beta_head[1]} "
+            f"mode={args.frozen_beta_mode} refresh_every={args.frozen_beta_refresh}")
+
     for global_step in range(start_step, args.max_steps):
         alpha = alpha_for_step(global_step, start_step, args)
         total_loss = 0.0
@@ -968,6 +995,10 @@ def main(default_run_kind="baseline"):
 
             if args.run_kind in {"baseline", "random_continuation"}:
                 loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
+            elif args.run_kind == "frozen_beta":
+                sigma_phys = beta_provider.physical_order(model, idx_batch, global_step).to(device)
+                phys = sigma_phys.unsqueeze(0).expand(args.batch_size, -1)
+                loss = order_loss(model, idx_batch, phys, clean_perm, device)
             elif args.run_kind == "l2r":
                 l2r = torch.arange(N, dtype=torch.long, device=device).unsqueeze(0).expand(args.batch_size, -1)
                 loss = order_loss(model, idx_batch, l2r, clean_perm, device)
