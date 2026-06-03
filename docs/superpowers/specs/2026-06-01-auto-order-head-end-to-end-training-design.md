@@ -171,6 +171,20 @@ descriptive target(报告,不一开始硬杀):
 ```
 **过了才有资格接 Task-15。** 不过 = clean negative(g_β 没学到可移植 readout,hook 必崩),如实报告并停在此。
 
+> **✅ VERDICT — PASS(text, 2026-06-03;`scripts/run_phase33_gbeta.py --M 2000 --batch-size 8`)**
+> head=L0H0(best+,B0 canonical),g_β=nodewise+pairwise,5k 训(train/val/test=1600/200/200)。
+>
+> | split | g_β τ | g_β pw | L2R-prior τ | non-L2R[n] g_β τ |
+> |---|---|---|---|---|
+> | 5k/val | **0.849** | 0.941 | 0.760 | 0.648 [76] |
+> | 5k/test | **0.836** | 0.939 | 0.780 | 0.640 [74] |
+> | 10k/cross | 0.927 | 0.964 | 0.966 | 0.635 [52] |
+> | 20k/cross | 0.930 | 0.965 | 0.990 | 0.402 [9] |
+>
+> Gate(τ≥0.6, pairwise≥0.8): same-step ✓ / cross-step ✓ → **PASS**。
+>
+> **g_β 学到了 B-dependent readout,不是记常数 L2R**:(1) 在操作点 5k **反超 hardcoded-L2R prior**(+0.06~0.09);(2) 关键证据 = **non-L2R 子集(teacher≠identity,prior 必败处)g_β τ=0.64**,说明它读出了真实偏离 L2R 的序。**诚实边界**:文本内在序≈L2R,随训练头结晶成纯 L2R(non-L2R 样本 5k 75→20k 9),故 10k/20k 上 prior 逼近天花板、g_β 边际价值收窄(仍 τ≈0.93、non-L2R 子集仍正)——learned g_β 对文本的**增量价值有限但非零**,其真正 context-dependent 价值待 **image**(locality 序随内容变)验证。⚠️ smoke(M=80)曾显示 g_β<prior/non-L2R τ<0,**纯 underpower 伪影**,1600 样本下反转。**Phase 1.5 gate 通过 → 解锁 Task-15 hook(§5)。**
+
 ## 5. Phase 2 — training hook(无 CDL,g_β frozen)
 
 每 step:
