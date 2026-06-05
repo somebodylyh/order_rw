@@ -5,6 +5,7 @@ This module uses the new explicit convention for clean experiments:
     inv_perm_model_to_phys[model_block] = physical_block
 """
 
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -110,6 +111,54 @@ def expand_model_blocks_to_token_order(model_block_orders, block_len):
 def physical_blocks_to_model_token_order(physical_block_orders, clean_perm, block_len):
     model_blocks = physical_blocks_to_model_blocks(physical_block_orders, clean_perm)
     return expand_model_blocks_to_token_order(model_blocks, block_len)
+
+
+def build_phys_to_model_token_gather(clean_perm, block_len):
+    """Token-level gather index g such that, for a physical-space token tensor
+    idx_phys of shape (b, seq_len), `idx_phys[:, g]` equals
+    `phys_to_model_idx_clean(idx_phys, clean_perm)`.
+
+    Derivation: phys_to_model_idx_clean places phys position pb*bl+off at model
+    position block_perm[pb]*bl+off. So for model position q=mb*bl+off the source
+    phys position is inv_perm[mb]*bl+off — exactly expand(inv_perm).  This is a
+    vectorized one-shot equivalent of the per-position loop, cheap enough to apply
+    every training step.
+    """
+    inv = clean_perm.inv_perm_model_to_phys.long().unsqueeze(0)  # (1, N) model->phys block map
+    return expand_model_blocks_to_token_order(inv, block_len).squeeze(0)  # (seq_len,)
+
+
+def load_token_stream(bin_path):
+    """Memory-map a flat uint16 token `.bin` file (nanoGPT format) read-only.
+
+    Returns the np.memmap directly; callers slice contiguous windows out of it
+    (collaborator-style continuous loading) rather than materializing it.
+    """
+    return np.memmap(os.path.expanduser(str(bin_path)), dtype=np.uint16, mode="r")
+
+
+def sample_stream_batch(stream, batch_size, block_size, seed, step, micro):
+    """Draw `batch_size` contiguous `block_size`-token windows at random offsets
+    from a flat token stream (collaborator-style continuous loading).
+
+    Returns a (batch_size, block_size) long tensor in PHYSICAL token space (the
+    original left-to-right text order). Apply the clean gather index afterwards
+    (``batch[:, build_phys_to_model_token_gather(...)]``) to move into model space.
+
+    Deterministic in (seed, step, micro), mirroring the seeding scheme of
+    ``sample_random_physical_orders`` so resumes/replays are reproducible.
+    """
+    gen = torch.Generator()
+    gen.manual_seed(int(seed) * 100000000 + int(step) * 1000 + int(micro))
+    max_start = int(len(stream)) - int(block_size)
+    if max_start < 0:
+        raise ValueError(f"stream length {len(stream)} shorter than block_size {block_size}")
+    starts = torch.randint(0, max_start + 1, (int(batch_size),), generator=gen).tolist()
+    block_size = int(block_size)
+    rows = np.stack([
+        np.asarray(stream[s : s + block_size], dtype=np.int64) for s in starts
+    ])
+    return torch.from_numpy(rows).long()
 
 
 def build_fixed_split_and_shuffle(total_chunks, seed, val_fraction, max_eval_seqs=None):

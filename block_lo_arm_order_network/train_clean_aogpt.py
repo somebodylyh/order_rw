@@ -25,11 +25,14 @@ from clean_training_protocol import (
     batch_indices_for_step,
     build_clean_block_permutation,
     build_fixed_split_and_shuffle,
+    build_phys_to_model_token_gather,
     expand_model_blocks_to_token_order,
+    load_token_stream,
     model_blocks_to_physical_blocks,
     physical_blocks_to_model_blocks,
     physical_blocks_to_model_token_order,
     phys_to_model_idx_clean,
+    sample_stream_batch,
     sha256_int_array,
     train_cursor_for_next_step,
     verify_clean_coordinate_round_trip,
@@ -175,7 +178,7 @@ def refresh_rw_graph(model, idx_chunks, clean_perm, device, A_global_old, n_chun
 
 
 def alpha_for_step(global_step, start_step, args):
-    if args.run_kind not in {"graph_rw", "graph_rw_bag"}:
+    if args.run_kind not in {"graph_rw", "graph_rw_bag", "frozen_beta"}:
         return 0.0
     offset = int(getattr(args, "alpha_warmup_start", 0) or 0)
     local_step = max(0, int(global_step) - int(start_step) - offset)
@@ -303,7 +306,7 @@ def order_loss(model, idx_batch, physical_orders, clean_perm, device):
 
 
 @torch.no_grad()
-def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, args, alpha, rw_mlp=None):
+def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, args, alpha, rw_mlp=None, beta_provider=None):
     model.eval()
     device = next(model.parameters()).device
 
@@ -379,6 +382,20 @@ def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, 
         unstructured_model_orders.append(physical_blocks_to_model_blocks(unstructured_phys, clean_perm))
         rw_model_orders.append(physical_blocks_to_model_blocks(rw_phys, clean_perm))
 
+    # --- frozen_beta: compute val_beta_order from the current model state ---
+    beta_model_orders = []
+    if beta_provider is not None and args.run_kind == "frozen_beta":
+        from batch_readout.hook_order_provider import extract_selected_head_A_for_batch, random_probe_token_orders
+        eval_batch = idx_eval_model[: min(args.eval_batch_size, n_eval)].to(device)
+        probe = random_probe_token_orders(eval_batch.shape[0], args.seed, 0, device)
+        A = extract_selected_head_A_for_batch(
+            model, eval_batch, beta_provider.head, clean_perm, device, probe
+        )
+        beta_phys = beta_provider.hook.step(A.to(device)).cpu()  # (N,) physical-frame
+        beta_model = physical_blocks_to_model_blocks(beta_phys, clean_perm)
+        for _ in args.eval_order_seeds:
+            beta_model_orders.append(beta_model.unsqueeze(0).expand(n_eval, -1))
+
     modes = {
         "val_ori_l2r_block": ([ori_model], ori_model, None),
         "val_ar_l2r": ([ori_model], ori_model, None),
@@ -394,6 +411,12 @@ def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, 
             list(args.eval_order_seeds),
         ),
     }
+    if beta_model_orders:
+        modes["val_beta_order"] = (
+            beta_model_orders,
+            beta_model_orders[0][0],
+            list(args.eval_order_seeds),
+        )
 
     results = {}
     for name, (orders, desc_order, seeds) in modes.items():
@@ -404,8 +427,13 @@ def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, 
     rw_loss = results["val_rw_order"]["loss_token_avg"]
     if args.run_kind in {"graph_rw", "graph_rw_bag"}:
         train_objective = (1.0 - alpha) * random_loss + alpha * rw_loss
+    elif args.run_kind == "frozen_beta" and "val_beta_order" in results:
+        beta_loss = results["val_beta_order"]["loss_token_avg"]
+        train_objective = (1.0 - alpha) * random_loss + alpha * beta_loss
     elif args.run_kind == "l2r":
         train_objective = results["val_ori_l2r_block"]["loss_token_avg"]
+    elif args.run_kind == "shuffled_l2r":
+        train_objective = results["val_model_order"]["loss_token_avg"]
     else:
         train_objective = random_loss
     results["val_train_objective"] = {
@@ -508,9 +536,10 @@ def checkpoint_payload(model, optimizer, args, clean_perm, split, global_step, t
 
 def write_config(output_dir, args, split, clean_perm, rw_policy, rw_params):
     # Honest config: only emit Graph-RW fields if Graph-RW is actually active.
-    # alpha_for_step short-circuits to 0.0 when run_kind is not in {graph_rw, graph_rw_bag},
+    # alpha_for_step short-circuits to 0.0 when run_kind is not in {graph_rw, graph_rw_bag, frozen_beta},
     # so writing rw_policy / rw_params for baseline / l2r runs is misleading.
     graph_rw_active = args.run_kind in {"graph_rw", "graph_rw_bag"}
+    alpha_active = args.run_kind in {"graph_rw", "graph_rw_bag", "frozen_beta"}
     payload = {
         "args": vars(args),
         "model_args": clean_model_args(args),
@@ -537,7 +566,7 @@ def write_config(output_dir, args, split, clean_perm, rw_policy, rw_params):
                 "alpha_target": float(args.alpha_target),
                 "alpha_warmup_steps": int(args.alpha_warmup_steps),
             }
-            if graph_rw_active
+            if alpha_active
             else {"alpha_constant": 0.0, "reason": f"run_kind={args.run_kind} short-circuits alpha_for_step to 0"}
         ),
         "rw_policy": rw_policy if graph_rw_active else None,
@@ -551,7 +580,7 @@ def write_config(output_dir, args, split, clean_perm, rw_policy, rw_params):
 
 def parse_args(default_run_kind="baseline"):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--run-kind", choices=["baseline", "random_continuation", "graph_rw", "graph_rw_bag", "l2r", "frozen_beta"],
+    p.add_argument("--run-kind", choices=["baseline", "random_continuation", "graph_rw", "graph_rw_bag", "l2r", "shuffled_l2r", "frozen_beta"],
                    default=default_run_kind)
     p.add_argument("--resume-ckpt", default="")
     p.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
@@ -560,6 +589,18 @@ def parse_args(default_run_kind="baseline"):
     p.add_argument("--permute-seed", type=int, default=42)
     p.add_argument("--val-fraction", type=float, default=0.05)
     p.add_argument("--max-eval-seqs", type=int, default=200)
+    p.add_argument("--data-source", choices=["chunks", "continuous"], default="chunks",
+                   help="chunks = fixed wikitext arrow chunks (Graph-RW protocol, ~18ep reuse → "
+                        "overfit); continuous = collaborator-style memmap random-window stream "
+                        "(no reuse; L2R/baseline validation toward ~3.34). continuous requires "
+                        "run-kind in {l2r,baseline,random_continuation} and --refresh-interval 0.")
+    p.add_argument("--train-bin", default="/home/admin/ych/nanogpt-learned-order/data/wikitext103/train.bin",
+                   help="continuous: flat uint16 token .bin for the training stream")
+    p.add_argument("--val-bin", default="/home/admin/ych/nanogpt-learned-order/data/wikitext103/val.bin",
+                   help="continuous: flat uint16 token .bin for the eval stream")
+    p.add_argument("--stream-eval-windows", type=int, default=2000,
+                   help="continuous: number of fixed seeded val windows used for eval "
+                        "(replaces the 200 fixed chunks; larger → lower eval noise)")
     p.add_argument("--eval-batch-size", type=int, default=16)
     p.add_argument("--eval-interval", type=int, default=1000)
     p.add_argument("--log-interval", type=int, default=10)
@@ -688,19 +729,21 @@ def main(default_run_kind="baseline"):
 
     log(f"Run kind: {args.run_kind}")
     _graph_rw_active = args.run_kind in {"graph_rw", "graph_rw_bag"}
-    log(f"graph_rw_active: {_graph_rw_active}")
-    if _graph_rw_active:
+    _alpha_active = args.run_kind in {"graph_rw", "graph_rw_bag", "frozen_beta"}
+    log(f"graph_rw_active: {_graph_rw_active}  alpha_active: {_alpha_active}")
+    if _alpha_active:
         log(
             f"alpha_schedule: start={args.alpha_start} target={args.alpha_target} "
             f"warmup_steps={args.alpha_warmup_steps}"
         )
+    if _graph_rw_active:
         log(
             f"rw_policy={args.rw_policy} top_k={args.rw_top_k} "
             f"epsilon={getattr(args, 'rw_epsilon_uniform', None)} "
             f"tau_start={args.tau_start} lam={getattr(args, 'rw_lam', None)} "
             f"rho={getattr(args, 'rw_rho', None)}"
         )
-    else:
+    if not _alpha_active:
         log(
             f"alpha_schedule: constant 0.0 (run_kind={args.run_kind} short-circuits "
             f"alpha_for_step). Any rw_* CLI flags are ignored at training time."
@@ -714,28 +757,73 @@ def main(default_run_kind="baseline"):
         log(f"Loaded resume checkpoint: {args.resume_ckpt}")
 
     clean_perm, loaded_split = load_or_create_protocol(args, output_dir, ckpt)
-    log("Loading train-arrow chunks...")
-    idx_phys = load_train_chunks(n_chunks=None)
-    if loaded_split is None:
-        fixed = build_fixed_split_and_shuffle(
-            total_chunks=idx_phys.size(0),
-            seed=args.seed,
-            val_fraction=args.val_fraction,
-            max_eval_seqs=args.max_eval_seqs,
-        )
-        split = {
-            "train_indices": fixed.train_indices,
-            "val_indices": fixed.val_indices,
-            "train_shuffle_order": fixed.train_shuffle_order,
-            "eval_indices": fixed.eval_indices,
-        }
-    else:
-        split = loaded_split
-    save_protocol_files(output_dir, args, clean_perm, split)
 
-    log(f"Train chunks: {len(split['train_indices'])}, val chunks: {len(split['val_indices'])}, eval chunks: {len(split['eval_indices'])}")
-    log("Converting chunks to model coordinates...")
-    idx_model = phys_to_model_idx_clean(idx_phys, clean_perm)
+    continuous = (args.data_source == "continuous")
+    if continuous:
+        # frozen_beta is allowed: its g_β hook extracts B per-batch from the model (no fixed
+        # chunk pool needed) and reads no idx_train. The Graph-RW refresh/random_train paths
+        # DO need the fixed pool, so graph_rw* stay excluded.
+        if args.run_kind not in {"l2r", "shuffled_l2r", "baseline", "random_continuation", "frozen_beta"}:
+            raise SystemExit(
+                "--data-source continuous only supports --run-kind in "
+                "{l2r,shuffled_l2r,baseline,random_continuation,frozen_beta} (the Graph-RW refresh/random_train "
+                "paths need the fixed chunk pool); got "
+                f"{args.run_kind!r}.")
+        if args.refresh_interval > 0:
+            raise SystemExit("--data-source continuous does not support --refresh-interval > 0 "
+                             "(no fixed eval/train chunk pool to extract A from).")
+
+    # Token-level gather: physical-space token tensor [:, g_gather] == model-space tensor.
+    g_gather = build_phys_to_model_token_gather(clean_perm, BLOCK_LEN)
+
+    if continuous:
+        log(f"[data-source=continuous] memmap streams train={args.train_bin} val={args.val_bin}")
+        stream_train = load_token_stream(args.train_bin)
+        stream_val = load_token_stream(args.val_bin)
+        # Fixed, seeded eval windows from the val stream -> model coordinates.
+        eval_phys = sample_stream_batch(
+            stream_val, args.stream_eval_windows, SEQ_LEN,
+            seed=args.permute_seed, step=-1, micro=0,
+        )
+        idx_eval_model = eval_phys[:, g_gather].contiguous()
+        idx_train = None  # streamed per-step; no fixed train pool
+        # Harmless dummy split so checkpoint/protocol-file plumbing stays intact.
+        # train_* are 1-length (not empty) because train_cursor_for_next_step rejects empties.
+        split = {
+            "train_indices": np.zeros(1, dtype=np.int64),
+            "val_indices": np.zeros(0, dtype=np.int64),
+            "train_shuffle_order": np.zeros(1, dtype=np.int64),
+            "eval_indices": np.arange(idx_eval_model.size(0), dtype=np.int64),
+        }
+        save_protocol_files(output_dir, args, clean_perm, split)
+        log(f"[continuous] train stream tokens={len(stream_train)} "
+            f"eval windows={idx_eval_model.size(0)} (block={SEQ_LEN})")
+    else:
+        stream_train = None
+        log("Loading train-arrow chunks...")
+        idx_phys = load_train_chunks(n_chunks=None)
+        if loaded_split is None:
+            fixed = build_fixed_split_and_shuffle(
+                total_chunks=idx_phys.size(0),
+                seed=args.seed,
+                val_fraction=args.val_fraction,
+                max_eval_seqs=args.max_eval_seqs,
+            )
+            split = {
+                "train_indices": fixed.train_indices,
+                "val_indices": fixed.val_indices,
+                "train_shuffle_order": fixed.train_shuffle_order,
+                "eval_indices": fixed.eval_indices,
+            }
+        else:
+            split = loaded_split
+        save_protocol_files(output_dir, args, clean_perm, split)
+
+        log(f"Train chunks: {len(split['train_indices'])}, val chunks: {len(split['val_indices'])}, eval chunks: {len(split['eval_indices'])}")
+        log("Converting chunks to model coordinates...")
+        idx_model = phys_to_model_idx_clean(idx_phys, clean_perm)
+        idx_eval_model = idx_model[split["eval_indices"]]
+        idx_train = idx_model[split["train_indices"]]
 
     if ckpt is None:
         model_args = clean_model_args(args)
@@ -820,8 +908,7 @@ def main(default_run_kind="baseline"):
         log(f"[position_only] pos_tau={args.pos_tau} top_k={args.rw_top_k}; no graph B / MLP "
             f"(positional prior only) — entropy-matched attribution control for source_start")
 
-    idx_eval_model = idx_model[split["eval_indices"]]
-    idx_train = idx_model[split["train_indices"]]
+    # idx_eval_model / idx_train were set in the data-source branch above.
     if rw_policy == "mlp_cdl":
         if args.mlp_alternating:
             if start_step > 0:
@@ -911,6 +998,7 @@ def main(default_run_kind="baseline"):
                 "val_model_order",
                 "val_unstructured_order",
                 "val_rw_order",
+                "val_beta_order",
                 "lr",
             ])
 
@@ -923,12 +1011,13 @@ def main(default_run_kind="baseline"):
         nonlocal last_metrics
         log(f"[Eval @ {global_step}] alpha={alpha:.4f}")
         metrics = evaluate_orders(
-            model, idx_eval_model, clean_perm, B, rw_policy, rw_params, args, alpha, rw_mlp=rw_mlp
+            model, idx_eval_model, clean_perm, B, rw_policy, rw_params, args, alpha,
+            rw_mlp=rw_mlp, beta_provider=beta_provider,
         )
         last_metrics = metrics
         with eval_curve_path.open("a", newline="") as f:
             writer = csv.writer(f, delimiter="\t")
-            writer.writerow([
+            row = [
                 global_step,
                 f"{alpha:.6f}",
                 f"{avg_loss:.6f}",
@@ -938,13 +1027,17 @@ def main(default_run_kind="baseline"):
                 f"{metrics['val_model_order']['loss_token_avg']:.6f}",
                 f"{metrics['val_unstructured_order']['loss_token_avg']:.6f}",
                 f"{metrics['val_rw_order']['loss_token_avg']:.6f}",
+                f"{metrics.get('val_beta_order', {}).get('loss_token_avg', float('nan')):.6f}",
                 f"{lr:.8e}",
-            ])
+            ]
+            writer.writerow(row)
+        beta_str = f"beta={metrics['val_beta_order']['loss_token_avg']:.4f} | " if "val_beta_order" in metrics else ""
         log(
             f"[Eval @ {global_step}] train_obj={metrics['val_train_objective']['loss_token_avg']:.4f} | "
             f"ori_l2r={metrics['val_ori_l2r_block']['loss_token_avg']:.4f} | "
             f"model_order={metrics['val_model_order']['loss_token_avg']:.4f} | "
             f"unstructured={metrics['val_unstructured_order']['loss_token_avg']:.4f} | "
+            f"{beta_str}"
             f"rw={metrics['val_rw_order']['loss_token_avg']:.4f}"
         )
         return metrics
@@ -958,13 +1051,13 @@ def main(default_run_kind="baseline"):
         torch.save(payload, path)
         log(f"Saved checkpoint: {path}")
 
+    beta_provider = None
+
     if start_step == 0 and 0 in save_steps:
         lr0 = get_lr(0, args)
         alpha0 = alpha_for_step(0, start_step, args)
         metrics0 = run_eval_and_save(0, float("nan"), lr0, alpha0)
         save_ckpt(0, metrics0)
-
-    beta_provider = None
     if args.run_kind == "frozen_beta":
         if not args.frozen_beta_ckpt:
             raise ValueError("run-kind=frozen_beta requires --frozen-beta-ckpt")
@@ -984,10 +1077,15 @@ def main(default_run_kind="baseline"):
         optimizer.zero_grad(set_to_none=True)
 
         for micro_step in range(args.grad_accum):
-            batch_indices = batch_indices_for_step(
-                split["train_shuffle_order"], global_step, micro_step, args.batch_size, args.grad_accum
-            )
-            idx_batch = idx_model[batch_indices].to(device)
+            if continuous:
+                idx_batch = sample_stream_batch(
+                    stream_train, args.batch_size, SEQ_LEN, args.seed, global_step, micro_step
+                )[:, g_gather].to(device)
+            else:
+                batch_indices = batch_indices_for_step(
+                    split["train_shuffle_order"], global_step, micro_step, args.batch_size, args.grad_accum
+                )
+                idx_batch = idx_model[batch_indices].to(device)
 
             random_phys = sample_random_physical_orders(
                 args.batch_size, args.seed, global_step, micro_step, device
@@ -996,12 +1094,29 @@ def main(default_run_kind="baseline"):
             if args.run_kind in {"baseline", "random_continuation"}:
                 loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
             elif args.run_kind == "frozen_beta":
-                sigma_phys = beta_provider.physical_order(model, idx_batch, global_step).to(device)
-                phys = sigma_phys.unsqueeze(0).expand(args.batch_size, -1)
-                loss = order_loss(model, idx_batch, phys, clean_perm, device)
+                if alpha > 0.0:
+                    sigma_phys = beta_provider.physical_order(model, idx_batch, global_step).to(device)
+                    phys = sigma_phys.unsqueeze(0).expand(args.batch_size, -1)
+                    # Per-sample alpha mixing (same pattern as graph_rw)
+                    choose_rng = torch.Generator(device=device)
+                    choose_rng.manual_seed(args.seed * 100000000 + global_step * 1000 + micro_step)
+                    use_beta = torch.rand(args.batch_size, generator=choose_rng, device=device) < alpha
+                    mixed = torch.where(use_beta.unsqueeze(1), phys, random_phys)
+                    loss = order_loss(model, idx_batch, mixed, clean_perm, device)
+                else:
+                    loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
             elif args.run_kind == "l2r":
                 l2r = torch.arange(N, dtype=torch.long, device=device).unsqueeze(0).expand(args.batch_size, -1)
                 loss = order_loss(model, idx_batch, l2r, clean_perm, device)
+            elif args.run_kind == "shuffled_l2r":
+                # Control: AR along the data's shuffled layout (model_ascending), NOT the
+                # recovered original order. fixed_phys maps model-ascending back to physical
+                # so order_loss reproduces exactly the `val_model_order` eval traversal.
+                # Same clean_perm/data as random; only the (fixed, wrong-adjacency) order differs.
+                fixed_phys = model_blocks_to_physical_blocks(
+                    torch.arange(N, dtype=torch.long, device=device), clean_perm
+                ).unsqueeze(0).expand(args.batch_size, -1)
+                loss = order_loss(model, idx_batch, fixed_phys, clean_perm, device)
             elif args.run_kind == "graph_rw":
                 if should_sample_rw(alpha, rw_policy, rw_mlp):
                     rw_phys = sample_rw_physical_orders(

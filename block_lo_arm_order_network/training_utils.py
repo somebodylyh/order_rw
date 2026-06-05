@@ -10,6 +10,7 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _SCRIPT_DIR)
 
+import numpy as np
 import torch
 from datasets import Dataset
 from transformers import GPT2TokenizerFast
@@ -73,3 +74,24 @@ def load_train_chunks(n_chunks=None):
             break
     print(f"Processed {total_texts} texts, got {len(chunks)} chunks", flush=True)
     return torch.stack(chunks)  # (n_chunks, 256)
+
+
+def load_token_stream(path):
+    """Memory-map a contiguous uint16 token stream (nanoGPT-style train.bin/val.bin)."""
+    return np.memmap(path, dtype=np.uint16, mode="r")
+
+
+def sample_stream_batch(stream, batch_size, block_size, seed, global_step, micro_step):
+    """Draw `batch_size` random contiguous `block_size`-token windows from a continuous
+    token stream (physical/original token order). Mirrors nanoGPT get_batch but seeds
+    deterministically by (seed, global_step, micro_step) so training is reproducible and
+    resumable. Returns a (batch_size, block_size) long tensor in PHYSICAL token space.
+    """
+    g = torch.Generator()
+    g.manual_seed(int(seed) * 100000000 + int(global_step) * 1000 + int(micro_step))
+    max_start = len(stream) - block_size
+    ix = torch.randint(0, max_start, (batch_size,), generator=g)
+    x = torch.stack(
+        [torch.from_numpy(stream[int(i): int(i) + block_size].astype(np.int64)) for i in ix]
+    )
+    return x  # (batch_size, block_size), physical token order
