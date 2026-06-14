@@ -178,7 +178,7 @@ def refresh_rw_graph(model, idx_chunks, clean_perm, device, A_global_old, n_chun
 
 
 def alpha_for_step(global_step, start_step, args):
-    if args.run_kind not in {"graph_rw", "graph_rw_bag", "frozen_beta"}:
+    if args.run_kind not in {"graph_rw", "graph_rw_bag", "frozen_beta", "cdl_teacher"}:
         return 0.0
     offset = int(getattr(args, "alpha_warmup_start", 0) or 0)
     local_step = max(0, int(global_step) - int(start_step) - offset)
@@ -226,6 +226,36 @@ def sample_random_physical_orders(batch_size, seed, global_step, micro_step, dev
     for b in range(batch_size):
         rng = np.random.default_rng(int(seed) * 100000000 + int(global_step) * 1000 + int(micro_step) * 100 + b)
         rows.append(rng.permutation(N))
+    return torch.tensor(np.stack(rows), dtype=torch.long, device=device)
+
+
+def sample_token_orders_granular(batch_size, seed, global_step, micro_step,
+                                  device, granularity):
+    """Generate model-space token orders at a given shuffle granularity.
+
+    granularity in {32, 64, 128}: number of independently shuffled groups.
+    Each group is a contiguous chunk of group_size = SEQ_LEN // granularity tokens
+    (8, 4, or 2 tokens respectively). Groups are permuted randomly per sample,
+    but tokens within each group stay in contiguous left-to-right order.
+
+    Returns a (batch_size, SEQ_LEN) long tensor of model-coordinate token indices,
+    suitable for direct use as `token_orders` in model.forward_fn.
+    """
+    if granularity not in {32, 64, 128}:
+        raise ValueError(f"granularity must be in {{32, 64, 128}}, got {granularity}")
+    group_size = SEQ_LEN // granularity
+    rows = []
+    for b in range(batch_size):
+        rng = np.random.default_rng(
+            int(seed) * 100_000_000 + int(global_step) * 1000
+            + int(micro_step) * 100 + b
+        )
+        perm_groups = rng.permutation(granularity)
+        tokens = np.concatenate([
+            np.arange(g * group_size, (g + 1) * group_size)
+            for g in perm_groups
+        ])
+        rows.append(tokens)
     return torch.tensor(np.stack(rows), dtype=torch.long, device=device)
 
 
@@ -306,7 +336,7 @@ def order_loss(model, idx_batch, physical_orders, clean_perm, device):
 
 
 @torch.no_grad()
-def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, args, alpha, rw_mlp=None, beta_provider=None):
+def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, args, alpha, rw_mlp=None, beta_provider=None, cdl_provider=None):
     model.eval()
     device = next(model.parameters()).device
 
@@ -396,6 +426,15 @@ def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, 
         for _ in args.eval_order_seeds:
             beta_model_orders.append(beta_model.unsqueeze(0).expand(n_eval, -1))
 
+    # --- cdl_teacher: compute val_cdl_order from the current model state ---
+    cdl_model_orders = []
+    if cdl_provider is not None and args.run_kind == "cdl_teacher":
+        eval_batch_cdl = idx_eval_model[: min(args.eval_batch_size, n_eval)].to(device)
+        cdl_phys = cdl_provider.physical_order(model, eval_batch_cdl, 0)  # (N,) physical-frame
+        cdl_model = physical_blocks_to_model_blocks(cdl_phys, clean_perm)
+        for _ in args.eval_order_seeds:
+            cdl_model_orders.append(cdl_model.unsqueeze(0).expand(n_eval, -1))
+
     modes = {
         "val_ori_l2r_block": ([ori_model], ori_model, None),
         "val_ar_l2r": ([ori_model], ori_model, None),
@@ -417,6 +456,12 @@ def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, 
             beta_model_orders[0][0],
             list(args.eval_order_seeds),
         )
+    if cdl_model_orders:
+        modes["val_cdl_order"] = (
+            cdl_model_orders,
+            cdl_model_orders[0][0],
+            list(args.eval_order_seeds),
+        )
 
     results = {}
     for name, (orders, desc_order, seeds) in modes.items():
@@ -430,6 +475,9 @@ def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, 
     elif args.run_kind == "frozen_beta" and "val_beta_order" in results:
         beta_loss = results["val_beta_order"]["loss_token_avg"]
         train_objective = (1.0 - alpha) * random_loss + alpha * beta_loss
+    elif args.run_kind == "cdl_teacher" and "val_cdl_order" in results:
+        cdl_loss = results["val_cdl_order"]["loss_token_avg"]
+        train_objective = (1.0 - alpha) * random_loss + alpha * cdl_loss
     elif args.run_kind == "l2r":
         train_objective = results["val_ori_l2r_block"]["loss_token_avg"]
     elif args.run_kind == "shuffled_l2r":
@@ -539,7 +587,7 @@ def write_config(output_dir, args, split, clean_perm, rw_policy, rw_params):
     # alpha_for_step short-circuits to 0.0 when run_kind is not in {graph_rw, graph_rw_bag, frozen_beta},
     # so writing rw_policy / rw_params for baseline / l2r runs is misleading.
     graph_rw_active = args.run_kind in {"graph_rw", "graph_rw_bag"}
-    alpha_active = args.run_kind in {"graph_rw", "graph_rw_bag", "frozen_beta"}
+    alpha_active = args.run_kind in {"graph_rw", "graph_rw_bag", "frozen_beta", "cdl_teacher"}
     payload = {
         "args": vars(args),
         "model_args": clean_model_args(args),
@@ -580,7 +628,7 @@ def write_config(output_dir, args, split, clean_perm, rw_policy, rw_params):
 
 def parse_args(default_run_kind="baseline"):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--run-kind", choices=["baseline", "random_continuation", "graph_rw", "graph_rw_bag", "l2r", "shuffled_l2r", "frozen_beta"],
+    p.add_argument("--run-kind", choices=["baseline", "random_continuation", "graph_rw", "graph_rw_bag", "l2r", "shuffled_l2r", "frozen_beta", "cdl_teacher"],
                    default=default_run_kind)
     p.add_argument("--resume-ckpt", default="")
     p.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
@@ -594,6 +642,11 @@ def parse_args(default_run_kind="baseline"):
                         "overfit); continuous = collaborator-style memmap random-window stream "
                         "(no reuse; L2R/baseline validation toward ~3.34). continuous requires "
                         "run-kind in {l2r,baseline,random_continuation} and --refresh-interval 0.")
+    p.add_argument("--shuffle-granularity", type=int, default=64, choices=[32, 64, 128],
+                   help="Shuffle granularity for baseline/random_continuation runs: number of "
+                        "independently shuffled token groups. 32 = groups of 8 tokens, "
+                        "64 = groups of 4 (standard), 128 = groups of 2 tokens. "
+                        "Model always uses 64-block internal structure.")
     p.add_argument("--train-bin", default="/home/admin/ych/nanogpt-learned-order/data/wikitext103/train.bin",
                    help="continuous: flat uint16 token .bin for the training stream")
     p.add_argument("--val-bin", default="/home/admin/ych/nanogpt-learned-order/data/wikitext103/val.bin",
@@ -704,6 +757,20 @@ def parse_args(default_run_kind="baseline"):
     p.add_argument("--frozen-beta-refresh", type=int, default=1,
                    help="recompute the g_β order every N steps (K-step refresh; 1 = every step). "
                         "Bounds the probe-forward overhead to ~1/N.")
+    # --- direct CDL teacher order hook (run-kind=cdl_teacher) ---
+    p.add_argument("--cdl-teacher-head", type=int, nargs=2, default=[0, 7], metavar=("LAYER", "HEAD"),
+                   help="run-kind=cdl_teacher: (layer, head) to extract attention from for C-D+L teacher.")
+    p.add_argument("--cdl-teacher-tau", type=float, default=1.0,
+                   help="C-D+L teacher softmax temperature.")
+    p.add_argument("--cdl-teacher-refresh", type=int, default=10,
+                   help="recompute the CDL order every N steps.")
+    # --- per-head CDL signal tracking (diagnostic, any run-kind) ---
+    p.add_argument("--track-head", type=int, nargs=2, default=None, metavar=("LAYER", "HEAD"),
+                   help="at each eval, extract this head's B and log CDL tau / pairwise / uniqueness.")
+    p.add_argument("--track-head-m", type=int, default=20,
+                   help="number of probe batches for --track-head diagnostic (default 20).")
+    p.add_argument("--track-head-interval", type=int, default=20,
+                   help="run head-signal diagnostic every N steps (default 20).")
     return p.parse_args()
 
 
@@ -729,7 +796,7 @@ def main(default_run_kind="baseline"):
 
     log(f"Run kind: {args.run_kind}")
     _graph_rw_active = args.run_kind in {"graph_rw", "graph_rw_bag"}
-    _alpha_active = args.run_kind in {"graph_rw", "graph_rw_bag", "frozen_beta"}
+    _alpha_active = args.run_kind in {"graph_rw", "graph_rw_bag", "frozen_beta", "cdl_teacher"}
     log(f"graph_rw_active: {_graph_rw_active}  alpha_active: {_alpha_active}")
     if _alpha_active:
         log(
@@ -748,6 +815,9 @@ def main(default_run_kind="baseline"):
             f"alpha_schedule: constant 0.0 (run_kind={args.run_kind} short-circuits "
             f"alpha_for_step). Any rw_* CLI flags are ignored at training time."
         )
+    if args.run_kind in {"baseline", "random_continuation"}:
+        log(f"shuffle_granularity: {args.shuffle_granularity} "
+            f"(groups of {SEQ_LEN // args.shuffle_granularity} tokens)")
     log(f"Output dir: {output_dir}")
     log(f"Device: {device}")
 
@@ -763,7 +833,7 @@ def main(default_run_kind="baseline"):
         # frozen_beta is allowed: its g_β hook extracts B per-batch from the model (no fixed
         # chunk pool needed) and reads no idx_train. The Graph-RW refresh/random_train paths
         # DO need the fixed pool, so graph_rw* stay excluded.
-        if args.run_kind not in {"l2r", "shuffled_l2r", "baseline", "random_continuation", "frozen_beta"}:
+        if args.run_kind not in {"l2r", "shuffled_l2r", "baseline", "random_continuation", "frozen_beta", "cdl_teacher"}:
             raise SystemExit(
                 "--data-source continuous only supports --run-kind in "
                 "{l2r,shuffled_l2r,baseline,random_continuation,frozen_beta} (the Graph-RW refresh/random_train "
@@ -999,11 +1069,13 @@ def main(default_run_kind="baseline"):
                 "val_unstructured_order",
                 "val_rw_order",
                 "val_beta_order",
+                "val_cdl_order",
                 "lr",
             ])
 
     model.train()
     t0 = time.time()
+    last_log_time = t0
     last_metrics = {}
     next_refresh_step = start_step + args.refresh_interval if args.refresh_interval > 0 else None
 
@@ -1012,7 +1084,7 @@ def main(default_run_kind="baseline"):
         log(f"[Eval @ {global_step}] alpha={alpha:.4f}")
         metrics = evaluate_orders(
             model, idx_eval_model, clean_perm, B, rw_policy, rw_params, args, alpha,
-            rw_mlp=rw_mlp, beta_provider=beta_provider,
+            rw_mlp=rw_mlp, beta_provider=beta_provider, cdl_provider=cdl_provider,
         )
         last_metrics = metrics
         with eval_curve_path.open("a", newline="") as f:
@@ -1028,19 +1100,108 @@ def main(default_run_kind="baseline"):
                 f"{metrics['val_unstructured_order']['loss_token_avg']:.6f}",
                 f"{metrics['val_rw_order']['loss_token_avg']:.6f}",
                 f"{metrics.get('val_beta_order', {}).get('loss_token_avg', float('nan')):.6f}",
+                f"{metrics.get('val_cdl_order', {}).get('loss_token_avg', float('nan')):.6f}",
                 f"{lr:.8e}",
             ]
             writer.writerow(row)
         beta_str = f"beta={metrics['val_beta_order']['loss_token_avg']:.4f} | " if "val_beta_order" in metrics else ""
+        cdl_str = f"cdl={metrics['val_cdl_order']['loss_token_avg']:.4f} | " if "val_cdl_order" in metrics else ""
         log(
             f"[Eval @ {global_step}] train_obj={metrics['val_train_objective']['loss_token_avg']:.4f} | "
             f"ori_l2r={metrics['val_ori_l2r_block']['loss_token_avg']:.4f} | "
             f"model_order={metrics['val_model_order']['loss_token_avg']:.4f} | "
             f"unstructured={metrics['val_unstructured_order']['loss_token_avg']:.4f} | "
             f"{beta_str}"
+            f"{cdl_str}"
             f"rw={metrics['val_rw_order']['loss_token_avg']:.4f}"
         )
+
+        # ── per-head CDL signal tracking (diagnostic) ──
+        if args.track_head is not None:
+            _track_head_signal(model, global_step)
+
         return metrics
+
+    # ── head signal tracker ─────────────────────────────────────────────
+    head_signal_path = None
+    if args.track_head is not None:
+        head_signal_path = output_dir / "head_signal.tsv"
+        head_signal_path.write_text(
+            "step\ttau_vs_l2r\tmean_pairwise_tau\tunique_sigma\trow_conc_mean\telapsed_s\n"
+        )
+
+    @torch.no_grad()
+    def _track_head_signal(model, global_step):
+        from neural_readout.teacher_labels import generate_teacher_label
+        from per_head_order_scan import _attn_to_A_block_b0_vec, _batch_mean_B
+        from batch_readout.diversity_batch import teacher_diversity_stats
+        from scipy.stats import kendalltau
+        import time as _time
+
+        t0 = _time.time()
+        device = next(model.parameters()).device
+        inv_perm = clean_perm.inv_perm_model_to_phys.cpu().numpy()
+        M_track = int(args.track_head_m)
+        l, h = int(args.track_head[0]), int(args.track_head[1])
+        PROBE_BATCH = 32  # grouping factor for batch-mean B
+        FWD_BATCH = 8     # small forward batch to avoid OOM (attention tensors are large)
+        model.eval()
+
+        # Use eval windows for probe
+        n_avail = len(idx_eval_model)
+        n_probe = min(M_track * PROBE_BATCH, n_avail)
+        rng = np.random.default_rng(int(args.seed) * 10000 + global_step)
+        probe_idx = rng.choice(n_avail, size=n_probe, replace=False)
+        from batch_readout.hook_order_provider import random_probe_token_orders
+
+        # Forward in small batches to avoid OOM
+        A_chunks = []
+        for start in range(0, n_probe, FWD_BATCH):
+            stop = min(start + FWD_BATCH, n_probe)
+            probe_chunks = idx_eval_model[probe_idx[start:stop]].to(device)
+            probe_orders = random_probe_token_orders(
+                probe_chunks.shape[0], args.seed, global_step + start, device)
+            _, _, attn_list = model.forward_fn(probe_chunks, probe_orders, return_attentions=True)
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            attn_stack = torch.stack(attn_list).cpu().numpy()  # (L, B, H, T+1, T+1)
+            for bi in range(attn_stack.shape[1]):
+                A_chunks.append(_attn_to_A_block_b0_vec(
+                    attn_stack[l, bi, h], probe_orders[bi].cpu().numpy(), inv_perm))
+        A_track = np.stack(A_chunks, axis=0)  # (n_probe, N, N)
+        # Batch-mean B
+        B_track = _batch_mean_B(A_track, M_track, PROBE_BATCH)  # (M, N, N)
+
+        # CDL per graph
+        sigmas = np.empty((M_track, N), dtype=np.int64)
+        for m in range(M_track):
+            sigmas[m], _, _ = generate_teacher_label(B_track[m], alpha_dep=0.5)
+
+        l2r = np.arange(N)
+        taus = []
+        for s in sigmas:
+            t, _ = kendalltau(s, l2r)
+            if not np.isnan(t):
+                taus.append(t)
+        tau = float(np.mean(taus)) if taus else float("nan")
+        div = teacher_diversity_stats(sigmas)
+        unique = len(set(tuple(s.tolist()) for s in sigmas))
+        # Proper row-negentropy: normalize each row → entropy → log(N) - H
+        row_negs = []
+        for m in range(M_track):
+            for i in range(N):
+                row = np.abs(B_track[m, i]) + 1e-12
+                p = row / row.sum()
+                H = -np.sum(p * np.log(p))
+                row_negs.append(np.log(N) - H)
+        row_conc = float(np.mean(row_negs))
+        elapsed = _time.time() - t0
+
+        with head_signal_path.open("a", newline="") as f:
+            f.write(f"{global_step}\t{tau:.6f}\t{div['mean_pairwise_tau']:.6f}\t{unique}\t{row_conc:.4f}\t{elapsed:.1f}\n")
+        log(f"[HeadSignal L{l}H{h}] τ={tau:+.4f} pw={div['mean_pairwise_tau']:.4f} unique={unique}/{M_track} row_conc={row_conc:.2f} ({elapsed:.1f}s)")
+
+        model.train()
 
     def save_ckpt(global_step, metrics):
         path = output_dir / f"ckpt_step{global_step}.pt"
@@ -1052,6 +1213,7 @@ def main(default_run_kind="baseline"):
         log(f"Saved checkpoint: {path}")
 
     beta_provider = None
+    cdl_provider = None
 
     if start_step == 0 and 0 in save_steps:
         lr0 = get_lr(0, args)
@@ -1070,6 +1232,15 @@ def main(default_run_kind="baseline"):
         )
         log(f"[frozen_beta] g_β={args.frozen_beta_ckpt} head=L{args.frozen_beta_head[0]}H{args.frozen_beta_head[1]} "
             f"mode={args.frozen_beta_mode} refresh_every={args.frozen_beta_refresh}")
+    if args.run_kind == "cdl_teacher":
+        from batch_readout.cdl_order_provider import CdlOrderProvider
+        cdl_provider = CdlOrderProvider(
+            head=tuple(args.cdl_teacher_head), clean_perm=clean_perm,
+            refresh_every=args.cdl_teacher_refresh, tau_T=args.cdl_teacher_tau,
+            mode="C-D+L", seed=args.seed, device=str(device),
+        )
+        log(f"[cdl_teacher] C-D+L teacher head=L{args.cdl_teacher_head[0]}H{args.cdl_teacher_head[1]} "
+            f"refresh_every={args.cdl_teacher_refresh} tau_T={args.cdl_teacher_tau}")
 
     for global_step in range(start_step, args.max_steps):
         alpha = alpha_for_step(global_step, start_step, args)
@@ -1087,62 +1258,82 @@ def main(default_run_kind="baseline"):
                 )
                 idx_batch = idx_model[batch_indices].to(device)
 
-            random_phys = sample_random_physical_orders(
-                args.batch_size, args.seed, global_step, micro_step, device
-            )
-
-            if args.run_kind in {"baseline", "random_continuation"}:
-                loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
-            elif args.run_kind == "frozen_beta":
-                if alpha > 0.0:
-                    sigma_phys = beta_provider.physical_order(model, idx_batch, global_step).to(device)
-                    phys = sigma_phys.unsqueeze(0).expand(args.batch_size, -1)
-                    # Per-sample alpha mixing (same pattern as graph_rw)
-                    choose_rng = torch.Generator(device=device)
-                    choose_rng.manual_seed(args.seed * 100000000 + global_step * 1000 + micro_step)
-                    use_beta = torch.rand(args.batch_size, generator=choose_rng, device=device) < alpha
-                    mixed = torch.where(use_beta.unsqueeze(1), phys, random_phys)
-                    loss = order_loss(model, idx_batch, mixed, clean_perm, device)
-                else:
-                    loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
-            elif args.run_kind == "l2r":
-                l2r = torch.arange(N, dtype=torch.long, device=device).unsqueeze(0).expand(args.batch_size, -1)
-                loss = order_loss(model, idx_batch, l2r, clean_perm, device)
-            elif args.run_kind == "shuffled_l2r":
-                # Control: AR along the data's shuffled layout (model_ascending), NOT the
-                # recovered original order. fixed_phys maps model-ascending back to physical
-                # so order_loss reproduces exactly the `val_model_order` eval traversal.
-                # Same clean_perm/data as random; only the (fixed, wrong-adjacency) order differs.
-                fixed_phys = model_blocks_to_physical_blocks(
-                    torch.arange(N, dtype=torch.long, device=device), clean_perm
-                ).unsqueeze(0).expand(args.batch_size, -1)
-                loss = order_loss(model, idx_batch, fixed_phys, clean_perm, device)
-            elif args.run_kind == "graph_rw":
-                if should_sample_rw(alpha, rw_policy, rw_mlp):
-                    rw_phys = sample_rw_physical_orders(
-                        args.batch_size, B, rw_policy, rw_params, args.seed, global_step, micro_step,
-                        device, mlp=rw_mlp,
-                    )
-                    choose_rng = torch.Generator(device=device)
-                    choose_rng.manual_seed(args.seed * 100000000 + global_step * 1000 + micro_step)
-                    use_rw = torch.rand(args.batch_size, generator=choose_rng, device=device) < alpha
-                    mixed = torch.where(use_rw.unsqueeze(1), rw_phys, random_phys)
-                    loss = order_loss(model, idx_batch, mixed, clean_perm, device)
-                else:
-                    loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
+            if (args.run_kind in {"baseline", "random_continuation"}
+                    and args.shuffle_granularity != 64):
+                token_orders = sample_token_orders_granular(
+                    args.batch_size, args.seed, global_step, micro_step,
+                    device, args.shuffle_granularity
+                )
+                _, loss = model.forward_fn(idx_batch, token_orders)
             else:
-                random_loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
-                weighted = (1.0 - alpha) * random_loss
-                if alpha > 0.0:
-                    rw_total = 0.0
-                    for bag_idx in range(args.rw_order_bag_k):
+                random_phys = sample_random_physical_orders(
+                    args.batch_size, args.seed, global_step, micro_step, device
+                )
+
+                if args.run_kind in {"baseline", "random_continuation"}:
+                    loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
+                elif args.run_kind == "frozen_beta":
+                    if alpha > 0.0:
+                        sigma_phys = beta_provider.physical_order(model, idx_batch, global_step).to(device)
+                        phys = sigma_phys.unsqueeze(0).expand(args.batch_size, -1)
+                        # Per-sample alpha mixing (same pattern as graph_rw)
+                        choose_rng = torch.Generator(device=device)
+                        choose_rng.manual_seed(args.seed * 100000000 + global_step * 1000 + micro_step)
+                        use_beta = torch.rand(args.batch_size, generator=choose_rng, device=device) < alpha
+                        mixed = torch.where(use_beta.unsqueeze(1), phys, random_phys)
+                        loss = order_loss(model, idx_batch, mixed, clean_perm, device)
+                    else:
+                        loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
+                elif args.run_kind == "cdl_teacher":
+                    if alpha > 0.0:
+                        sigma_phys = cdl_provider.physical_order(model, idx_batch, global_step).to(device)
+                        phys = sigma_phys.unsqueeze(0).expand(args.batch_size, -1)
+                        # Per-sample alpha mixing
+                        choose_rng = torch.Generator(device=device)
+                        choose_rng.manual_seed(args.seed * 100000000 + global_step * 1000 + micro_step)
+                        use_cdl = torch.rand(args.batch_size, generator=choose_rng, device=device) < alpha
+                        mixed = torch.where(use_cdl.unsqueeze(1), phys, random_phys)
+                        loss = order_loss(model, idx_batch, mixed, clean_perm, device)
+                    else:
+                        loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
+                elif args.run_kind == "l2r":
+                    l2r = torch.arange(N, dtype=torch.long, device=device).unsqueeze(0).expand(args.batch_size, -1)
+                    loss = order_loss(model, idx_batch, l2r, clean_perm, device)
+                elif args.run_kind == "shuffled_l2r":
+                    # Control: AR along the data's shuffled layout (model_ascending), NOT the
+                    # recovered original order. fixed_phys maps model-ascending back to physical
+                    # so order_loss reproduces exactly the `val_model_order` eval traversal.
+                    # Same clean_perm/data as random; only the (fixed, wrong-adjacency) order differs.
+                    fixed_phys = model_blocks_to_physical_blocks(
+                        torch.arange(N, dtype=torch.long, device=device), clean_perm
+                    ).unsqueeze(0).expand(args.batch_size, -1)
+                    loss = order_loss(model, idx_batch, fixed_phys, clean_perm, device)
+                elif args.run_kind == "graph_rw":
+                    if should_sample_rw(alpha, rw_policy, rw_mlp):
                         rw_phys = sample_rw_physical_orders(
-                            args.batch_size, B, rw_policy, rw_params, args.seed,
-                            global_step, micro_step, device, bag_idx=bag_idx, mlp=rw_mlp,
+                            args.batch_size, B, rw_policy, rw_params, args.seed, global_step, micro_step,
+                            device, mlp=rw_mlp,
                         )
-                        rw_total = rw_total + order_loss(model, idx_batch, rw_phys, clean_perm, device)
-                    weighted = weighted + alpha * rw_total / float(args.rw_order_bag_k)
-                loss = weighted
+                        choose_rng = torch.Generator(device=device)
+                        choose_rng.manual_seed(args.seed * 100000000 + global_step * 1000 + micro_step)
+                        use_rw = torch.rand(args.batch_size, generator=choose_rng, device=device) < alpha
+                        mixed = torch.where(use_rw.unsqueeze(1), rw_phys, random_phys)
+                        loss = order_loss(model, idx_batch, mixed, clean_perm, device)
+                    else:
+                        loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
+                else:
+                    random_loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
+                    weighted = (1.0 - alpha) * random_loss
+                    if alpha > 0.0:
+                        rw_total = 0.0
+                        for bag_idx in range(args.rw_order_bag_k):
+                            rw_phys = sample_rw_physical_orders(
+                                args.batch_size, B, rw_policy, rw_params, args.seed,
+                                global_step, micro_step, device, bag_idx=bag_idx, mlp=rw_mlp,
+                            )
+                            rw_total = rw_total + order_loss(model, idx_batch, rw_phys, clean_perm, device)
+                        weighted = weighted + alpha * rw_total / float(args.rw_order_bag_k)
+                    loss = weighted
 
             total_loss += float(loss.item())
             (loss / args.grad_accum).backward()
@@ -1158,12 +1349,24 @@ def main(default_run_kind="baseline"):
         train_losses.append(avg_loss)
         next_step = global_step + 1
 
+        # ── per-head CDL signal tracking (lightweight, every N steps) ──
+        if args.track_head is not None and next_step % args.track_head_interval == 0:
+            _track_head_signal(model, next_step)
+
         if global_step % args.log_interval == 0:
-            elapsed = time.time() - t0
+            now = time.time()
+            elapsed = now - t0
+            elapsed_since_log = now - last_log_time
+            s_per_step = elapsed_since_log / args.log_interval
+            steps_left = args.max_steps - global_step
+            eta = s_per_step * steps_left
+            eta_str = f"{eta/60:.0f}m" if eta < 3600 else f"{eta/3600:.1f}h"
             log(
                 f"step {global_step:5d}->{next_step:5d}/{args.max_steps} | "
-                f"loss={avg_loss:.4f} | alpha={alpha:.3f} | lr={lr:.2e} | {elapsed:.0f}s"
+                f"loss={avg_loss:.4f} | alpha={alpha:.3f} | lr={lr:.2e} | "
+                f"{s_per_step:.2f}s/step | ETA {eta_str} | total {elapsed:.0f}s"
             )
+            last_log_time = now
 
         if next_step % args.eval_interval == 0 or next_step in save_steps or next_step == args.max_steps:
             metrics = run_eval_and_save(next_step, avg_loss, lr, alpha_for_step(next_step, start_step, args))

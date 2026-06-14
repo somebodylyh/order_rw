@@ -29,30 +29,69 @@ from train_clean_aogpt import (
     build_model,
     CleanPermutation,
     phys_to_model_idx_clean,
+    build_phys_to_model_token_gather,
+    BLOCK_LEN as _BLOCK_LEN,
 )
-from training_utils import load_train_chunks, SEQ_LEN
+from training_utils import load_train_chunks, load_token_stream, sample_stream_batch, SEQ_LEN
 
 
 _ALLOWED_SPLITS = ("train", "eval")
 
 
+def _chunks_from_continuous_stream(ckpt, clean_perm, M, seed, device):
+    """Sample M random 256-token windows from the continuous train stream.
+
+    For models trained with ``--data-source continuous``, the train split is a
+    single memmap of ~119M uint16 tokens rather than pre-chunked arrow data.
+    This function draws M contiguous windows at reproducibly seeded offsets,
+    maps them from physical→model token space, and returns them in the same
+    (M, SEQ_LEN) long-tensor format as the chunk-based path.
+    """
+    args = ckpt.get("args", {})
+    train_bin = args.get("train_bin")
+    if not train_bin:
+        raise ValueError(
+            "continuous model ckpt is missing args.train_bin; "
+            "cannot sample from the train stream"
+        )
+    stream = load_token_stream(train_bin)
+    g_gather = build_phys_to_model_token_gather(clean_perm, _BLOCK_LEN)
+
+    # Each call to sample_stream_batch draws batch_size windows at one
+    # (seed, step, micro) position.  We fan out over micro steps so large
+    # M fits without exceeding max contiguous-token limits.
+    MICRO_MAX = 256
+    chunks_list = []
+    for i in range(M):
+        micro = i % MICRO_MAX
+        step = i // MICRO_MAX
+        batch = sample_stream_batch(
+            stream, 1, SEQ_LEN, seed=seed, global_step=step, micro_step=micro,
+        )  # (1, SEQ_LEN) physical-token long tensor
+        chunks_list.append(batch[0, g_gather])  # (SEQ_LEN,) model-token
+    chunks = torch.stack(chunks_list)  # (M, SEQ_LEN)
+    chunk_index = np.arange(M, dtype=np.int64)
+    return chunks, chunk_index
+
+
 def _load_model_and_chunks(ckpt_path, M, seed, device, split):
-    """Common setup: validate args (cheap), load ckpt protocol, then load model + chunks (expensive)."""
+    """Common setup: validate args (cheap), load ckpt protocol, then load model + chunks (expensive).
+
+    Supports both classic chunk-based models and continuous-stream models
+    (``--data-source continuous``).  For continuous models the train split
+    samples from the memmap stream; the eval split uses the fixed seeded
+    windows stored in the checkpoint protocol.
+    """
     # Cheap validations first so misuse fails instantly.
     if split not in _ALLOWED_SPLITS:
         raise ValueError(f"split must be one of {_ALLOWED_SPLITS!r}, got {split!r}")
     if M <= 0:
         raise ValueError(f"M must be positive, got {M}")
 
-    # Inexpensive: just read the ckpt's protocol to verify pool size for the chosen split.
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     protocol = ckpt["clean_protocol"]
-    split_indices = np.asarray(protocol[f"{split}_indices"], dtype=np.int64)
-    if M > len(split_indices):
-        raise ValueError(
-            f"requested M={M} chunks but split={split!r} only has "
-            f"{len(split_indices)} chunks; choose split='train' for large M"
-        )
+    args = ckpt.get("args", {})
+    is_continuous = (args.get("data_source") == "continuous")
 
     model_args = dict(ckpt["model_args"])
     model_args["block_size"] = SEQ_LEN
@@ -81,7 +120,37 @@ def _load_model_and_chunks(ckpt_path, M, seed, device, split):
     model.to(dev)
     model.eval()
 
-    # Expensive: re-tokenize wikitext (no on-disk cache in training_utils).
+    if is_continuous and split == "train":
+        # Sample arbitrary windows from the continuous memmap stream.
+        chunks, chunk_index = _chunks_from_continuous_stream(
+            ckpt, clean_perm, M, seed, device
+        )
+        return model, chunks, clean_perm, dev, chunk_index
+
+    # --- classic chunk-based or continuous-eval path ---
+    split_indices = np.asarray(protocol[f"{split}_indices"], dtype=np.int64)
+    if is_continuous:
+        # Eval split for continuous models: the protocol already stores
+        # pre-computed model-space token windows.
+        if M > len(split_indices):
+            raise ValueError(
+                f"requested M={M} chunks but continuous eval split only has "
+                f"{len(split_indices)} windows"
+            )
+        rng = np.random.RandomState(seed)
+        chunk_index = rng.choice(len(split_indices), size=M, replace=False).astype(np.int64)
+        chunk_index.sort()
+        idx_split = torch.from_numpy(split_indices[chunk_index]).long()  # (M, SEQ_LEN)
+        chunks = idx_split
+        return model, chunks, clean_perm, dev, chunk_index
+
+    # Classic chunk-based path (arrow tokenization).
+    if M > len(split_indices):
+        raise ValueError(
+            f"requested M={M} chunks but split={split!r} only has "
+            f"{len(split_indices)} chunks; choose split='train' for large M"
+        )
+
     idx_phys = load_train_chunks(n_chunks=None)
     idx_model = phys_to_model_idx_clean(idx_phys, clean_perm)
     idx_split = idx_model[split_indices]

@@ -33,18 +33,19 @@ from batch_readout.eval_frozen_phase2 import _load_g_beta
 from batch_readout.diversity_batch import teacher_diversity_stats
 from batch_readout.eval_metrics import kendall_tau_batch, pairwise_acc
 
-CKPT_DIR = PKG / "probe_results" / "clean_base_random_perm"
+CKPT_DIR_DEFAULT = PKG / "probe_results" / "clean_base_random_perm"
 
 # Phase 1.5 descriptive targets (spec §4) — reported, not hard-killed mid-run.
 TAU_TARGET = 0.6
 PAIRWISE_TARGET = 0.8
 
 
-def _ckpt(step: int) -> str:
-    return str(CKPT_DIR / f"ckpt_step{step}.pt")
+def _ckpt(step: int, ckpt_dir=None) -> str:
+    d = pathlib.Path(ckpt_dir) if ckpt_dir else CKPT_DIR_DEFAULT
+    return str(d / f"ckpt_step{step}.pt")
 
 
-def _build(step, head, M, batch_size, seed, out_path, device, fwd_batch):
+def _build(step, head, M, batch_size, seed, out_path, device, fwd_batch, ckpt_dir=None):
     if out_path is not None and pathlib.Path(out_path).exists():
         d = np.load(out_path, allow_pickle=True)
         sig = np.concatenate([d["train_sigma_T"], d["val_sigma_T"], d["test_sigma_T"]])
@@ -53,7 +54,7 @@ def _build(step, head, M, batch_size, seed, out_path, device, fwd_batch):
         print(f"  [build step={step}] reuse cached {out_path}")
     else:
         info = build_selected_head_dataset(
-            ckpt_path=_ckpt(step), head=head, M=M, batch_size=batch_size, seed=seed,
+            ckpt_path=_ckpt(step, ckpt_dir), head=head, M=M, batch_size=batch_size, seed=seed,
             none_mode="b0", out_path=out_path, device=device, split="train",
             fwd_batch=fwd_batch,
         )
@@ -127,24 +128,29 @@ def main():
                     help="forward batch for attention extraction; keep small on a shared GPU")
     ap.add_argument("--out", default=str(PKG / "batch_readout" / "logs" / "phase33_gbeta"))
     ap.add_argument("--cross-steps", type=int, nargs="*", default=[10000, 20000])
+    ap.add_argument("--ckpt-dir", default=str(CKPT_DIR_DEFAULT),
+                    help="checkpoint directory (default: clean_base)")
+    ap.add_argument("--step", type=int, default=5000,
+                    help="checkpoint step to pretrain g_β on (match the hook start point)")
     args = ap.parse_args()
 
     head = (args.layer, args.head)
     M = 80 if args.smoke else args.M
     epochs = 8 if args.smoke else args.epochs
     tag = "smoke" if args.smoke else "full"
-    out = pathlib.Path(args.out) / tag
+    ckpt_name = pathlib.Path(args.ckpt_dir).name
+    out = pathlib.Path(args.out) / ckpt_name / tag
     out.mkdir(parents=True, exist_ok=True)
     data_dir = out / "data"
     data_dir.mkdir(exist_ok=True)
 
     print(f"=== §3.3 g_β pretrain ({tag}) head=L{head[0]}H{head[1]} B0 canonical "
-          f"M={M} bs={args.batch_size} epochs={epochs} ===")
+          f"M={M} bs={args.batch_size} epochs={epochs} step={args.step} ===")
 
-    # --- Phase A: build 5k training dataset ---
-    print("[A] build 5k selected-head dataset")
-    train_npz = str(data_dir / "ds_5k.npz")
-    div5k = _build(5000, head, M, args.batch_size, args.seed, train_npz, args.device, args.fwd_batch)
+    # --- Phase A: build training dataset ---
+    print(f"[A] build step={args.step} selected-head dataset")
+    train_npz = str(data_dir / f"ds_{args.step}.npz")
+    div5k = _build(args.step, head, M, args.batch_size, args.seed, train_npz, args.device, args.fwd_batch, ckpt_dir=args.ckpt_dir)
 
     # --- Phase B: train g_β ---
     print("[B] train g_β (nodewise + pairwise)")
@@ -185,7 +191,7 @@ def main():
     M_cross = max(M // 4, 20)
     for step in args.cross_steps:
         npz = str(data_dir / f"ds_{step}.npz")
-        divc = _build(step, head, M_cross, args.batch_size, args.seed, npz, args.device, args.fwd_batch)
+        divc = _build(step, head, M_cross, args.batch_size, args.seed, npz, args.device, args.fwd_batch, ckpt_dir=args.ckpt_dir)
         r = _eval_npz_all(g_beta, npz, args.device)
         r["teacher_diversity"] = divc
         report["splits"][f"{step}_cross"] = r

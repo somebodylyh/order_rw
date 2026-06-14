@@ -71,7 +71,8 @@ def extract_selected_head_batch_mean_B(
         ckpt_path, total, seed, device, split
     )
     A_lh, _A_heavy = extract_per_head_and_heavy_A(
-        model, chunks, clean_perm, dev, seed, fwd_batch=fwd_batch, none_mode=none_mode
+        model, chunks, clean_perm, dev, seed, fwd_batch=fwd_batch, none_mode=none_mode,
+        head=head,
     )
     B_batch = selected_head_B(A_lh, head, batch_size)
     chunks_grouped = np.asarray(chunk_index, dtype=np.int64).reshape(M, batch_size)

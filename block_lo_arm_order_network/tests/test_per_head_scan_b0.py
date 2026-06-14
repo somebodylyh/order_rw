@@ -2,7 +2,12 @@ import pathlib
 import numpy as np
 import pytest
 
-from per_head_order_scan import _attn_to_A_block_b0_vec, _per_sample_A, _attn_to_A_block_vec
+from per_head_order_scan import (
+    _attn_to_A_block_b0_vec,
+    _attn_to_A_block_predictor_vec,
+    _per_sample_A,
+    _attn_to_A_block_vec,
+)
 from training_utils import SEQ_LEN, N, BLOCK_LEN
 
 # Load the per-chunk reference agg_b0 from b0_fast.py without running its main loop.
@@ -63,3 +68,31 @@ def test_per_sample_A_unknown_none_mode_raises():
     attn, reveal_tokens, inv_perm = _random_inputs()
     with pytest.raises(ValueError):
         _per_sample_A(attn, reveal_tokens, inv_perm, n_top=4, none_mode="bogus")
+
+
+def test_predictor_vec_uses_shifted_predictor_blocks_without_physical_remap():
+    seq_len = 12
+    num_blocks = 3
+    block_len = 4
+    attn = np.zeros((seq_len + 1, seq_len + 1), dtype=np.float32)
+    for i in range(seq_len + 1):
+        for j in range(seq_len + 1):
+            attn[i, j] = 100 * i + j
+
+    reveal_tokens = np.array([8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3], dtype=np.int64)
+    inv_perm = np.array([2, 1, 0], dtype=np.int64)
+
+    got = _attn_to_A_block_predictor_vec(
+        attn,
+        reveal_tokens,
+        inv_perm,
+        seq_len=seq_len,
+        num_blocks=num_blocks,
+        block_len=block_len,
+    )
+    expected = attn[:-1, :-1].reshape(
+        num_blocks, block_len, num_blocks, block_len
+    ).mean(axis=(1, 3))
+    np.fill_diagonal(expected, 0.0)
+
+    np.testing.assert_allclose(got, expected, rtol=1e-6, atol=1e-6)

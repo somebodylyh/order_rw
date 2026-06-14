@@ -124,6 +124,32 @@ def _attn_to_A_block_b0_vec(attn, reveal_tokens, inv_perm,
     return A.reshape(lead + (num_blocks, num_blocks)) if lead else A[0]
 
 
+def _attn_to_A_block_predictor_vec(attn, reveal_tokens, inv_perm,
+                                   seq_len=SEQ_LEN, num_blocks=N, block_len=BLOCK_LEN):
+    """AO-GPT predictor-aligned block graph, vectorized over leading dims.
+
+    This keeps the original AO-GPT prediction frame: logits[..., :-1, :] predict
+    the 256 targets, so the block graph is aggregated from attn[:-1, :-1]. The
+    first predictor block is therefore [None] plus the first block_len - 1
+    revealed real-token predictor positions. No physical remap is applied here;
+    nodes are reveal/predictor blocks, not physical blocks.
+    """
+    del reveal_tokens, inv_perm
+    attn = np.asarray(attn, dtype=np.float32)
+    lead = attn.shape[:-2]
+    K = int(np.prod(lead)) if lead else 1
+    a = attn.reshape(K, seq_len + 1, seq_len + 1)
+
+    shifted = a[:, :-1, :-1]
+    A = shifted.reshape(
+        K, num_blocks, block_len, num_blocks, block_len
+    ).mean(axis=(2, 4))
+    di = np.arange(num_blocks)
+    A[:, di, di] = 0.0
+    A = A.astype(np.float32, copy=False)
+    return A.reshape(lead + (num_blocks, num_blocks)) if lead else A[0]
+
+
 def attn257_to_A_block(avg_attn, reveal_tokens, inv_perm,
                        seq_len=SEQ_LEN, num_blocks=N, block_len=BLOCK_LEN,
                        none_weight=0.1):
@@ -259,13 +285,19 @@ def _extract_per_head_and_heavy_A_loop(model, chunks, clean_perm, device, seed, 
     return A_lh, A_heavy
 
 
-def _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top, none_mode="old"):
+def _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top, none_mode="old", head=None):
     """Per-sample physical-frame A_lh (L,H,N,N) and heavy A (N,N) from one
     sample's attention stack (L,H,T+1,T+1). Identical math to the loop body.
 
-    none_mode in {"old","b0"} selects the [None]-handling for BOTH the per-head
+    none_mode in {"old","b0","predictor"} selects the [None]-handling for BOTH the per-head
     and heavy block graphs ("old" = canonical 0.1-weighted [None] source term,
-    "b0" = none->physical-block-0 fold)."""
+    "b0" = none->physical-block-0 fold, "predictor" = original AO-GPT
+    predictor-aligned attn[:-1, :-1] reveal-frame aggregation).
+
+    ``head`` (optional (layer, head_index)): when set, compute ONLY that single
+    head's A — skipping the 32× einsum over all (L,H) heads.  A_lh_i is still
+    shaped (L,H,N,N) but only the selected cell is non-zero; heavy graph is
+    still computed from the top-n_top variance heads."""
     L, H = attn_stack.shape[:2]
     head_vars = np.zeros(H)
     mask = ~np.eye(SEQ_LEN, dtype=bool)
@@ -278,20 +310,32 @@ def _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top, none_mode="old"):
 
     # "old" agg == attn257_to_A_block (thin wrapper over _attn_to_A_block_vec
     # with default none_weight), so the OLD path is byte-unchanged.
-    _AGG_BY_NONE_MODE = {"old": _attn_to_A_block_vec, "b0": _attn_to_A_block_b0_vec}
+    _AGG_BY_NONE_MODE = {
+        "old": _attn_to_A_block_vec,
+        "b0": _attn_to_A_block_b0_vec,
+        "predictor": _attn_to_A_block_predictor_vec,
+    }
     if none_mode not in _AGG_BY_NONE_MODE:
         raise ValueError(f"none_mode must be one of {sorted(_AGG_BY_NONE_MODE)}, got {none_mode!r}")
     agg = _AGG_BY_NONE_MODE[none_mode]
     A_heavy_i = agg(avg_attn_heavy, reveal_tokens, inv_perm)
 
-    # (L, H, T+1, T+1) -> (L, H, N, N) in one vectorized call (was an L*H loop).
+    if head is not None:
+        # Single-head fast path: only compute the selected (l*,h*) — 32× cheaper.
+        sel_l, sel_h = int(head[0]), int(head[1])
+        single = agg(attn_stack[sel_l, sel_h], reveal_tokens, inv_perm)  # (N,N)
+        Nn = single.shape[-1]
+        A_lh_i = np.zeros((L, H, Nn, Nn), dtype=np.float32)
+        A_lh_i[sel_l, sel_h] = single
+        return A_lh_i, A_heavy_i
+    # Full-path: vectorized over all (L,H) heads.
     A_lh_i = agg(attn_stack, reveal_tokens, inv_perm)
     return A_lh_i, A_heavy_i
 
 
 @torch.no_grad()
 def extract_per_head_and_heavy_A(model, chunks, clean_perm, device, seed,
-                                 n_top=4, fwd_batch=64, none_mode="old"):
+                                 n_top=4, fwd_batch=64, none_mode="old", head=None):
     """Batched per-chunk per-(layer,head) A and top-n_top-head heavy A.
 
     Forwards `fwd_batch` chunks at once instead of one-at-a-time. The per-chunk
@@ -299,6 +343,10 @@ def extract_per_head_and_heavy_A(model, chunks, clean_perm, device, seed,
     bit-for-bit the same as `_extract_per_head_and_heavy_A_loop` (pinned by
     test_per_head_scan_batched on a batch-invariant synthetic model); only the
     forward batching changes, so on a real model results match to fp tolerance.
+
+    If ``head`` (layer, head_index) is given, only that single head's A matrix
+    is computed (the other cells of A_lh are zero).  This cuts the per-sample
+    einsum cost by ~32×.
 
     Returns:
         A_lh:    (n_chunks, L, H, N, N) float32
@@ -336,11 +384,14 @@ def extract_per_head_and_heavy_A(model, chunks, clean_perm, device, seed,
             i = start + bi
             attn_stack = attn_batch[:, bi]  # (L, H, T+1, T+1)
             reveal_tokens = token_orders[i].numpy()
-            A_lh_i, A_heavy_i = _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top, none_mode=none_mode)
+            A_lh_i, A_heavy_i = _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top, none_mode=none_mode, head=head)
             if A_lh is None:
                 A_lh = np.zeros((n_chunks,) + A_lh_i.shape, dtype=np.float32)
             A_lh[i] = A_lh_i
             A_heavy[i] = A_heavy_i
+
+        if start % (max(1, int(fwd_batch)) * 10) == 0 or stop >= n_chunks:
+            print(f"  [extract] {stop}/{n_chunks} chunks ({100*stop//n_chunks}%)", flush=True)
 
     return A_lh, A_heavy
 
@@ -355,16 +406,9 @@ def _batch_mean_B(A, M, batch_size):
     return B
 
 
-def scan_checkpoint(ckpt_path, M, batch_size, seed, device="cuda:0",
-                    split="train", alpha_dep=0.5, none_mode="old"):
-    """Full per-head order scan for one checkpoint and one sampling seed.
-
-    Returns a dict matching the original diag_head_layer_scan JSON schema.
-    """
-    total = M * batch_size
-    model, chunks, clean_perm, dev, _ci = _load_model_and_chunks(
-        ckpt_path, total, seed, device, split
-    )
+def scan_loaded(model, chunks, clean_perm, dev, ckpt_path, M, batch_size, seed,
+                alpha_dep=0.5, none_mode="old"):
+    """Full per-head order scan for an already-loaded model/chunk set."""
     A_lh, A_heavy = extract_per_head_and_heavy_A(model, chunks, clean_perm, dev, seed, none_mode=none_mode)
     Ln, Hn = A_lh.shape[1], A_lh.shape[2]
 
@@ -412,6 +456,22 @@ def scan_checkpoint(ckpt_path, M, batch_size, seed, device="cuda:0",
     }
 
 
+def scan_checkpoint(ckpt_path, M, batch_size, seed, device="cuda:0",
+                    split="train", alpha_dep=0.5, none_mode="old"):
+    """Full per-head order scan for one checkpoint and one sampling seed.
+
+    Returns a dict matching the original diag_head_layer_scan JSON schema.
+    """
+    total = M * batch_size
+    model, chunks, clean_perm, dev, _ci = _load_model_and_chunks(
+        ckpt_path, total, seed, device, split
+    )
+    return scan_loaded(
+        model, chunks, clean_perm, dev, ckpt_path, M, batch_size, seed,
+        alpha_dep=alpha_dep, none_mode=none_mode,
+    )
+
+
 def main():
     import argparse
     import json
@@ -424,7 +484,7 @@ def main():
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--split", default="train")
     p.add_argument("--alpha-dep", type=float, default=0.5)
-    p.add_argument("--none-mode", default="old", choices=["old", "b0"])
+    p.add_argument("--none-mode", default="old", choices=["old", "b0", "predictor"])
     p.add_argument("--out", required=True)
     args = p.parse_args()
 
