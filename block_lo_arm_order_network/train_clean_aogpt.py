@@ -419,10 +419,14 @@ def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, 
         eval_batch = idx_eval_model[: min(args.eval_batch_size, n_eval)].to(device)
         probe = random_probe_token_orders(eval_batch.shape[0], args.seed, 0, device)
         A = extract_selected_head_A_for_batch(
-            model, eval_batch, beta_provider.head, clean_perm, device, probe
+            model, eval_batch, beta_provider.head, clean_perm, device, probe,
+            none_mode=beta_provider.none_mode,
         )
-        beta_phys = beta_provider.hook.step(A.to(device)).cpu()  # (N,) physical-frame
-        beta_model = physical_blocks_to_model_blocks(beta_phys, clean_perm)
+        beta_sigma = beta_provider.hook.step(A.to(device)).cpu()  # (N,) block order
+        if beta_provider.none_mode in ("model", "content"):
+            beta_model = beta_sigma  # already model frame
+        else:
+            beta_model = physical_blocks_to_model_blocks(beta_sigma, clean_perm)
         for _ in args.eval_order_seeds:
             beta_model_orders.append(beta_model.unsqueeze(0).expand(n_eval, -1))
 
@@ -757,6 +761,8 @@ def parse_args(default_run_kind="baseline"):
     p.add_argument("--frozen-beta-refresh", type=int, default=1,
                    help="recompute the g_β order every N steps (K-step refresh; 1 = every step). "
                         "Bounds the probe-forward overhead to ~1/N.")
+    p.add_argument("--frozen-beta-none-mode", choices=["b0", "b1", "predictor", "model", "content", "loss_aligned"], default="b0",
+                   help="block-aggregation mode for the in-loop probe extraction; must match g_β training.")
     # --- direct CDL teacher order hook (run-kind=cdl_teacher) ---
     p.add_argument("--cdl-teacher-head", type=int, nargs=2, default=[0, 7], metavar=("LAYER", "HEAD"),
                    help="run-kind=cdl_teacher: (layer, head) to extract attention from for C-D+L teacher.")
@@ -765,12 +771,16 @@ def parse_args(default_run_kind="baseline"):
     p.add_argument("--cdl-teacher-refresh", type=int, default=10,
                    help="recompute the CDL order every N steps.")
     # --- per-head CDL signal tracking (diagnostic, any run-kind) ---
+    p.add_argument("--track-all-heads", action="store_true",
+                   help="at each tracking interval, scan every (layer, head) with the same lightweight probe batches.")
     p.add_argument("--track-head", type=int, nargs=2, default=None, metavar=("LAYER", "HEAD"),
                    help="at each eval, extract this head's B and log CDL tau / pairwise / uniqueness.")
     p.add_argument("--track-head-m", type=int, default=20,
                    help="number of probe batches for --track-head diagnostic (default 20).")
     p.add_argument("--track-head-interval", type=int, default=20,
                    help="run head-signal diagnostic every N steps (default 20).")
+    p.add_argument("--track-head-none-mode", choices=["b0", "b1", "predictor", "model", "content", "loss_aligned"], default="b1",
+                   help="attention-to-block aggregation: b0=none→block0 fold, b1=predictor frame+physical remap, predictor=old predictor frame no remap, loss_aligned=AR target queries to source keys.")
     return p.parse_args()
 
 
@@ -1119,6 +1129,8 @@ def main(default_run_kind="baseline"):
         # ── per-head CDL signal tracking (diagnostic) ──
         if args.track_head is not None:
             _track_head_signal(model, global_step)
+        if args.track_all_heads:
+            _track_all_heads_signal(model, global_step)
 
         return metrics
 
@@ -1127,13 +1139,27 @@ def main(default_run_kind="baseline"):
     if args.track_head is not None:
         head_signal_path = output_dir / "head_signal.tsv"
         head_signal_path.write_text(
-            "step\ttau_vs_l2r\tmean_pairwise_tau\tunique_sigma\trow_conc_mean\telapsed_s\n"
+            "step\tnone_mode\ttau_vs_l2r\tmean_pairwise_tau\tunique_sigma\trow_conc_mean\telapsed_s\n"
+        )
+    head_signal_all_path = None
+    if args.track_all_heads:
+        head_signal_all_path = output_dir / "head_signal_all.tsv"
+        head_signal_all_path.write_text(
+            "step\tnone_mode\tlayer\thead\ttau_vs_l2r\tmean_pairwise_tau\tunique_sigma\trow_conc_mean\telapsed_s\n"
         )
 
     @torch.no_grad()
     def _track_head_signal(model, global_step):
         from neural_readout.teacher_labels import generate_teacher_label
-        from per_head_order_scan import _attn_to_A_block_b0_vec, _batch_mean_B
+        from per_head_order_scan import (
+            _attn_to_A_block_b0_vec,
+            _attn_to_A_block_b1_vec,
+            _attn_to_A_block_loss_aligned_content_vec,
+            _attn_to_A_block_predictor_vec,
+            _attn_to_A_block_model_vec,
+            _attn_to_A_block_content_vec,
+            _batch_mean_B,
+        )
         from batch_readout.diversity_batch import teacher_diversity_stats
         from scipy.stats import kendalltau
         import time as _time
@@ -1141,15 +1167,19 @@ def main(default_run_kind="baseline"):
         t0 = _time.time()
         device = next(model.parameters()).device
         inv_perm = clean_perm.inv_perm_model_to_phys.cpu().numpy()
-        M_track = int(args.track_head_m)
+        M_track_req = int(args.track_head_m)
         l, h = int(args.track_head[0]), int(args.track_head[1])
+        none_mode = str(args.track_head_none_mode)
+        track_is_model = (none_mode in ("model", "content"))
         PROBE_BATCH = 32  # grouping factor for batch-mean B
         FWD_BATCH = 8     # small forward batch to avoid OOM (attention tensors are large)
         model.eval()
 
         # Use eval windows for probe
         n_avail = len(idx_eval_model)
-        n_probe = min(M_track * PROBE_BATCH, n_avail)
+        n_probe = min(M_track_req * PROBE_BATCH, n_avail)
+        M_track = max(1, n_probe // PROBE_BATCH)
+        n_probe = M_track * PROBE_BATCH
         rng = np.random.default_rng(int(args.seed) * 10000 + global_step)
         probe_idx = rng.choice(n_avail, size=n_probe, replace=False)
         from batch_readout.hook_order_provider import random_probe_token_orders
@@ -1166,8 +1196,26 @@ def main(default_run_kind="baseline"):
                 torch.cuda.synchronize(device)
             attn_stack = torch.stack(attn_list).cpu().numpy()  # (L, B, H, T+1, T+1)
             for bi in range(attn_stack.shape[1]):
-                A_chunks.append(_attn_to_A_block_b0_vec(
-                    attn_stack[l, bi, h], probe_orders[bi].cpu().numpy(), inv_perm))
+                if none_mode == "predictor":
+                    A_chunks.append(_attn_to_A_block_predictor_vec(
+                        attn_stack[l, bi, h], probe_orders[bi].cpu().numpy(), inv_perm))
+                elif none_mode == "b0":
+                    A_chunks.append(_attn_to_A_block_b0_vec(
+                        attn_stack[l, bi, h], probe_orders[bi].cpu().numpy(), inv_perm))
+                elif none_mode == "b1":
+                    A_chunks.append(_attn_to_A_block_b1_vec(
+                        attn_stack[l, bi, h], probe_orders[bi].cpu().numpy(), inv_perm))
+                elif none_mode == "model":
+                    A_chunks.append(_attn_to_A_block_model_vec(
+                        attn_stack[l, bi, h], probe_orders[bi].cpu().numpy(), inv_perm))
+                elif none_mode == "content":
+                    A_chunks.append(_attn_to_A_block_content_vec(
+                        attn_stack[l, bi, h], probe_orders[bi].cpu().numpy(), inv_perm))
+                elif none_mode == "loss_aligned":
+                    A_chunks.append(_attn_to_A_block_loss_aligned_content_vec(
+                        attn_stack[l, bi, h], probe_orders[bi].cpu().numpy(), inv_perm))
+                else:
+                    raise ValueError(f"unknown --track-head-none-mode={none_mode!r}")
         A_track = np.stack(A_chunks, axis=0)  # (n_probe, N, N)
         # Batch-mean B
         B_track = _batch_mean_B(A_track, M_track, PROBE_BATCH)  # (M, N, N)
@@ -1180,7 +1228,11 @@ def main(default_run_kind="baseline"):
         l2r = np.arange(N)
         taus = []
         for s in sigmas:
-            t, _ = kendalltau(s, l2r)
+            if track_is_model:
+                s_phys = inv_perm[s]                         # model→physical remap for tau
+            else:
+                s_phys = s
+            t, _ = kendalltau(s_phys, l2r)
             if not np.isnan(t):
                 taus.append(t)
         tau = float(np.mean(taus)) if taus else float("nan")
@@ -1198,8 +1250,122 @@ def main(default_run_kind="baseline"):
         elapsed = _time.time() - t0
 
         with head_signal_path.open("a", newline="") as f:
-            f.write(f"{global_step}\t{tau:.6f}\t{div['mean_pairwise_tau']:.6f}\t{unique}\t{row_conc:.4f}\t{elapsed:.1f}\n")
-        log(f"[HeadSignal L{l}H{h}] τ={tau:+.4f} pw={div['mean_pairwise_tau']:.4f} unique={unique}/{M_track} row_conc={row_conc:.2f} ({elapsed:.1f}s)")
+            f.write(f"{global_step}\t{none_mode}\t{tau:.6f}\t{div['mean_pairwise_tau']:.6f}\t{unique}\t{row_conc:.4f}\t{elapsed:.1f}\n")
+        log(f"[HeadSignal L{l}H{h} {none_mode}] τ={tau:+.4f} pw={div['mean_pairwise_tau']:.4f} unique={unique}/{M_track} row_conc={row_conc:.2f} ({elapsed:.1f}s)")
+
+        model.train()
+
+    @torch.no_grad()
+    def _track_all_heads_signal(model, global_step):
+        from neural_readout.teacher_labels import generate_teacher_label
+        from per_head_order_scan import (
+            _attn_to_A_block_b0_vec,
+            _attn_to_A_block_b1_vec,
+            _attn_to_A_block_loss_aligned_content_vec,
+            _attn_to_A_block_predictor_vec,
+            _attn_to_A_block_model_vec,
+            _attn_to_A_block_content_vec,
+        )
+        from batch_readout.diversity_batch import teacher_diversity_stats
+        from batch_readout.eval_metrics import kendall_tau_batch
+        import time as _time
+
+        t0 = _time.time()
+        device = next(model.parameters()).device
+        inv_perm = clean_perm.inv_perm_model_to_phys.cpu().numpy()
+        M_track_req = int(args.track_head_m)
+        none_mode = str(args.track_head_none_mode)
+        track_is_model = (none_mode in ("model", "content"))
+        PROBE_BATCH = 32
+        FWD_BATCH = 8
+        model.eval()
+
+        n_avail = len(idx_eval_model)
+        n_probe = min(M_track_req * PROBE_BATCH, n_avail)
+        M_track = max(1, n_probe // PROBE_BATCH)
+        n_probe = M_track * PROBE_BATCH
+        rng = np.random.default_rng(int(args.seed) * 10000 + global_step)
+        probe_idx = rng.choice(n_avail, size=n_probe, replace=False)
+        from batch_readout.hook_order_provider import random_probe_token_orders
+
+        A_lh = None
+        L = H = None
+        di = np.arange(N)
+        for start in range(0, n_probe, FWD_BATCH):
+            stop = min(start + FWD_BATCH, n_probe)
+            probe_chunks = idx_eval_model[probe_idx[start:stop]].to(device)
+            probe_orders = random_probe_token_orders(
+                probe_chunks.shape[0], args.seed, global_step + start, device)
+            _, _, attn_list = model.forward_fn(probe_chunks, probe_orders, return_attentions=True)
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            attn_stack = torch.stack(attn_list).cpu().numpy()  # (L, B, H, T+1, T+1)
+            if A_lh is None:
+                L, H = attn_stack.shape[0], attn_stack.shape[2]
+                A_lh = np.zeros((L, H, M_track, N, N), dtype=np.float64)
+            for bi in range(attn_stack.shape[1]):
+                global_i = start + bi
+                m = global_i // PROBE_BATCH
+                if m >= M_track:
+                    continue
+                sample = np.transpose(attn_stack[:, bi], (0, 1, 2, 3))  # (L,H,T+1,T+1)
+                if none_mode == "predictor":
+                    A_blocks = _attn_to_A_block_predictor_vec(
+                        sample, probe_orders[bi].cpu().numpy(), inv_perm)
+                elif none_mode == "b0":
+                    A_blocks = _attn_to_A_block_b0_vec(
+                        sample, probe_orders[bi].cpu().numpy(), inv_perm)
+                elif none_mode == "b1":
+                    A_blocks = _attn_to_A_block_b1_vec(
+                        sample, probe_orders[bi].cpu().numpy(), inv_perm)
+                elif none_mode == "model":
+                    A_blocks = _attn_to_A_block_model_vec(
+                        sample, probe_orders[bi].cpu().numpy(), inv_perm)
+                elif none_mode == "content":
+                    A_blocks = _attn_to_A_block_content_vec(
+                        sample, probe_orders[bi].cpu().numpy(), inv_perm)
+                elif none_mode == "loss_aligned":
+                    A_blocks = _attn_to_A_block_loss_aligned_content_vec(
+                        sample, probe_orders[bi].cpu().numpy(), inv_perm)
+                else:
+                    raise ValueError(f"unknown --track-head-none-mode={none_mode!r}")
+                B_blocks = np.swapaxes(A_blocks, -1, -2)
+                B_blocks[..., di, di] = 0.0
+                A_lh[:, :, m] += B_blocks
+
+        Bb_lh = (A_lh / PROBE_BATCH).astype(np.float32)
+        Bb_lh[..., di, di] = 0.0
+        l2r = np.tile(np.arange(N), (M_track, 1))
+        rows = []
+        for ell in range(L):
+            for h in range(H):
+                sigmas = np.stack([
+                    generate_teacher_label(Bb_lh[ell, h, m], alpha_dep=0.5)[0]
+                    for m in range(M_track)
+                ])
+                div = teacher_diversity_stats(sigmas)
+                unique = len(set(tuple(s.tolist()) for s in sigmas))
+                row = np.abs(Bb_lh[ell, h]) + 1e-12
+                p = row / row.sum(axis=-1, keepdims=True)
+                entropy = -np.sum(p * np.log(p), axis=-1)
+                row_conc = float(np.mean(np.log(N) - entropy))
+                tau = float(kendall_tau_batch(
+                    inv_perm[sigmas] if track_is_model else sigmas, l2r))
+                rows.append((ell, h, tau, div["mean_pairwise_tau"], unique, row_conc))
+
+        elapsed = _time.time() - t0
+        with head_signal_all_path.open("a", newline="") as f:
+            for ell, h, tau, pw, unique, row_conc in rows:
+                f.write(
+                    f"{global_step}\t{none_mode}\t{ell}\t{h}\t{tau:.6f}\t"
+                    f"{pw:.6f}\t{unique}\t{row_conc:.4f}\t{elapsed:.1f}\n"
+                )
+        top = max(rows, key=lambda r: abs(r[2]))
+        log(
+            f"[HeadSignalAll {none_mode}] top=L{top[0]}H{top[1]} "
+            f"τ={top[2]:+.4f} pw={top[3]:.4f} unique={top[4]}/{M_track} "
+            f"row_conc={top[5]:.2f} ({elapsed:.1f}s)"
+        )
 
         model.train()
 
@@ -1228,9 +1394,10 @@ def main(default_run_kind="baseline"):
             g_beta_ckpt=args.frozen_beta_ckpt, head=tuple(args.frozen_beta_head),
             clean_perm=clean_perm, refresh_every=args.frozen_beta_refresh,
             mode=args.frozen_beta_mode, tau=args.frozen_beta_tau,
-            seed=args.seed, device=str(device),
+            seed=args.seed, device=str(device), none_mode=args.frozen_beta_none_mode,
         )
         log(f"[frozen_beta] g_β={args.frozen_beta_ckpt} head=L{args.frozen_beta_head[0]}H{args.frozen_beta_head[1]} "
+            f"none_mode={args.frozen_beta_none_mode} "
             f"mode={args.frozen_beta_mode} refresh_every={args.frozen_beta_refresh}")
     if args.run_kind == "cdl_teacher":
         from batch_readout.cdl_order_provider import CdlOrderProvider
@@ -1274,8 +1441,11 @@ def main(default_run_kind="baseline"):
                     loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
                 elif args.run_kind == "frozen_beta":
                     if alpha > 0.0:
-                        sigma_phys = beta_provider.physical_order(model, idx_batch, global_step).to(device)
-                        phys = sigma_phys.unsqueeze(0).expand(args.batch_size, -1)
+                        sigma = beta_provider.physical_order(model, idx_batch, global_step).to(device)
+                        # model mode: sigma is in model frame; remap to physical for mixing
+                        if args.frozen_beta_none_mode in ("model", "content"):
+                            sigma = model_blocks_to_physical_blocks(sigma, clean_perm)
+                        phys = sigma.unsqueeze(0).expand(args.batch_size, -1)
                         # Per-sample alpha mixing (same pattern as graph_rw)
                         choose_rng = torch.Generator(device=device)
                         choose_rng.manual_seed(args.seed * 100000000 + global_step * 1000 + micro_step)
@@ -1352,6 +1522,8 @@ def main(default_run_kind="baseline"):
         # ── per-head CDL signal tracking (lightweight, every N steps) ──
         if args.track_head is not None and next_step % args.track_head_interval == 0:
             _track_head_signal(model, next_step)
+        if args.track_all_heads and next_step % args.track_head_interval == 0:
+            _track_all_heads_signal(model, next_step)
 
         if global_step % args.log_interval == 0:
             now = time.time()

@@ -150,6 +150,251 @@ def _attn_to_A_block_predictor_vec(attn, reveal_tokens, inv_perm,
     return A.reshape(lead + (num_blocks, num_blocks)) if lead else A[0]
 
 
+def _attn_to_A_block_b1_vec(attn, reveal_tokens, inv_perm,
+                            seq_len=SEQ_LEN, num_blocks=N, block_len=BLOCK_LEN):
+    """B1: predictor frame (attn[:-1,:-1]) + physical remap, vectorized.
+
+    Like B0, this does a physical-frame block aggregation via segment-mean
+    selection.  The difference from B0 is the predictor-aligned frame:
+      - attn[:-1, :-1] (256×256) instead of attn[1:, 1:]
+      - Key 0 = [None] → physical block 0
+      - Key j (1..255) = real token (j-1) → its physical block
+      - Query labels match key labels in this shifted frame: query 0 is also
+        [None], and query j (1..255) is real token (j-1)
+    """
+    attn = np.asarray(attn, dtype=np.float64)
+    lead = attn.shape[:-2]
+    K = int(np.prod(lead)) if lead else 1
+    a = attn.reshape(K, seq_len + 1, seq_len + 1)[:, :-1, :-1]  # (K, 256, 256)
+
+    reveal_tokens = np.asarray(reveal_tokens, dtype=np.int64)
+    inv_perm = np.asarray(inv_perm, dtype=np.int64)
+
+    # Key labels: key 0=[None]→phys 0; key j (j≥1)=real token j-1→phys block
+    key_labels = np.empty(seq_len, dtype=np.int64)
+    key_labels[0] = 0  # [None]
+    key_phys = inv_perm[reveal_tokens[:-1] // block_len]  # real tokens 0..254
+    key_labels[1:] = key_phys
+
+    # Query labels mirror key labels because attn[:-1, :-1] leaves [None] at
+    # row/col 0 and real tokens 0..254 at row/col 1..255.
+    query_labels = key_labels.copy()
+
+    # Segment-mean selection matrices
+    key_counts = np.bincount(key_labels, minlength=num_blocks).astype(np.float64)
+    query_counts = np.bincount(query_labels, minlength=num_blocks).astype(np.float64)
+    # With block_len=4, the final stripped token leaves one physical block with
+    # 3 real positions; the [None] fold adds one position to physical block 0.
+    # Therefore every row remains non-empty under the configured geometry.
+    Sk = np.zeros((num_blocks, seq_len), dtype=np.float64)
+    Sk[key_labels, np.arange(seq_len)] = 1.0
+    Sk = Sk / key_counts[:, None]
+    Sq = np.zeros((num_blocks, seq_len), dtype=np.float64)
+    Sq[query_labels, np.arange(seq_len)] = 1.0
+    Sq = Sq / query_counts[:, None]
+
+    A = np.einsum("bt,ktu,cu->kbc", Sq, a, Sk, optimize=True)  # (K, N, N)
+    di = np.arange(num_blocks)
+    A[:, di, di] = 0.0
+    A = A.astype(np.float32, copy=False)
+    return A.reshape(lead + (num_blocks, num_blocks)) if lead else A[0]
+
+
+def _attn_to_A_block_loss_aligned_with_none_vec(
+    attn,
+    reveal_tokens,
+    inv_perm,
+    seq_len=SEQ_LEN,
+    num_blocks=N,
+    block_len=BLOCK_LEN,
+):
+    """Loss-aligned AR map A[target_block, source_node] with [None] separate.
+
+    The attention slice is ``attn[:T, :T]``: query positions predict targets
+    x_0..x_{T-1}, and key positions expose [None], x_0..x_{T-2}.  Query labels
+    come from the target token being predicted; key labels come from the visible
+    context token, with source node 0 reserved for [None].
+
+    Returns:
+        A: (..., num_blocks, num_blocks + 1), where columns are
+           [None], source block 0, ..., source block N-1.
+    """
+    attn = np.asarray(attn, dtype=np.float64)
+    lead = attn.shape[:-2]
+    K = int(np.prod(lead)) if lead else 1
+    a = attn.reshape(K, seq_len + 1, seq_len + 1)[:, :seq_len, :seq_len]
+
+    reveal_tokens = np.asarray(reveal_tokens, dtype=np.int64)
+    inv_perm = np.asarray(inv_perm, dtype=np.int64)
+    if reveal_tokens.shape[0] != seq_len:
+        raise ValueError(f"reveal_tokens must have length {seq_len}, got {reveal_tokens.shape[0]}")
+
+    query_model_blocks = reveal_tokens // block_len
+    query_labels = inv_perm[query_model_blocks]
+
+    source_labels = np.empty(seq_len, dtype=np.int64)
+    source_labels[0] = 0
+    key_model_blocks = reveal_tokens[:-1] // block_len
+    source_labels[1:] = 1 + inv_perm[key_model_blocks]
+
+    query_counts = np.bincount(query_labels, minlength=num_blocks).astype(np.float64)
+    source_counts = np.bincount(source_labels, minlength=num_blocks + 1).astype(np.float64)
+
+    Sq = np.zeros((num_blocks, seq_len), dtype=np.float64)
+    Sq[query_labels, np.arange(seq_len)] = 1.0
+    Sq = Sq / np.maximum(query_counts[:, None], 1.0)
+
+    Sk = np.zeros((num_blocks + 1, seq_len), dtype=np.float64)
+    Sk[source_labels, np.arange(seq_len)] = 1.0
+    Sk = Sk / np.maximum(source_counts[:, None], 1.0)
+
+    A = np.einsum("bt,ktu,cu->kbc", Sq, a, Sk, optimize=True)
+    A = A.astype(np.float32, copy=False)
+    return A.reshape(lead + (num_blocks, num_blocks + 1)) if lead else A[0]
+
+
+def _attn_to_A_block_loss_aligned_with_none_model_vec(
+    attn,
+    reveal_tokens,
+    seq_len=SEQ_LEN,
+    num_blocks=N,
+    block_len=BLOCK_LEN,
+):
+    """Loss-aligned AR map in model-frame coordinates, [None] separate, NO inv_perm.
+
+    Same attention slice as ``_attn_to_A_block_loss_aligned_with_none_vec``
+    (attn[:T,:T]) but keeps model-block labels instead of remapping to physical
+    blocks via inv_perm.  This is the strict label-free extraction: node 0 is
+    [None], node 1+i is model block i.  inv_perm is never used here — it is
+    only applied posthoc to translate the final sigma_model into sigma_phys for
+    scoring against physical L2R.
+
+    Returns:
+        A: (..., num_blocks, num_blocks + 1), columns = [None], model_block_0, ..., model_block_{N-1}.
+    """
+    attn = np.asarray(attn, dtype=np.float64)
+    lead = attn.shape[:-2]
+    K = int(np.prod(lead)) if lead else 1
+    a = attn.reshape(K, seq_len + 1, seq_len + 1)[:, :seq_len, :seq_len]
+
+    reveal_tokens = np.asarray(reveal_tokens, dtype=np.int64)
+    if reveal_tokens.shape[0] != seq_len:
+        raise ValueError(f"reveal_tokens must have length {seq_len}, got {reveal_tokens.shape[0]}")
+
+    # ── model-block labels, NO inv_perm ──
+    model_blocks = reveal_tokens // block_len
+    query_labels = model_blocks                          # model-frame query rows
+
+    source_labels = np.empty(seq_len, dtype=np.int64)
+    source_labels[0] = 0                                 # [None] → source node 0
+    key_model_blocks = reveal_tokens[:-1] // block_len
+    source_labels[1:] = 1 + key_model_blocks             # model-frame source: node 1+i = model block i
+
+    query_counts = np.bincount(query_labels, minlength=num_blocks).astype(np.float64)
+    source_counts = np.bincount(source_labels, minlength=num_blocks + 1).astype(np.float64)
+
+    Sq = np.zeros((num_blocks, seq_len), dtype=np.float64)
+    Sq[query_labels, np.arange(seq_len)] = 1.0
+    Sq = Sq / np.maximum(query_counts[:, None], 1.0)
+
+    Sk = np.zeros((num_blocks + 1, seq_len), dtype=np.float64)
+    Sk[source_labels, np.arange(seq_len)] = 1.0
+    Sk = Sk / np.maximum(source_counts[:, None], 1.0)
+
+    A = np.einsum("bt,ktu,cu->kbc", Sq, a, Sk, optimize=True)
+    A = A.astype(np.float32, copy=False)
+    return A.reshape(lead + (num_blocks, num_blocks + 1)) if lead else A[0]
+
+
+def _attn_to_A_block_loss_aligned_content_vec(
+    attn,
+    reveal_tokens,
+    inv_perm,
+    seq_len=SEQ_LEN,
+    num_blocks=N,
+    block_len=BLOCK_LEN,
+):
+    """Loss-aligned content map A[target_block, source_block], excluding [None]."""
+    A_with_none = _attn_to_A_block_loss_aligned_with_none_vec(
+        attn,
+        reveal_tokens,
+        inv_perm,
+        seq_len=seq_len,
+        num_blocks=num_blocks,
+        block_len=block_len,
+    )
+    A = np.asarray(A_with_none[..., 1:], dtype=np.float32).copy()
+    di = np.arange(num_blocks)
+    A[..., di, di] = 0.0
+    return A
+
+
+def _attn_to_A_block_model_vec(attn, reveal_tokens, inv_perm,
+                               seq_len=SEQ_LEN, num_blocks=N, block_len=BLOCK_LEN):
+    """Model-coordinate block graph (no inv_perm remap), vectorized over leading dims.
+
+    Like B0 (attn[1:,1:], segment-mean, [None]→block-0 fold, zero diagonal) but
+    keeps model-block labels instead of remapping to physical blocks via inv_perm.
+    The returned block graph is in the model's own coordinate frame — the same
+    frame the model sees at training time.
+
+    Unlike ``predictor`` mode this does NOT fold attn[:-1,:-1]; it uses the same
+    attn[1:,1:] slice as B0, preserving the target-side attention structure.
+    """
+    attn = np.asarray(attn, dtype=np.float64)
+    lead = attn.shape[:-2]
+    K = int(np.prod(lead)) if lead else 1
+    a = attn.reshape(K, seq_len + 1, seq_len + 1)
+
+    reveal_tokens = np.asarray(reveal_tokens, dtype=np.int64)
+    # ── model blocks, NO inv_perm ──
+    model_blocks = reveal_tokens // block_len              # (T,) model block per token
+    labels = np.empty(seq_len + 1, dtype=np.int64)
+    labels[0] = 0                                          # [None] → block 0
+    labels[1:] = model_blocks
+    counts = np.bincount(labels, minlength=num_blocks).astype(np.float64)
+    S = np.zeros((num_blocks, seq_len + 1), dtype=np.float64)
+    S[labels, np.arange(seq_len + 1)] = 1.0
+    S = S / counts[:, None]                                # segment-mean selection rows
+    A = np.einsum("bt,ktu,cu->kbc", S, a, S, optimize=True)
+    di = np.arange(num_blocks)
+    A[:, di, di] = 0.0
+    A = A.astype(np.float32, copy=False)
+    return A.reshape(lead + (num_blocks, num_blocks)) if lead else A[0]
+
+
+def _attn_to_A_block_content_vec(attn, reveal_tokens, inv_perm,
+                                  seq_len=SEQ_LEN, num_blocks=N, block_len=BLOCK_LEN):
+    """Content-only block graph — NO [None] sink, NO inv_perm, model coordinates.
+
+    Strips the [None] row/col entirely (attn[1:,1:]) and aggregates the remaining
+    256 real-token attention positions into N×N model-block blocks via segment-mean.
+    No source term, no physical remap, no diagonal budget.
+
+    This is the strictest label-free diagnostic: it answers whether raw
+    content-to-content attention alone carries order-bearing structure, without
+    any experimenter-supplied knowledge (no inv_perm, no [None]→block-0 prior).
+    """
+    del inv_perm                                           # explicitly unused
+    attn = np.asarray(attn, dtype=np.float32)
+    lead = attn.shape[:-2]
+    K = int(np.prod(lead)) if lead else 1
+    a = attn.reshape(K, seq_len + 1, seq_len + 1)[:, 1:, 1:]  # (K, 256, 256) content only
+
+    reveal_tokens = np.asarray(reveal_tokens, dtype=np.int64)
+    model_blocks = reveal_tokens // block_len  # (256,) model block per token
+
+    counts = np.bincount(model_blocks, minlength=num_blocks).astype(np.float32)
+    S = np.zeros((num_blocks, seq_len), dtype=np.float32)
+    S[model_blocks, np.arange(seq_len)] = 1.0
+    S = S / counts[:, None]                                # segment-mean selection rows
+    A = np.einsum("bt,ktu,cu->kbc", S, a, S, optimize=True)
+    di = np.arange(num_blocks)
+    A[:, di, di] = 0.0
+    A = A.astype(np.float32, copy=False)
+    return A.reshape(lead + (num_blocks, num_blocks)) if lead else A[0]
+
+
 def attn257_to_A_block(avg_attn, reveal_tokens, inv_perm,
                        seq_len=SEQ_LEN, num_blocks=N, block_len=BLOCK_LEN,
                        none_weight=0.1):
@@ -289,10 +534,13 @@ def _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top, none_mode="old", h
     """Per-sample physical-frame A_lh (L,H,N,N) and heavy A (N,N) from one
     sample's attention stack (L,H,T+1,T+1). Identical math to the loop body.
 
-    none_mode in {"old","b0","predictor"} selects the [None]-handling for BOTH the per-head
+    none_mode in {"old","b0","b1","predictor","model","content","loss_aligned"} selects the [None]-handling for BOTH the per-head
     and heavy block graphs ("old" = canonical 0.1-weighted [None] source term,
     "b0" = none->physical-block-0 fold, "predictor" = original AO-GPT
-    predictor-aligned attn[:-1, :-1] reveal-frame aggregation).
+    predictor-aligned attn[:-1, :-1] reveal-frame aggregation,
+    "model" = like b0 but keeps model-block labels, NO inv_perm remap,
+    "content" = attn[1:,1:] only, model-block segment-mean, NO [None], NO inv_perm,
+    "loss_aligned" = AR target-block queries to source/content-block keys).
 
     ``head`` (optional (layer, head_index)): when set, compute ONLY that single
     head's A — skipping the 32× einsum over all (L,H) heads.  A_lh_i is still
@@ -313,7 +561,11 @@ def _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top, none_mode="old", h
     _AGG_BY_NONE_MODE = {
         "old": _attn_to_A_block_vec,
         "b0": _attn_to_A_block_b0_vec,
+        "b1": _attn_to_A_block_b1_vec,
         "predictor": _attn_to_A_block_predictor_vec,
+        "model": _attn_to_A_block_model_vec,
+        "content": _attn_to_A_block_content_vec,
+        "loss_aligned": _attn_to_A_block_loss_aligned_content_vec,
     }
     if none_mode not in _AGG_BY_NONE_MODE:
         raise ValueError(f"none_mode must be one of {sorted(_AGG_BY_NONE_MODE)}, got {none_mode!r}")
@@ -484,7 +736,7 @@ def main():
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--split", default="train")
     p.add_argument("--alpha-dep", type=float, default=0.5)
-    p.add_argument("--none-mode", default="old", choices=["old", "b0", "predictor"])
+    p.add_argument("--none-mode", default="old", choices=["old", "b0", "b1", "predictor", "loss_aligned"])
     p.add_argument("--out", required=True)
     args = p.parse_args()
 

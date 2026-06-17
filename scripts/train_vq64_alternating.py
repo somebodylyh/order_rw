@@ -191,7 +191,7 @@ def main():
         beta_path = out / f"beta_step{start_step}.pt"
         if beta_path.exists():
             from train_attn_order_mlp import OrderMLP
-            rw_mlp = OrderMLP()
+            rw_mlp = OrderMLP().to(device)
             rw_mlp.load_state_dict(torch.load(beta_path, map_location=device, weights_only=False))
             rw_mlp.eval()
         a_path = out / f"A_global_step{start_step}.npy"

@@ -45,7 +45,7 @@ def _ckpt(step: int, ckpt_dir=None) -> str:
     return str(d / f"ckpt_step{step}.pt")
 
 
-def _build(step, head, M, batch_size, seed, out_path, device, fwd_batch, ckpt_dir=None):
+def _build(step, head, M, batch_size, seed, out_path, device, fwd_batch, ckpt_dir=None, none_mode="b0"):
     if out_path is not None and pathlib.Path(out_path).exists():
         d = np.load(out_path, allow_pickle=True)
         sig = np.concatenate([d["train_sigma_T"], d["val_sigma_T"], d["test_sigma_T"]])
@@ -55,7 +55,7 @@ def _build(step, head, M, batch_size, seed, out_path, device, fwd_batch, ckpt_di
     else:
         info = build_selected_head_dataset(
             ckpt_path=_ckpt(step, ckpt_dir), head=head, M=M, batch_size=batch_size, seed=seed,
-            none_mode="b0", out_path=out_path, device=device, split="train",
+            none_mode=none_mode, out_path=out_path, device=device, split="train",
             fwd_batch=fwd_batch,
         )
     div = teacher_diversity_stats(info["sigma_T"])
@@ -126,6 +126,8 @@ def main():
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--fwd-batch", type=int, default=8,
                     help="forward batch for attention extraction; keep small on a shared GPU")
+    ap.add_argument("--none-mode", default="b0", choices=["b0", "b1", "predictor", "model", "content"],
+                    help="block-aggregation mode (default b0)")
     ap.add_argument("--out", default=str(PKG / "batch_readout" / "logs" / "phase33_gbeta"))
     ap.add_argument("--cross-steps", type=int, nargs="*", default=[10000, 20000])
     ap.add_argument("--ckpt-dir", default=str(CKPT_DIR_DEFAULT),
@@ -144,13 +146,13 @@ def main():
     data_dir = out / "data"
     data_dir.mkdir(exist_ok=True)
 
-    print(f"=== §3.3 g_β pretrain ({tag}) head=L{head[0]}H{head[1]} B0 canonical "
+    print(f"=== §3.3 g_β pretrain ({tag}) head=L{head[0]}H{head[1]} none_mode={args.none_mode} "
           f"M={M} bs={args.batch_size} epochs={epochs} step={args.step} ===")
 
     # --- Phase A: build training dataset ---
     print(f"[A] build step={args.step} selected-head dataset")
     train_npz = str(data_dir / f"ds_{args.step}.npz")
-    div5k = _build(args.step, head, M, args.batch_size, args.seed, train_npz, args.device, args.fwd_batch, ckpt_dir=args.ckpt_dir)
+    div5k = _build(args.step, head, M, args.batch_size, args.seed, train_npz, args.device, args.fwd_batch, ckpt_dir=args.ckpt_dir, none_mode=args.none_mode)
 
     # --- Phase B: train g_β ---
     print("[B] train g_β (nodewise + pairwise)")
@@ -170,7 +172,7 @@ def main():
     print("[C/D] Phase 1.5 generalization gate")
     g_beta = _load_g_beta(gbeta_path).to(args.device)
     report = {"config": {"head": list(head), "M": M, "batch_size": args.batch_size,
-                         "epochs": epochs, "none_mode": "b0", "tag": tag},
+                         "epochs": epochs, "none_mode": args.none_mode, "tag": tag},
               "teacher_diversity_5k": div5k, "splits": {}}
 
     def _report_line(tag, r):
@@ -191,7 +193,7 @@ def main():
     M_cross = max(M // 4, 20)
     for step in args.cross_steps:
         npz = str(data_dir / f"ds_{step}.npz")
-        divc = _build(step, head, M_cross, args.batch_size, args.seed, npz, args.device, args.fwd_batch, ckpt_dir=args.ckpt_dir)
+        divc = _build(step, head, M_cross, args.batch_size, args.seed, npz, args.device, args.fwd_batch, ckpt_dir=args.ckpt_dir, none_mode=args.none_mode)
         r = _eval_npz_all(g_beta, npz, args.device)
         r["teacher_diversity"] = divc
         report["splits"][f"{step}_cross"] = r

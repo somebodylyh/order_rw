@@ -7,6 +7,7 @@
 set -euo pipefail
 
 cd /home/admin/lyuyuhuan/order_lyu
+export PYTHONPATH="block_lo_arm_order_network:${PYTHONPATH:-}"
 
 DATA="block_lo_arm_order_network/neural_readout/data/text_5k_full_10k.npz"
 
