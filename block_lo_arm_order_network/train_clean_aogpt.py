@@ -751,7 +751,7 @@ def parse_args(default_run_kind="baseline"):
     # --- frozen-g_β order hook (run-kind=frozen_beta; Phase 2 §5) ---
     p.add_argument("--frozen-beta-ckpt", type=str, default=None,
                    help="run-kind=frozen_beta: path to the pretrained g_β checkpoint "
-                        "(g_beta_best.pt). The in-loop order is g_β(B0(selected head)).")
+                        "(g_beta_best.pt). The in-loop order is g_β(B1(selected head)).")
     p.add_argument("--frozen-beta-head", type=int, nargs=2, default=[0, 0], metavar=("LAYER", "HEAD"),
                    help="(layer, head) the g_β was pretrained on; must match the dataset head (default L0H0).")
     p.add_argument("--frozen-beta-mode", choices=["argsort", "sample"], default="argsort",
@@ -761,8 +761,18 @@ def parse_args(default_run_kind="baseline"):
     p.add_argument("--frozen-beta-refresh", type=int, default=1,
                    help="recompute the g_β order every N steps (K-step refresh; 1 = every step). "
                         "Bounds the probe-forward overhead to ~1/N.")
-    p.add_argument("--frozen-beta-none-mode", choices=["b0", "b1", "predictor", "model", "content", "loss_aligned"], default="b0",
-                   help="block-aggregation mode for the in-loop probe extraction; must match g_β training.")
+    p.add_argument("--frozen-beta-none-mode", choices=["b1", "predictor", "model", "content", "loss_aligned"], default="b1",
+                   help="block-aggregation mode for the in-loop probe extraction; must match g_β training (B1=65-node).")
+    # --- head-gated g_beta order hook (extends frozen_beta with multi-head gate) ---
+    p.add_argument("--gbeta-input-mode", choices=["single_head", "layer_heads"], default="single_head",
+                   help="g_beta input mode: single_head (existing) or layer_heads (head-gated, "
+                        "extracts ALL heads from one layer).")
+    p.add_argument("--gbeta-layer", type=int, default=0,
+                   help="which layer to extract heads from (for --gbeta-input-mode layer_heads).")
+    p.add_argument("--gbeta-topk", type=int, default=2,
+                   help="top-k for head gate (for --gbeta-input-mode layer_heads).")
+    p.add_argument("--gbeta-frozen", type=lambda x: x.lower() != "false", default=True,
+                   help="freeze g_beta weights during training (default True).")
     # --- direct CDL teacher order hook (run-kind=cdl_teacher) ---
     p.add_argument("--cdl-teacher-head", type=int, nargs=2, default=[0, 7], metavar=("LAYER", "HEAD"),
                    help="run-kind=cdl_teacher: (layer, head) to extract attention from for C-D+L teacher.")
@@ -770,6 +780,11 @@ def parse_args(default_run_kind="baseline"):
                    help="C-D+L teacher softmax temperature.")
     p.add_argument("--cdl-teacher-refresh", type=int, default=10,
                    help="recompute the CDL order every N steps.")
+    p.add_argument("--cdl-teacher-none-mode", type=str, default="b1",
+                   choices=["b1", "predictor", "model", "content", "loss_aligned"],
+                   help="none_mode for CDL teacher attention extraction (B1=65-node).")
+    p.add_argument("--cdl-teacher-rev", action="store_true",
+                   help="reverse the CDL teacher order (flip physical block order).")
     # --- per-head CDL signal tracking (diagnostic, any run-kind) ---
     p.add_argument("--track-all-heads", action="store_true",
                    help="at each tracking interval, scan every (layer, head) with the same lightweight probe batches.")
@@ -779,8 +794,8 @@ def parse_args(default_run_kind="baseline"):
                    help="number of probe batches for --track-head diagnostic (default 20).")
     p.add_argument("--track-head-interval", type=int, default=20,
                    help="run head-signal diagnostic every N steps (default 20).")
-    p.add_argument("--track-head-none-mode", choices=["b0", "b1", "predictor", "model", "content", "loss_aligned"], default="b1",
-                   help="attention-to-block aggregation: b0=none→block0 fold, b1=predictor frame+physical remap, predictor=old predictor frame no remap, loss_aligned=AR target queries to source keys.")
+    p.add_argument("--track-head-none-mode", choices=["b1", "predictor", "model", "content", "loss_aligned"], default="b1",
+                   help="attention-to-block aggregation: b1=predictor frame+physical remap (65-node), predictor=old predictor frame no remap, loss_aligned=AR target queries to source keys.")
     return p.parse_args()
 
 
@@ -1152,7 +1167,6 @@ def main(default_run_kind="baseline"):
     def _track_head_signal(model, global_step):
         from neural_readout.teacher_labels import generate_teacher_label
         from per_head_order_scan import (
-            _attn_to_A_block_b0_vec,
             _attn_to_A_block_b1_vec,
             _attn_to_A_block_loss_aligned_content_vec,
             _attn_to_A_block_predictor_vec,
@@ -1198,9 +1212,6 @@ def main(default_run_kind="baseline"):
             for bi in range(attn_stack.shape[1]):
                 if none_mode == "predictor":
                     A_chunks.append(_attn_to_A_block_predictor_vec(
-                        attn_stack[l, bi, h], probe_orders[bi].cpu().numpy(), inv_perm))
-                elif none_mode == "b0":
-                    A_chunks.append(_attn_to_A_block_b0_vec(
                         attn_stack[l, bi, h], probe_orders[bi].cpu().numpy(), inv_perm))
                 elif none_mode == "b1":
                     A_chunks.append(_attn_to_A_block_b1_vec(
@@ -1259,7 +1270,6 @@ def main(default_run_kind="baseline"):
     def _track_all_heads_signal(model, global_step):
         from neural_readout.teacher_labels import generate_teacher_label
         from per_head_order_scan import (
-            _attn_to_A_block_b0_vec,
             _attn_to_A_block_b1_vec,
             _attn_to_A_block_loss_aligned_content_vec,
             _attn_to_A_block_predictor_vec,
@@ -1311,9 +1321,6 @@ def main(default_run_kind="baseline"):
                 sample = np.transpose(attn_stack[:, bi], (0, 1, 2, 3))  # (L,H,T+1,T+1)
                 if none_mode == "predictor":
                     A_blocks = _attn_to_A_block_predictor_vec(
-                        sample, probe_orders[bi].cpu().numpy(), inv_perm)
-                elif none_mode == "b0":
-                    A_blocks = _attn_to_A_block_b0_vec(
                         sample, probe_orders[bi].cpu().numpy(), inv_perm)
                 elif none_mode == "b1":
                     A_blocks = _attn_to_A_block_b1_vec(
@@ -1389,24 +1396,43 @@ def main(default_run_kind="baseline"):
     if args.run_kind == "frozen_beta":
         if not args.frozen_beta_ckpt:
             raise ValueError("run-kind=frozen_beta requires --frozen-beta-ckpt")
-        from batch_readout.hook_order_provider import HookOrderProvider
-        beta_provider = HookOrderProvider(
-            g_beta_ckpt=args.frozen_beta_ckpt, head=tuple(args.frozen_beta_head),
-            clean_perm=clean_perm, refresh_every=args.frozen_beta_refresh,
-            mode=args.frozen_beta_mode, tau=args.frozen_beta_tau,
-            seed=args.seed, device=str(device), none_mode=args.frozen_beta_none_mode,
-        )
-        log(f"[frozen_beta] g_β={args.frozen_beta_ckpt} head=L{args.frozen_beta_head[0]}H{args.frozen_beta_head[1]} "
-            f"none_mode={args.frozen_beta_none_mode} "
-            f"mode={args.frozen_beta_mode} refresh_every={args.frozen_beta_refresh}")
+        if args.gbeta_input_mode == "layer_heads":
+            # Head-gated: extract ALL heads from one layer, apply learned gate
+            from batch_readout.hook_order_provider import HeadGatedHookOrderProvider
+            beta_provider = HeadGatedHookOrderProvider(
+                g_beta_ckpt=args.frozen_beta_ckpt, layer=args.gbeta_layer,
+                clean_perm=clean_perm, refresh_every=args.frozen_beta_refresh,
+                topk=args.gbeta_topk,
+                mode=args.frozen_beta_mode, tau=args.frozen_beta_tau,
+                seed=args.seed, device=str(device), none_mode=args.frozen_beta_none_mode,
+            )
+            log(f"[frozen_beta head-gated] g_β={args.frozen_beta_ckpt} "
+                f"layer=L{args.gbeta_layer} topk={args.gbeta_topk} "
+                f"none_mode={args.frozen_beta_none_mode} "
+                f"mode={args.frozen_beta_mode} refresh_every={args.frozen_beta_refresh}")
+        else:
+            # Single-head: existing behaviour
+            from batch_readout.hook_order_provider import HookOrderProvider
+            beta_provider = HookOrderProvider(
+                g_beta_ckpt=args.frozen_beta_ckpt, head=tuple(args.frozen_beta_head),
+                clean_perm=clean_perm, refresh_every=args.frozen_beta_refresh,
+                mode=args.frozen_beta_mode, tau=args.frozen_beta_tau,
+                seed=args.seed, device=str(device), none_mode=args.frozen_beta_none_mode,
+            )
+            log(f"[frozen_beta] g_β={args.frozen_beta_ckpt} head=L{args.frozen_beta_head[0]}H{args.frozen_beta_head[1]} "
+                f"none_mode={args.frozen_beta_none_mode} "
+                f"mode={args.frozen_beta_mode} refresh_every={args.frozen_beta_refresh}")
     if args.run_kind == "cdl_teacher":
         from batch_readout.cdl_order_provider import CdlOrderProvider
         cdl_provider = CdlOrderProvider(
             head=tuple(args.cdl_teacher_head), clean_perm=clean_perm,
             refresh_every=args.cdl_teacher_refresh, tau_T=args.cdl_teacher_tau,
             mode="C-D+L", seed=args.seed, device=str(device),
+            none_mode=args.cdl_teacher_none_mode,
+            reverse=getattr(args, 'cdl_teacher_rev', False),
         )
         log(f"[cdl_teacher] C-D+L teacher head=L{args.cdl_teacher_head[0]}H{args.cdl_teacher_head[1]} "
+            f"none_mode={args.cdl_teacher_none_mode} rev={getattr(args, 'cdl_teacher_rev', False)} "
             f"refresh_every={args.cdl_teacher_refresh} tau_T={args.cdl_teacher_tau}")
 
     for global_step in range(start_step, args.max_steps):
