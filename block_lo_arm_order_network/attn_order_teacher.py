@@ -21,7 +21,7 @@ Ablation modes (diagnostics only, NOT the main teacher): "C", "L", "C-D", "C+L",
 """
 import numpy as np
 
-MODES = ("C", "L", "C-D", "C+L", "C-D+L")
+MODES = ("C", "L", "C-D", "C+L", "C-D+L", "-D")
 MAIN_MODE = "C-D+L"
 
 
@@ -64,6 +64,8 @@ def teacher_scores(B, S_t, U_t, last, mode=MAIN_MODE):
         q = C - D
     elif mode == "C+L":
         q = C + L
+    elif mode == "-D":
+        q = -D
     else:  # "C-D+L"
         q = C - D + L
     return q, U
