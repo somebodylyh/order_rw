@@ -90,7 +90,7 @@ def _near_diag_mass(B: np.ndarray, d: int) -> float:
     """Fraction of total abs(B) mass within distance d of diagonal."""
     n = B.shape[0]
     mask = np.abs(np.arange(n)[:, None] - np.arange(n)[None, :]) <= d
-    return float(np.abs(B[:, mask]).sum() / (np.abs(B).sum() + 1e-12))
+    return float(np.abs(B[mask]).sum() / (np.abs(B).sum() + 1e-12))
 
 
 def _topk_mass(B: np.ndarray, k: int) -> float:
@@ -479,7 +479,6 @@ class AttentionTrajectoryLogger:
 
         # ── Save raw tensors ───────────────────────────────────────────
         step_dir = _ensure_dir(self.output_root / "raw" / f"step_{int(global_step):06d}")
-        torch.save(torch.from_numpy(B_all), step_dir / "B_all_layers.pt")   # (L,S,H,65,65)
         torch.save(torch.from_numpy(B_model), step_dir / "B_model.pt")      # L0 alias
         if B_phys is not None:
             torch.save(torch.from_numpy(B_phys), step_dir / "B_phys.pt")
@@ -493,13 +492,6 @@ class AttentionTrajectoryLogger:
 
         # ── Mean across samples (per-head) ────────────────────────────
         B_model_mean = B_model.mean(axis=0)  # (heads, 65, 65)
-        mean_summary = compute_sample_summary(
-            B_model_mean[np.newaxis, :], phys_perm=self.phys_perm
-        )
-        # Fix: compute_sample_summary wraps in an extra level; flatten it
-        # mean_summary has per_head list + head_mean_* / best_head_* aggregates
-        # But it was computed on a batch of 1 "sample" (the mean). We want the
-        # head metrics directly from the mean B.
         per_head_mean = []
         for h in range(B_model_mean.shape[0]):
             per_head_mean.append(
