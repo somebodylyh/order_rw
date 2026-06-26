@@ -1704,6 +1704,44 @@ def main(default_run_kind="baseline"):
     cdl_provider = None
     direct_provider = None
 
+    # ── attention trajectory logger (L0 all-head B maps at eval time) ──
+    if args.attn_trajectory:
+        from attention_trajectory import AttentionTrajectoryLogger, phys_perm_from_clean_perm  # noqa: E402 (lazy import to avoid circular deps)
+        phys_perm_arr = phys_perm_from_clean_perm(clean_perm)
+        traj_output = output_dir / "attention_trajectory"
+        attn_extra_meta = {
+            "order_policy": args.run_kind,
+            "start_ckpt": str(args.resume_ckpt) if args.resume_ckpt else "none",
+            "start_step": int(start_step),
+            "max_steps": int(args.max_steps),
+            "seed": int(args.seed),
+            "eval_indices_hash": sha256_int_array(split["eval_indices"]),
+            "data_source": str(args.data_source),
+            "device": str(args.device),
+            "wandb_run_name": args.wandb_run_name if args.wandb_run_name else str(output_dir.name),
+        }
+        n_layer = model.config.n_layer
+        if args.attn_composition_pairs == "adjacent":
+            comp_pairs = [(i, i + 1) for i in range(n_layer - 1)]
+        else:
+            comp_pairs = [(i, j) for i in range(n_layer) for j in range(i + 1, n_layer)]
+        attn_traj_logger = AttentionTrajectoryLogger(
+            output_root=traj_output,
+            run_name=output_dir.name,
+            n_attention_samples=args.attn_trajectory_samples,
+            wandb_run=wandb_run,
+            phys_perm=phys_perm_arr,
+            heatmap_interval=args.attn_trajectory_heatmap_interval,
+            heatmap_png_interval=args.attn_trajectory_heatmap_interval,
+            seed=args.seed,
+            extra_metadata=attn_extra_meta,
+            composition_pairs=comp_pairs,
+        )
+        attn_traj_logger.set_log_fn(log)
+        log(f"[attn_trajectory] enabled — {args.attn_trajectory_samples} fixed samples, "
+            f"heatmap every {args.attn_trajectory_heatmap_interval} steps, "
+            f"output={traj_output}")
+
     if start_step == 0 and 0 in save_steps:
         lr0 = get_lr(0, args)
         alpha0 = alpha_for_step(0, start_step, args)
@@ -1815,44 +1853,6 @@ def main(default_run_kind="baseline"):
             f"lambda_dep={audit['lambda_dep']} | "
             f"refresh_every={audit['refresh_every']}"
         )
-
-    # ── attention trajectory logger (L0 all-head B maps at eval time) ──
-    if args.attn_trajectory:
-        from attention_trajectory import AttentionTrajectoryLogger, phys_perm_from_clean_perm  # noqa: E402 (lazy import to avoid circular deps)
-        phys_perm_arr = phys_perm_from_clean_perm(clean_perm)
-        traj_output = output_dir / "attention_trajectory"
-        attn_extra_meta = {
-            "order_policy": args.run_kind,
-            "start_ckpt": str(args.resume_ckpt) if args.resume_ckpt else "none",
-            "start_step": int(start_step),
-            "max_steps": int(args.max_steps),
-            "seed": int(args.seed),
-            "eval_indices_hash": sha256_int_array(split["eval_indices"]),
-            "data_source": str(args.data_source),
-            "device": str(args.device),
-            "wandb_run_name": args.wandb_run_name if args.wandb_run_name else str(output_dir.name),
-        }
-        n_layer = model.config.n_layer
-        if args.attn_composition_pairs == "adjacent":
-            comp_pairs = [(i, i + 1) for i in range(n_layer - 1)]
-        else:
-            comp_pairs = [(i, j) for i in range(n_layer) for j in range(i + 1, n_layer)]
-        attn_traj_logger = AttentionTrajectoryLogger(
-            output_root=traj_output,
-            run_name=output_dir.name,
-            n_attention_samples=args.attn_trajectory_samples,
-            wandb_run=wandb_run,
-            phys_perm=phys_perm_arr,
-            heatmap_interval=args.attn_trajectory_heatmap_interval,
-            heatmap_png_interval=args.attn_trajectory_heatmap_interval,
-            seed=args.seed,
-            extra_metadata=attn_extra_meta,
-            composition_pairs=comp_pairs,
-        )
-        attn_traj_logger.set_log_fn(log)
-        log(f"[attn_trajectory] enabled — {args.attn_trajectory_samples} fixed samples, "
-            f"heatmap every {args.attn_trajectory_heatmap_interval} steps, "
-            f"output={traj_output}")
 
     if args.track_head_maps and start_step % int(args.track_head_map_interval) == 0:
         _track_head_maps_raw(model, start_step)
