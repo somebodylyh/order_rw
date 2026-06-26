@@ -35,3 +35,16 @@ def test_layer_pair_composition_shapes():
     out = layer_pair_composition(c_attn_ws, c_proj_ws, n_head, n_embd, pairs)
     assert set(out.keys()) == set(pairs)
     assert out[(0, 1)].shape == (n_head, n_head, 3)  # (up_head, down_head, {Q,K,V})
+
+
+def test_extract_layer_weights_matches_config():
+    import torch
+    from model_AOGPT_AdaLN6_NoRep_cond_128_trunc_qknorm import AOGPT, AOGPTConfig
+    from batch_readout.attn_composition import extract_layer_weights
+    cfg = AOGPTConfig(n_layer=4, n_head=8, n_embd=64, block_size=256)
+    model = AOGPT(cfg)
+    c_attn_ws, c_proj_ws, n_head, n_embd = extract_layer_weights(model)
+    assert len(c_attn_ws) == 4 and len(c_proj_ws) == 4
+    assert n_head == 8 and n_embd == 64
+    assert c_attn_ws[0].shape == (3 * 64, 64)
+    assert c_proj_ws[0].shape == (64, 64)

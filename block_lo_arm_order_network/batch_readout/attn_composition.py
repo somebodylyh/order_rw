@@ -54,3 +54,26 @@ def layer_pair_composition(c_attn_ws, c_proj_ws, n_head, n_embd, pairs) -> dict:
                 mat[a, b] = [s["Q"], s["K"], s["V"]]
         out[(i, j)] = mat
     return out
+
+
+def extract_layer_weights(model):
+    """Read per-layer c_attn/c_proj weights from an AOGPT model.
+
+    Args:
+        model: AOGPT model instance
+
+    Returns:
+        tuple of (c_attn_ws, c_proj_ws, n_head, n_embd) where:
+        - c_attn_ws: list of numpy arrays, one per layer
+        - c_proj_ws: list of numpy arrays, one per layer
+        - n_head: number of attention heads
+        - n_embd: embedding dimension
+    """
+    blocks = model.transformer.h
+    c_attn_ws, c_proj_ws = [], []
+    for blk in blocks:
+        c_attn_ws.append(blk.attn.c_attn.weight.detach().cpu().numpy())
+        c_proj_ws.append(blk.attn.c_proj.weight.detach().cpu().numpy())
+    n_head = blocks[0].attn.n_head
+    n_embd = blocks[0].attn.n_embd
+    return c_attn_ws, c_proj_ws, int(n_head), int(n_embd)
