@@ -52,6 +52,74 @@ from training_utils import (
 
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "probe_results" / "clean_base_random_perm"
 DEFAULT_SAVE_STEPS = "0,1000,5000,10000,20000,30000,40000,50000"
+WANDB_EVAL_KEYS = [
+    "val_train_objective",
+    "val_ori_l2r_block",
+    "val_ar_l2r",
+    "val_model_order",
+    "val_unstructured_order",
+    "val_rw_order",
+    "val_beta_order",
+    "val_direct_order",
+    "val_cdl_order",
+]
+
+
+def _metric_loss(metrics, key):
+    value = metrics.get(key, {}).get("loss_token_avg", float("nan"))
+    return float(value)
+
+
+def wandb_train_payload(step, train_loss, alpha, lr):
+    return {
+        "step": int(step),
+        "train_loss": float(train_loss),
+        "alpha": float(alpha),
+        "lr": float(lr),
+    }
+
+
+def wandb_eval_payload(step, metrics, train_loss, alpha, lr):
+    payload = wandb_train_payload(step, train_loss, alpha, lr)
+    for key in WANDB_EVAL_KEYS:
+        payload[key] = _metric_loss(metrics, key)
+    return payload
+
+
+def maybe_init_wandb(args, output_dir, clean_perm=None, log_fn=print):
+    if not getattr(args, "wandb_log", False):
+        return None
+
+    try:
+        import wandb
+    except ImportError as exc:
+        raise RuntimeError(
+            "--wandb-log requested, but the wandb package is not installed. "
+            "Install wandb or rerun without --wandb-log."
+        ) from exc
+
+    config = dict(vars(args))
+    config["output_dir"] = str(output_dir)
+    if clean_perm is not None:
+        config["block_perm_first16"] = clean_perm.block_perm_phys_to_model[:16].tolist()
+        config["inv_perm_first16"] = clean_perm.inv_perm_model_to_phys[:16].tolist()
+
+    kwargs = {
+        "project": args.wandb_project,
+        "name": args.wandb_run_name or Path(args.output_dir).name,
+        "tags": args.wandb_tags or None,
+        "config": config,
+        "dir": str(output_dir),
+    }
+    if args.wandb_mode:
+        kwargs["mode"] = args.wandb_mode
+
+    run = wandb.init(**kwargs)
+    log_fn(
+        f"[wandb] logging enabled project={args.wandb_project} "
+        f"name={kwargs['name']} mode={args.wandb_mode or 'default'}"
+    )
+    return run
 
 
 def parse_step_list(text):
@@ -178,7 +246,10 @@ def refresh_rw_graph(model, idx_chunks, clean_perm, device, A_global_old, n_chun
 
 
 def alpha_for_step(global_step, start_step, args):
-    if args.run_kind not in {"graph_rw", "graph_rw_bag", "frozen_beta", "cdl_teacher"}:
+    if args.run_kind not in {
+        "graph_rw", "graph_rw_bag", "frozen_beta", "cdl_teacher",
+        "direct_policy",
+    }:
         return 0.0
     offset = int(getattr(args, "alpha_warmup_start", 0) or 0)
     local_step = max(0, int(global_step) - int(start_step) - offset)
@@ -336,7 +407,9 @@ def order_loss(model, idx_batch, physical_orders, clean_perm, device):
 
 
 @torch.no_grad()
-def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, args, alpha, rw_mlp=None, beta_provider=None, cdl_provider=None):
+def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, args, alpha,
+                    rw_mlp=None, beta_provider=None, cdl_provider=None,
+                    direct_provider=None, eval_step=0):
     model.eval()
     device = next(model.parameters()).device
 
@@ -415,14 +488,15 @@ def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, 
     # --- frozen_beta: compute val_beta_order from the current model state ---
     beta_model_orders = []
     if beta_provider is not None and args.run_kind == "frozen_beta":
-        from batch_readout.hook_order_provider import extract_selected_head_A_for_batch, random_probe_token_orders
         eval_batch = idx_eval_model[: min(args.eval_batch_size, n_eval)].to(device)
-        probe = random_probe_token_orders(eval_batch.shape[0], args.seed, 0, device)
-        A = extract_selected_head_A_for_batch(
-            model, eval_batch, beta_provider.head, clean_perm, device, probe,
-            none_mode=beta_provider.none_mode,
-        )
-        beta_sigma = beta_provider.hook.step(A.to(device)).cpu()  # (N,) block order
+        cached_sigma = getattr(beta_provider, "_sigma", None)
+        cached_last_refresh = getattr(beta_provider, "_last_refresh", None)
+        if hasattr(beta_provider, "_sigma"):
+            beta_provider._sigma = None
+        beta_sigma = beta_provider.physical_order(model, eval_batch, int(eval_step)).cpu()
+        if hasattr(beta_provider, "_sigma"):
+            beta_provider._sigma = cached_sigma
+            beta_provider._last_refresh = cached_last_refresh
         if beta_provider.none_mode in ("model", "content"):
             beta_model = beta_sigma  # already model frame
         else:
@@ -438,6 +512,23 @@ def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, 
         cdl_model = physical_blocks_to_model_blocks(cdl_phys, clean_perm)
         for _ in args.eval_order_seeds:
             cdl_model_orders.append(cdl_model.unsqueeze(0).expand(n_eval, -1))
+
+    # --- direct_policy: force a fresh model-frame strict65 score at eval ---
+    direct_model_orders = []
+    if direct_provider is not None and args.run_kind == "direct_policy":
+        eval_batch_direct = idx_eval_model[: min(args.eval_batch_size, n_eval)].to(device)
+        cached_sigma = direct_provider._sigma
+        cached_last_refresh = direct_provider._last_refresh
+        direct_provider._sigma = None
+        direct_model = direct_provider.physical_order(
+            model, eval_batch_direct, int(eval_step)
+        ).cpu()
+        direct_provider._sigma = cached_sigma
+        direct_provider._last_refresh = cached_last_refresh
+        for _ in args.eval_order_seeds:
+            direct_model_orders.append(
+                direct_model.unsqueeze(0).expand(n_eval, -1)
+            )
 
     modes = {
         "val_ori_l2r_block": ([ori_model], ori_model, None),
@@ -466,6 +557,12 @@ def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, 
             cdl_model_orders[0][0],
             list(args.eval_order_seeds),
         )
+    if direct_model_orders:
+        modes["val_direct_order"] = (
+            direct_model_orders,
+            direct_model_orders[0][0],
+            list(args.eval_order_seeds),
+        )
 
     results = {}
     for name, (orders, desc_order, seeds) in modes.items():
@@ -482,6 +579,9 @@ def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, 
     elif args.run_kind == "cdl_teacher" and "val_cdl_order" in results:
         cdl_loss = results["val_cdl_order"]["loss_token_avg"]
         train_objective = (1.0 - alpha) * random_loss + alpha * cdl_loss
+    elif args.run_kind == "direct_policy" and "val_direct_order" in results:
+        direct_loss = results["val_direct_order"]["loss_token_avg"]
+        train_objective = (1.0 - alpha) * random_loss + alpha * direct_loss
     elif args.run_kind == "l2r":
         train_objective = results["val_ori_l2r_block"]["loss_token_avg"]
     elif args.run_kind == "shuffled_l2r":
@@ -586,12 +686,37 @@ def checkpoint_payload(model, optimizer, args, clean_perm, split, global_step, t
     }
 
 
+def direct_policy_audit_metadata(args):
+    if getattr(args, "run_kind", None) != "direct_policy":
+        return None
+    return {
+        "policy": args.direct_policy,
+        "matrix_convention": "B[source,target]",
+        "frame": "model-frame strict65",
+        "layer_heads": "L0 all-head",
+        "probe_aggregation": (
+            f"mean over {int(args.batch_mean_probes)} probes"
+        ),
+        "head_fusion": "mean over heads",
+        "diagonal_handling": (
+            "exclude self; strict65 diagonal expected zero"
+        ),
+        "order_direction": "larger score earlier",
+        "lambda_dep": float(args.direct_policy_lambda_dep),
+        "refresh_every": int(args.direct_policy_refresh),
+        "sequential_cdl_equivalent": False,
+    }
+
+
 def write_config(output_dir, args, split, clean_perm, rw_policy, rw_params):
     # Honest config: only emit Graph-RW fields if Graph-RW is actually active.
-    # alpha_for_step short-circuits to 0.0 when run_kind is not in {graph_rw, graph_rw_bag, frozen_beta},
-    # so writing rw_policy / rw_params for baseline / l2r runs is misleading.
+    # Writing rw_policy / rw_params for non-Graph-RW runs is misleading even
+    # when another order provider uses the shared alpha schedule.
     graph_rw_active = args.run_kind in {"graph_rw", "graph_rw_bag"}
-    alpha_active = args.run_kind in {"graph_rw", "graph_rw_bag", "frozen_beta", "cdl_teacher"}
+    alpha_active = args.run_kind in {
+        "graph_rw", "graph_rw_bag", "frozen_beta", "cdl_teacher",
+        "direct_policy",
+    }
     payload = {
         "args": vars(args),
         "model_args": clean_model_args(args),
@@ -623,6 +748,7 @@ def write_config(output_dir, args, split, clean_perm, rw_policy, rw_params):
         ),
         "rw_policy": rw_policy if graph_rw_active else None,
         "rw_params": rw_params if graph_rw_active else None,
+        "direct_policy_audit": direct_policy_audit_metadata(args),
         "block_perm_first16": clean_perm.block_perm_phys_to_model[:16].tolist(),
         "inv_perm_first16": clean_perm.inv_perm_model_to_phys[:16].tolist(),
     }
@@ -632,7 +758,7 @@ def write_config(output_dir, args, split, clean_perm, rw_policy, rw_params):
 
 def parse_args(default_run_kind="baseline"):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--run-kind", choices=["baseline", "random_continuation", "graph_rw", "graph_rw_bag", "l2r", "shuffled_l2r", "frozen_beta", "cdl_teacher"],
+    p.add_argument("--run-kind", choices=["baseline", "random_continuation", "graph_rw", "graph_rw_bag", "l2r", "shuffled_l2r", "frozen_beta", "cdl_teacher", "direct_policy"],
                    default=default_run_kind)
     p.add_argument("--resume-ckpt", default="")
     p.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
@@ -644,8 +770,8 @@ def parse_args(default_run_kind="baseline"):
     p.add_argument("--data-source", choices=["chunks", "continuous"], default="chunks",
                    help="chunks = fixed wikitext arrow chunks (Graph-RW protocol, ~18ep reuse → "
                         "overfit); continuous = collaborator-style memmap random-window stream "
-                        "(no reuse; L2R/baseline validation toward ~3.34). continuous requires "
-                        "run-kind in {l2r,baseline,random_continuation} and --refresh-interval 0.")
+                        "(no reuse; L2R/baseline validation toward ~3.34). continuous excludes "
+                        "Graph-RW refresh paths and requires --refresh-interval 0.")
     p.add_argument("--shuffle-granularity", type=int, default=64, choices=[32, 64, 128],
                    help="Shuffle granularity for baseline/random_continuation runs: number of "
                         "independently shuffled token groups. 32 = groups of 8 tokens, "
@@ -673,6 +799,10 @@ def parse_args(default_run_kind="baseline"):
     p.add_argument("--beta1", type=float, default=0.9)
     p.add_argument("--beta2", type=float, default=0.99)
     p.add_argument("--grad-clip", type=float, default=1.0)
+    p.add_argument("--compile-model", dest="compile_model", action="store_true", default=True,
+                   help="compile AO-GPT with torch.compile(mode='reduce-overhead') (default)")
+    p.add_argument("--no-compile-model", dest="compile_model", action="store_false",
+                   help="disable torch.compile for determinism/ablation runs")
     p.add_argument("--vocab-size", type=int, default=50304)
     p.add_argument("--n-layer", type=int, default=4)
     p.add_argument("--n-head", type=int, default=8)
@@ -763,16 +893,51 @@ def parse_args(default_run_kind="baseline"):
                         "Bounds the probe-forward overhead to ~1/N.")
     p.add_argument("--frozen-beta-none-mode", choices=["b1", "predictor", "model", "content", "loss_aligned"], default="b1",
                    help="block-aggregation mode for the in-loop probe extraction; must match g_β training (B1=65-node).")
+    p.add_argument("--frozen-beta-rev", action="store_true",
+                   help="reverse the frozen g_beta emitted block order, matching audition rows marked rev.")
     # --- head-gated g_beta order hook (extends frozen_beta with multi-head gate) ---
-    p.add_argument("--gbeta-input-mode", choices=["single_head", "layer_heads"], default="single_head",
-                   help="g_beta input mode: single_head (existing) or layer_heads (head-gated, "
-                        "extracts ALL heads from one layer).")
+    p.add_argument("--gbeta-input-mode", choices=["single_head", "layer_heads", "all_layers"], default="single_head",
+                   help="g_beta input mode: single_head (existing), layer_heads (head-gated from one layer), "
+                        "or all_layers (head-gated from ALL layers, H=L*H).")
     p.add_argument("--gbeta-layer", type=int, default=0,
                    help="which layer to extract heads from (for --gbeta-input-mode layer_heads).")
     p.add_argument("--gbeta-topk", type=int, default=2,
                    help="top-k for head gate (for --gbeta-input-mode layer_heads).")
     p.add_argument("--gbeta-frozen", type=lambda x: x.lower() != "false", default=True,
                    help="freeze g_beta weights during training (default True).")
+    p.add_argument("--batch-mean-probes", type=int, default=1,
+                   help="number of probe forward passes to average B over "
+                        "(>1 activates model-frame FrozenGBetaModelFrameBlockProvider).")
+    # --- direct model-frame strict65 policies ---
+    p.add_argument(
+        "--direct-policy",
+        choices=["initial_cdl_one_shot", "source_mass", "readiness"],
+        default="initial_cdl_one_shot",
+        help="run-kind=direct_policy: non-learned L0 all-head strict65 score.",
+    )
+    p.add_argument(
+        "--direct-policy-lambda-dep",
+        type=float,
+        default=1.0,
+        help="dependency coefficient for --direct-policy readiness.",
+    )
+    p.add_argument(
+        "--direct-policy-refresh",
+        type=int,
+        default=10,
+        help="recompute the direct model-frame order every N optimizer steps.",
+    )
+    # --- Weights & Biases logging (formal runs) ---
+    p.add_argument("--wandb-log", action="store_true",
+                   help="log train loss and eval metrics to Weights & Biases.")
+    p.add_argument("--wandb-project", default="order-lyu",
+                   help="W&B project name when --wandb-log is enabled.")
+    p.add_argument("--wandb-run-name", default=None,
+                   help="Optional W&B run name; defaults to output directory name.")
+    p.add_argument("--wandb-tags", nargs="*", default=[],
+                   help="Optional W&B tags.")
+    p.add_argument("--wandb-mode", default=None, choices=["online", "offline", "disabled"],
+                   help="Optional W&B mode override.")
     # --- direct CDL teacher order hook (run-kind=cdl_teacher) ---
     p.add_argument("--cdl-teacher-head", type=int, nargs=2, default=[0, 7], metavar=("LAYER", "HEAD"),
                    help="run-kind=cdl_teacher: (layer, head) to extract attention from for C-D+L teacher.")
@@ -796,6 +961,25 @@ def parse_args(default_run_kind="baseline"):
                    help="run head-signal diagnostic every N steps (default 20).")
     p.add_argument("--track-head-none-mode", choices=["b1", "predictor", "model", "content", "loss_aligned"], default="b1",
                    help="attention-to-block aggregation: b1=predictor frame+physical remap (65-node), predictor=old predictor frame no remap, loss_aligned=AR target queries to source keys.")
+    p.add_argument("--track-head-maps", action="store_true",
+                   help="dump raw per-sample all-layer/all-head block attention maps at a fixed interval; no CDL/tau/top-head metrics.")
+    p.add_argument("--track-head-map-interval", type=int, default=200,
+                   help="dump raw head maps every N optimizer steps when --track-head-maps is enabled (default 200).")
+    p.add_argument("--track-head-map-samples", type=int, default=4,
+                   help="number of fixed eval probe samples to dump per raw head-map snapshot (default 4).")
+    p.add_argument("--track-head-map-dtype", choices=["float32", "float16"], default="float32",
+                   help="dtype used for raw head-map snapshots (default float32).")
+    # --- attention trajectory logging (L0 all-head B maps at eval time) ---
+    p.add_argument("--attn-trajectory", action="store_true",
+                   help="log L0 all-head model-frame strict65 B maps at each eval step "
+                        "(fixed samples, summary metrics, W&B logging).")
+    p.add_argument("--attn-trajectory-samples", type=int, default=8,
+                   help="number of fixed eval samples for attention trajectory extraction (default 8).")
+    p.add_argument("--attn-trajectory-heatmap-interval", type=int, default=5000,
+                   help="save heatmap PNGs every N steps (default 5000).")
+    p.add_argument("--attn-composition-pairs", default="all",
+                   choices=["all", "adjacent"],
+                   help="layer pairs for candidate composition: all i<j, or adjacent only.")
     return p.parse_args()
 
 
@@ -821,7 +1005,10 @@ def main(default_run_kind="baseline"):
 
     log(f"Run kind: {args.run_kind}")
     _graph_rw_active = args.run_kind in {"graph_rw", "graph_rw_bag"}
-    _alpha_active = args.run_kind in {"graph_rw", "graph_rw_bag", "frozen_beta", "cdl_teacher"}
+    _alpha_active = args.run_kind in {
+        "graph_rw", "graph_rw_bag", "frozen_beta", "cdl_teacher",
+        "direct_policy",
+    }
     log(f"graph_rw_active: {_graph_rw_active}  alpha_active: {_alpha_active}")
     if _alpha_active:
         log(
@@ -852,16 +1039,21 @@ def main(default_run_kind="baseline"):
         log(f"Loaded resume checkpoint: {args.resume_ckpt}")
 
     clean_perm, loaded_split = load_or_create_protocol(args, output_dir, ckpt)
+    wandb_run = maybe_init_wandb(args, output_dir, clean_perm=clean_perm, log_fn=log)
 
     continuous = (args.data_source == "continuous")
     if continuous:
         # frozen_beta is allowed: its g_β hook extracts B per-batch from the model (no fixed
         # chunk pool needed) and reads no idx_train. The Graph-RW refresh/random_train paths
         # DO need the fixed pool, so graph_rw* stay excluded.
-        if args.run_kind not in {"l2r", "shuffled_l2r", "baseline", "random_continuation", "frozen_beta", "cdl_teacher"}:
+        if args.run_kind not in {
+            "l2r", "shuffled_l2r", "baseline", "random_continuation",
+            "frozen_beta", "cdl_teacher", "direct_policy",
+        }:
             raise SystemExit(
                 "--data-source continuous only supports --run-kind in "
-                "{l2r,shuffled_l2r,baseline,random_continuation,frozen_beta} (the Graph-RW refresh/random_train "
+                "{l2r,shuffled_l2r,baseline,random_continuation,frozen_beta,"
+                "cdl_teacher,direct_policy} (the Graph-RW refresh/random_train "
                 "paths need the fixed chunk pool); got "
                 f"{args.run_kind!r}.")
         if args.refresh_interval > 0:
@@ -922,7 +1114,7 @@ def main(default_run_kind="baseline"):
 
     if ckpt is None:
         model_args = clean_model_args(args)
-        model = build_model(model_args, device)
+        model = build_model(model_args, device, compile_model=bool(args.compile_model))
         start_step = 0
         train_losses = []
     else:
@@ -932,7 +1124,8 @@ def main(default_run_kind="baseline"):
         if state_dict is None:
             raise KeyError("resume checkpoint lacks model/model_state_dict")
         model.load_state_dict(clean_state_dict(state_dict))
-        model = torch.compile(model, mode="reduce-overhead")
+        if args.compile_model:
+            model = torch.compile(model, mode="reduce-overhead")
         start_step = int(ckpt.get("global_step", ckpt.get("iter_num", 0)))
         train_losses = list(ckpt.get("train_losses", []))
 
@@ -1094,6 +1287,7 @@ def main(default_run_kind="baseline"):
                 "val_unstructured_order",
                 "val_rw_order",
                 "val_beta_order",
+                "val_direct_order",
                 "val_cdl_order",
                 "lr",
             ])
@@ -1104,12 +1298,16 @@ def main(default_run_kind="baseline"):
     last_metrics = {}
     next_refresh_step = start_step + args.refresh_interval if args.refresh_interval > 0 else None
 
+    attn_traj_logger = None  # initialised below if --attn-trajectory
+
     def run_eval_and_save(global_step, avg_loss, lr, alpha):
         nonlocal last_metrics
         log(f"[Eval @ {global_step}] alpha={alpha:.4f}")
         metrics = evaluate_orders(
             model, idx_eval_model, clean_perm, B, rw_policy, rw_params, args, alpha,
-            rw_mlp=rw_mlp, beta_provider=beta_provider, cdl_provider=cdl_provider,
+            rw_mlp=rw_mlp, beta_provider=beta_provider,
+            cdl_provider=cdl_provider, direct_provider=direct_provider,
+            eval_step=global_step,
         )
         last_metrics = metrics
         with eval_curve_path.open("a", newline="") as f:
@@ -1125,11 +1323,13 @@ def main(default_run_kind="baseline"):
                 f"{metrics['val_unstructured_order']['loss_token_avg']:.6f}",
                 f"{metrics['val_rw_order']['loss_token_avg']:.6f}",
                 f"{metrics.get('val_beta_order', {}).get('loss_token_avg', float('nan')):.6f}",
+                f"{metrics.get('val_direct_order', {}).get('loss_token_avg', float('nan')):.6f}",
                 f"{metrics.get('val_cdl_order', {}).get('loss_token_avg', float('nan')):.6f}",
                 f"{lr:.8e}",
             ]
             writer.writerow(row)
         beta_str = f"beta={metrics['val_beta_order']['loss_token_avg']:.4f} | " if "val_beta_order" in metrics else ""
+        direct_str = f"direct={metrics['val_direct_order']['loss_token_avg']:.4f} | " if "val_direct_order" in metrics else ""
         cdl_str = f"cdl={metrics['val_cdl_order']['loss_token_avg']:.4f} | " if "val_cdl_order" in metrics else ""
         log(
             f"[Eval @ {global_step}] train_obj={metrics['val_train_objective']['loss_token_avg']:.4f} | "
@@ -1137,9 +1337,25 @@ def main(default_run_kind="baseline"):
             f"model_order={metrics['val_model_order']['loss_token_avg']:.4f} | "
             f"unstructured={metrics['val_unstructured_order']['loss_token_avg']:.4f} | "
             f"{beta_str}"
+            f"{direct_str}"
             f"{cdl_str}"
             f"rw={metrics['val_rw_order']['loss_token_avg']:.4f}"
         )
+        if wandb_run is not None:
+            wandb_run.log(
+                wandb_eval_payload(global_step, metrics, avg_loss, alpha, lr),
+                step=int(global_step),
+            )
+
+        # ── attention trajectory snapshot (L0 all-head B maps) ──
+        if attn_traj_logger is not None:
+            try:
+                attn_traj_logger.log_snapshot(
+                    model, idx_eval_model, global_step,
+                    clean_perm, device,
+                )
+            except Exception as exc:
+                log(f"[attn_trajectory] WARNING: snapshot @ step {global_step} failed: {exc}")
 
         # ── per-head CDL signal tracking (diagnostic) ──
         if args.track_head is not None:
@@ -1162,6 +1378,25 @@ def main(default_run_kind="baseline"):
         head_signal_all_path.write_text(
             "step\tnone_mode\tlayer\thead\ttau_vs_l2r\tmean_pairwise_tau\tunique_sigma\trow_conc_mean\telapsed_s\n"
         )
+    head_maps_raw_dir = None
+    if args.track_head_maps:
+        if int(args.track_head_map_interval) < 1:
+            raise ValueError("--track-head-map-interval must be >= 1")
+        if int(args.track_head_map_samples) < 1:
+            raise ValueError("--track-head-map-samples must be >= 1")
+        head_maps_raw_dir = output_dir / "head_maps_raw"
+        head_maps_raw_dir.mkdir(parents=True, exist_ok=True)
+        (head_maps_raw_dir / "config.json").write_text(json.dumps({
+            "format": "npz",
+            "array": "head_maps",
+            "shape": ["sample", "layer", "head", "block_query", "block_key"],
+            "none_mode": args.track_head_none_mode,
+            "interval": int(args.track_head_map_interval),
+            "samples": int(args.track_head_map_samples),
+            "dtype": args.track_head_map_dtype,
+            "probe_policy": "fixed eval windows and fixed probe orders across snapshots",
+            "metrics": "none",
+        }, indent=2) + "\n")
 
     @torch.no_grad()
     def _track_head_signal(model, global_step):
@@ -1376,6 +1611,86 @@ def main(default_run_kind="baseline"):
 
         model.train()
 
+    @torch.no_grad()
+    def _track_head_maps_raw(model, global_step):
+        from per_head_order_scan import (
+            _attn_to_A_block_b1_vec,
+            _attn_to_A_block_loss_aligned_content_vec,
+            _attn_to_A_block_predictor_vec,
+            _attn_to_A_block_model_vec,
+            _attn_to_A_block_content_vec,
+        )
+        from batch_readout.hook_order_provider import random_probe_token_orders
+        import time as _time
+
+        assert head_maps_raw_dir is not None
+        t0 = _time.time()
+        device = next(model.parameters()).device
+        inv_perm = clean_perm.inv_perm_model_to_phys.cpu().numpy()
+        none_mode = str(args.track_head_none_mode)
+        n_avail = len(idx_eval_model)
+        n_samples = min(int(args.track_head_map_samples), n_avail)
+        if n_samples <= 0:
+            log(f"[HeadMapsRaw {none_mode}] skipped: no eval windows available")
+            return
+
+        # Keep probes fixed across snapshots so step-to-step differences are model changes.
+        rng = np.random.default_rng(int(args.seed) * 10000 + 4242)
+        probe_idx = rng.choice(n_avail, size=n_samples, replace=False)
+        probe_chunks = idx_eval_model[probe_idx].to(device)
+        probe_orders = random_probe_token_orders(n_samples, args.seed, 0, device)
+
+        was_training = model.training
+        model.eval()
+        _, _, attn_list = model.forward_fn(probe_chunks, probe_orders, return_attentions=True)
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        attn_stack = torch.stack(attn_list).cpu().numpy()  # (L, B, H, T+1, T+1)
+        probe_orders_np = probe_orders.cpu().numpy().astype(np.int64)
+
+        maps = []
+        for bi in range(attn_stack.shape[1]):
+            sample = np.transpose(attn_stack[:, bi], (0, 1, 2, 3))  # (L,H,T+1,T+1)
+            if none_mode == "predictor":
+                head_maps = _attn_to_A_block_predictor_vec(sample, probe_orders_np[bi], inv_perm)
+            elif none_mode == "b1":
+                head_maps = _attn_to_A_block_b1_vec(sample, probe_orders_np[bi], inv_perm)
+            elif none_mode == "model":
+                head_maps = _attn_to_A_block_model_vec(sample, probe_orders_np[bi], inv_perm)
+            elif none_mode == "content":
+                head_maps = _attn_to_A_block_content_vec(sample, probe_orders_np[bi], inv_perm)
+            elif none_mode == "loss_aligned":
+                head_maps = _attn_to_A_block_loss_aligned_content_vec(sample, probe_orders_np[bi], inv_perm)
+            else:
+                raise ValueError(f"unknown --track-head-none-mode={none_mode!r}")
+            maps.append(head_maps)
+
+        dtype = np.float16 if args.track_head_map_dtype == "float16" else np.float32
+        head_maps = np.stack(maps, axis=0).astype(dtype, copy=False)
+        meta = {
+            "step": int(global_step),
+            "none_mode": none_mode,
+            "shape": list(head_maps.shape),
+            "axis": ["sample", "layer", "head", "block_query", "block_key"],
+            "dtype": str(head_maps.dtype),
+            "probe_idx_kind": "indices_into_idx_eval_model",
+            "probe_seed": int(args.seed) * 10000 + 4242,
+            "probe_order_step": 0,
+            "metrics": "none",
+        }
+        path = head_maps_raw_dir / f"head_maps_step{int(global_step):06d}.npz"
+        np.savez_compressed(
+            path,
+            head_maps=head_maps,
+            probe_idx=probe_idx.astype(np.int64),
+            probe_orders=probe_orders_np,
+            meta_json=np.array(json.dumps(meta)),
+        )
+        elapsed = _time.time() - t0
+        log(f"[HeadMapsRaw {none_mode}] saved {path} shape={tuple(head_maps.shape)} ({elapsed:.1f}s)")
+        if was_training:
+            model.train()
+
     def save_ckpt(global_step, metrics):
         path = output_dir / f"ckpt_step{global_step}.pt"
         payload = checkpoint_payload(
@@ -1387,6 +1702,7 @@ def main(default_run_kind="baseline"):
 
     beta_provider = None
     cdl_provider = None
+    direct_provider = None
 
     if start_step == 0 and 0 in save_steps:
         lr0 = get_lr(0, args)
@@ -1396,7 +1712,23 @@ def main(default_run_kind="baseline"):
     if args.run_kind == "frozen_beta":
         if not args.frozen_beta_ckpt:
             raise ValueError("run-kind=frozen_beta requires --frozen-beta-ckpt")
-        if args.gbeta_input_mode == "layer_heads":
+        if args.gbeta_input_mode == "all_layers":
+            # All-layer head-gated: extract ALL heads from ALL layers, gate across L*H heads
+            from batch_readout.hook_order_provider import AllLayerHeadGatedHookOrderProvider
+            beta_provider = AllLayerHeadGatedHookOrderProvider(
+                g_beta_ckpt=args.frozen_beta_ckpt,
+                clean_perm=clean_perm, refresh_every=args.frozen_beta_refresh,
+                topk=args.gbeta_topk,
+                mode=args.frozen_beta_mode, tau=args.frozen_beta_tau,
+                seed=args.seed, device=str(device), none_mode=args.frozen_beta_none_mode,
+                reverse=args.frozen_beta_rev,
+            )
+            log(f"[frozen_beta all-layers] g_β={args.frozen_beta_ckpt} "
+                f"all_layers topk={args.gbeta_topk} "
+                f"none_mode={args.frozen_beta_none_mode} "
+                f"mode={args.frozen_beta_mode} rev={args.frozen_beta_rev} "
+                f"refresh_every={args.frozen_beta_refresh}")
+        elif args.gbeta_input_mode == "layer_heads":
             # Head-gated: extract ALL heads from one layer, apply learned gate
             from batch_readout.hook_order_provider import HeadGatedHookOrderProvider
             beta_provider = HeadGatedHookOrderProvider(
@@ -1405,11 +1737,32 @@ def main(default_run_kind="baseline"):
                 topk=args.gbeta_topk,
                 mode=args.frozen_beta_mode, tau=args.frozen_beta_tau,
                 seed=args.seed, device=str(device), none_mode=args.frozen_beta_none_mode,
+                reverse=args.frozen_beta_rev,
             )
             log(f"[frozen_beta head-gated] g_β={args.frozen_beta_ckpt} "
                 f"layer=L{args.gbeta_layer} topk={args.gbeta_topk} "
                 f"none_mode={args.frozen_beta_none_mode} "
-                f"mode={args.frozen_beta_mode} refresh_every={args.frozen_beta_refresh}")
+                f"mode={args.frozen_beta_mode} rev={args.frozen_beta_rev} "
+                f"refresh_every={args.frozen_beta_refresh}")
+        elif args.batch_mean_probes > 1:
+            # Model-frame batch-mean path: strict65 extraction, mean B over N
+            # probe forwards, multi-head g_beta — fully label-free (L0-only).
+            from batch_readout.frozen_gbeta_hook import FrozenGBetaModelFrameBlockProvider
+            beta_provider = FrozenGBetaModelFrameBlockProvider(
+                g_beta_ckpt=args.frozen_beta_ckpt,
+                batch_mean_probes=args.batch_mean_probes,
+                refresh_every=args.frozen_beta_refresh,
+                seed=args.seed, device=str(device),
+            )
+            if args.frozen_beta_none_mode not in ("model", "content"):
+                log(f"[frozen_beta model-frame] WARNING: none_mode={args.frozen_beta_none_mode} "
+                    f"→ forcing to 'model' for batch_mean_probes path")
+            args.frozen_beta_none_mode = "model"
+            log(f"[frozen_beta model-frame batch_mean] g_β={args.frozen_beta_ckpt} "
+                f"batch_mean_probes={args.batch_mean_probes} "
+                f"none_mode={args.frozen_beta_none_mode} "
+                f"mode={args.frozen_beta_mode} rev={args.frozen_beta_rev} "
+                f"refresh_every={args.frozen_beta_refresh} (label-free, strict65)")
         else:
             # Single-head: existing behaviour
             from batch_readout.hook_order_provider import HookOrderProvider
@@ -1418,10 +1771,12 @@ def main(default_run_kind="baseline"):
                 clean_perm=clean_perm, refresh_every=args.frozen_beta_refresh,
                 mode=args.frozen_beta_mode, tau=args.frozen_beta_tau,
                 seed=args.seed, device=str(device), none_mode=args.frozen_beta_none_mode,
+                reverse=args.frozen_beta_rev,
             )
             log(f"[frozen_beta] g_β={args.frozen_beta_ckpt} head=L{args.frozen_beta_head[0]}H{args.frozen_beta_head[1]} "
                 f"none_mode={args.frozen_beta_none_mode} "
-                f"mode={args.frozen_beta_mode} refresh_every={args.frozen_beta_refresh}")
+                f"mode={args.frozen_beta_mode} rev={args.frozen_beta_rev} "
+                f"refresh_every={args.frozen_beta_refresh}")
     if args.run_kind == "cdl_teacher":
         from batch_readout.cdl_order_provider import CdlOrderProvider
         cdl_provider = CdlOrderProvider(
@@ -1434,6 +1789,73 @@ def main(default_run_kind="baseline"):
         log(f"[cdl_teacher] C-D+L teacher head=L{args.cdl_teacher_head[0]}H{args.cdl_teacher_head[1]} "
             f"none_mode={args.cdl_teacher_none_mode} rev={getattr(args, 'cdl_teacher_rev', False)} "
             f"refresh_every={args.cdl_teacher_refresh} tau_T={args.cdl_teacher_tau}")
+    if args.run_kind == "direct_policy":
+        from batch_readout.direct_order_provider import (
+            DirectModelFrameOrderProvider,
+        )
+        direct_provider = DirectModelFrameOrderProvider(
+            policy=args.direct_policy,
+            lambda_dep=args.direct_policy_lambda_dep,
+            batch_mean_probes=args.batch_mean_probes,
+            refresh_every=args.direct_policy_refresh,
+            seed=args.seed,
+            device=str(device),
+        )
+        audit = direct_policy_audit_metadata(args)
+        log(
+            "[direct_policy] "
+            f"policy={audit['policy']} | "
+            f"matrix={audit['matrix_convention']} | "
+            f"frame={audit['frame']} | "
+            f"layer_heads={audit['layer_heads']} | "
+            f"probe_aggregation={audit['probe_aggregation']} | "
+            f"head_fusion={audit['head_fusion']} | "
+            f"diagonal={audit['diagonal_handling']} | "
+            f"order={audit['order_direction']} | "
+            f"lambda_dep={audit['lambda_dep']} | "
+            f"refresh_every={audit['refresh_every']}"
+        )
+
+    # ── attention trajectory logger (L0 all-head B maps at eval time) ──
+    if args.attn_trajectory:
+        from attention_trajectory import AttentionTrajectoryLogger, phys_perm_from_clean_perm  # noqa: E402 (lazy import to avoid circular deps)
+        phys_perm_arr = phys_perm_from_clean_perm(clean_perm)
+        traj_output = output_dir / "attention_trajectory"
+        attn_extra_meta = {
+            "order_policy": args.run_kind,
+            "start_ckpt": str(args.resume_ckpt) if args.resume_ckpt else "none",
+            "start_step": int(start_step),
+            "max_steps": int(args.max_steps),
+            "seed": int(args.seed),
+            "eval_indices_hash": sha256_int_array(split["eval_indices"]),
+            "data_source": str(args.data_source),
+            "device": str(args.device),
+            "wandb_run_name": args.wandb_run_name if args.wandb_run_name else str(output_dir.name),
+        }
+        n_layer = model.config.n_layer
+        if args.attn_composition_pairs == "adjacent":
+            comp_pairs = [(i, i + 1) for i in range(n_layer - 1)]
+        else:
+            comp_pairs = [(i, j) for i in range(n_layer) for j in range(i + 1, n_layer)]
+        attn_traj_logger = AttentionTrajectoryLogger(
+            output_root=traj_output,
+            run_name=output_dir.name,
+            n_attention_samples=args.attn_trajectory_samples,
+            wandb_run=wandb_run,
+            phys_perm=phys_perm_arr,
+            heatmap_interval=args.attn_trajectory_heatmap_interval,
+            heatmap_png_interval=args.attn_trajectory_heatmap_interval,
+            seed=args.seed,
+            extra_metadata=attn_extra_meta,
+            composition_pairs=comp_pairs,
+        )
+        attn_traj_logger.set_log_fn(log)
+        log(f"[attn_trajectory] enabled — {args.attn_trajectory_samples} fixed samples, "
+            f"heatmap every {args.attn_trajectory_heatmap_interval} steps, "
+            f"output={traj_output}")
+
+    if args.track_head_maps and start_step % int(args.track_head_map_interval) == 0:
+        _track_head_maps_raw(model, start_step)
 
     for global_step in range(start_step, args.max_steps):
         alpha = alpha_for_step(global_step, start_step, args)
@@ -1492,6 +1914,43 @@ def main(default_run_kind="baseline"):
                         loss = order_loss(model, idx_batch, mixed, clean_perm, device)
                     else:
                         loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
+                elif args.run_kind == "direct_policy":
+                    if alpha > 0.0:
+                        sigma_model = direct_provider.physical_order(
+                            model, idx_batch, global_step
+                        ).to(device)
+                        sigma_phys = model_blocks_to_physical_blocks(
+                            sigma_model, clean_perm
+                        )
+                        phys = sigma_phys.unsqueeze(0).expand(
+                            args.batch_size, -1
+                        )
+                        choose_rng = torch.Generator(device=device)
+                        choose_rng.manual_seed(
+                            args.seed * 100000000
+                            + global_step * 1000
+                            + micro_step
+                        )
+                        use_direct = (
+                            torch.rand(
+                                args.batch_size,
+                                generator=choose_rng,
+                                device=device,
+                            )
+                            < alpha
+                        )
+                        mixed = torch.where(
+                            use_direct.unsqueeze(1),
+                            phys,
+                            random_phys,
+                        )
+                        loss = order_loss(
+                            model, idx_batch, mixed, clean_perm, device
+                        )
+                    else:
+                        loss = order_loss(
+                            model, idx_batch, random_phys, clean_perm, device
+                        )
                 elif args.run_kind == "l2r":
                     l2r = torch.arange(N, dtype=torch.long, device=device).unsqueeze(0).expand(args.batch_size, -1)
                     loss = order_loss(model, idx_batch, l2r, clean_perm, device)
@@ -1550,6 +2009,8 @@ def main(default_run_kind="baseline"):
             _track_head_signal(model, next_step)
         if args.track_all_heads and next_step % args.track_head_interval == 0:
             _track_all_heads_signal(model, next_step)
+        if args.track_head_maps and next_step % int(args.track_head_map_interval) == 0:
+            _track_head_maps_raw(model, next_step)
 
         if global_step % args.log_interval == 0:
             now = time.time()
@@ -1564,6 +2025,11 @@ def main(default_run_kind="baseline"):
                 f"loss={avg_loss:.4f} | alpha={alpha:.3f} | lr={lr:.2e} | "
                 f"{s_per_step:.2f}s/step | ETA {eta_str} | total {elapsed:.0f}s"
             )
+            if wandb_run is not None:
+                wandb_run.log(
+                    wandb_train_payload(next_step, avg_loss, alpha, lr),
+                    step=int(next_step),
+                )
             last_log_time = now
 
         if next_step % args.eval_interval == 0 or next_step in save_steps or next_step == args.max_steps:
@@ -1617,6 +2083,11 @@ def main(default_run_kind="baseline"):
         if next_step in save_steps or next_step == args.max_steps:
             save_ckpt(next_step, metrics)
 
+    if wandb_run is not None:
+        wandb_run.finish()
+    if attn_traj_logger is not None:
+        attn_traj_logger.flush_summary_log()
+        log(f"[attn_trajectory] trajectory summary written to {attn_traj_logger.output_root}")
     log(f"Done. eval_curve={eval_curve_path}")
 
 
