@@ -26,11 +26,16 @@ Across existing 5k/10k random-baseline checkpoints (multiseed carrier scans):
 
 - Strong-pass carrier heads are mostly L0/L1; head identity drifts across seeds.
 - In *aggregate* the 5k→10k shift is L1→L0 (signal concentrating into L0), the
-  opposite of a naive "L0→L1" story.
+  opposite of a naive "L0→L1" story — **but this is based on binary strong-pass
+  counts over sparse (2-step) checkpoints and must not be treated as the working
+  hypothesis.**
 - The "L0→L1" narrative is currently driven mainly by one seed (seed123_new,
   L1-only at 5k → L0+L1 at 10k).
-- This rests on only 2 steps and binary strong-pass counts — too coarse. We need
-  a dense, continuous, in-training measurement.
+
+**The primary question is therefore kept open-ended:** *does the carrier location
+move within a seed across training, or is it seed-locked from early on?* The dense,
+continuous, in-training measurement below is designed to answer that without
+presupposing a direction.
 
 ## Scope Of This Spec
 
@@ -40,13 +45,40 @@ candidate cross-layer handoff (composition) signal. Causal verification and the
 "why" (Pillars ③ path patching, ④ training-dynamics inheritance, ⑤ representation
 content) are **out of scope here** and get their own spec after the map exists.
 
-### Run configuration (locked with user)
+### Locked configuration
 
-- **3 seeds**, each trained **from step 0 to 10,000**.
-- `run_kind=baseline`, `data_source=continuous` (matches the clean random-baseline
-  trajectories already analysed).
-- **Record every 200 steps** (`--eval-interval 200` → 50 time points to 10k).
-- Online recording of: per-(layer,head) order τ **and** L0×L1 composition scores.
+```
+seeds              = [2, 42, 123]          # case-study seeds (see caveat)
+max_steps          = 10000
+record_steps       = [0, 200, 400, ..., 10000]   # 51 points incl. step 0
+eval_interval      = 200
+data_source        = continuous
+run_kind           = baseline
+order_policy       = random                # uniform random reveal order
+attn_trajectory    = true
+attn_traj_samples  = 8
+bs_mean            = 16 (final)            # fallback: dense 8 + 1000-step anchor 16
+composition_pairs  = all i<j by default; fallback adjacent-only under overhead
+composition_types  = Q, K, V
+layers             = 0,1,2,3
+heads              = 0..7
+methods            = C-D+L, L
+ckpt_save_steps    = [0, 1000, 2000, ..., 10000]  # needed for Pillars ③④⑤
+overhead_budget    = target ≤5%, hard cap ≤10% of training wall-clock
+```
+
+**Seed caveat (important):** these are *from-scratch* training seeds (values 2,
+42, 123), **not** the historical checkpoints that carried those lineage labels.
+Same seed *value*, a new trajectory under current code/data — there is no
+guarantee they reproduce the specific historical seed2/seed42/seed123 phenomena.
+We use them to map *representative trajectory modes* as per-seed case studies, not
+to estimate population-level statistics. Read the true `--seed` back from each
+saved ckpt; never trust directory names.
+
+**Record at step 0** before any optimizer update (init-artifact control), then
+every 200 steps through 10k. Checkpoints are saved at least every 1000 steps so
+later pillars (path patching, freeze/graft, probing) have the trajectory to work
+on; trajectory summaries alone are insufficient for ③④⑤.
 
 ## Five Pillars (full research arc; only ①② implemented now)
 
@@ -94,38 +126,79 @@ content) are **out of scope here** and get their own spec after the map exists.
 In `log_snapshot`, replace the L0-only extraction with a loop over all layers.
 For each layer ℓ:
 - `attn_l = attn_list[ℓ].cpu().numpy()` → `build_model_frame_strict65(attn_l, probe_orders)`
-  → batch-mean B per head (reuse `_batch_mean_B`).
+  → batch-mean B per head over **`bs_mean` probes** (reuse `_batch_mean_B`).
+  `bs_mean=16` for the final map; under overhead use dense `bs_mean=8` with a
+  `bs_mean=16` anchor every 1000 steps. **Never default to `bs_mean=4`** (it
+  decays/misjudges the old L0 signal).
 - Per head h and method m ∈ {`C-D+L`, `L`}: `build_none_separated_B` →
   `rollout_by_method` → `discovery_metrics`, record **signed `tau_vs_l2r`**,
   `phys0_rank`, `prefix8_overlap`, gate status, plus the existing locality summary.
 
-Output a per-snapshot record keyed by `(layer, head, method)` with the signed τ
-and gate fields. This is the core flow signal — kept at head granularity (no
-premature best-head collapse); best-head-per-layer is a derived view.
+Output is structured in three levels to avoid selected-head bias:
 
-### B. Composition score over training (Pillar ②)
+- **Raw:** `tau[layer, head, method, step]` (signed) + gate fields, full tensor.
+  No premature best-head collapse.
+- **Derived:** `best_head_per_layer`, `best_head_global`,
+  `strong_pass_count_per_layer`, `signed_consensus_per_layer` — all per
+  `(seed, step, method)`.
+- **Visualization:** `layer×step` heatmaps of **both `max_abs_tau` and
+  `max_signed_tau`** (keep both: anti-L2R heads reach τ=−1.0; signed-best alone
+  would miss strong reversed structure, abs alone would conflate forward/reverse),
+  plus `strong_pass_count` and per-head τ-vs-step curves.
 
-New pure module `attn_composition.py` computing weight-based composition between
-an upstream head (layer i, head a) and a downstream head (layer j>i, head b):
-- `W_OV(i,a) = W_O(i,a) @ W_V(i,a)` (writes into residual).
-- Downstream reads: `W_QK(j,b) = W_Q(j,b)^T W_K(j,b)`; also `W_OV(j,b)`.
-- **Q-composition** `‖W_QK(j,b)^T · W_OV(i,a)‖_F / (‖W_QK(j,b)‖_F ‖W_OV(i,a)‖_F)`,
-  and analogously **K-composition** and **V-composition** (Transformer-Circuits
-  definitions).
-- Record the full upstream×downstream composition matrix for adjacent layer pairs
-  (minimum L0→L1; extensible to all i<j), each snapshot.
+### B. Candidate composition score over training (Pillar ②)
 
-**Approximation caveat (documented, not hidden):** per-head RMSNorm on q/k and
-AdaLN modulation mean these are *approximate* composition scores, not exact under
-this architecture. They are a screen for candidate handoff edges; the causal
-ground truth is path patching in Pillar ③. The spec deliberately pairs the
-weight-based score with that later causal cross-check rather than over-claiming.
+New pure module `attn_composition.py` computing weight-based **candidate
+composition** (a.k.a. composition compatibility) between an upstream head
+(layer i, head a) and a downstream head (layer j>i, head b).
+
+**Shape contract (activation-space, to avoid transpose errors).** PyTorch
+`Linear.weight` is `[out, in]`; convert every head's slices into this convention
+before computing anything:
+
+```
+x_resid : [d_model]
+q = x_resid @ W_Q     # [d_head]      W_Q, W_K, W_V : [d_model, d_head]
+k = x_resid @ W_K     # [d_head]      W_O           : [d_head, d_model]
+v = x_resid @ W_V     # [d_head]
+head_out = v @ W_O    # [d_model]
+W_OV = W_V @ W_O      # [d_model, d_model]   (upstream write)
+W_QK = W_Q @ W_K.T    # [d_model, d_model]   (downstream read)
+```
+
+Scores (Transformer-Circuits definitions), each in [0,1] via Frobenius norms:
+- **Q-composition** `‖W_QK(j,b) · W_OV(i,a)‖_F / (‖W_QK(j,b)‖_F · ‖W_OV(i,a)‖_F)`
+- **K-composition** `‖W_QK(j,b).T · W_OV(i,a)‖_F / (...)`
+- **V-composition** `‖W_OV(j,b) · W_OV(i,a)‖_F / (...)`
+
+Record the full upstream×downstream composition matrix per `{Q,K,V}` for **all
+i<j layer pairs by default** (4 layers → 6 pairs × 8×8 head pairs × 3 scores;
+cheap relative to attention extraction). **Fallback under overhead: adjacent pairs
+only** (`L0→L1, L1→L2, L2→L3`) — but `L1→L2` must stay in even the fallback,
+because prior scans found L2 carriers in the old lineage. Composition is the
+*cheapest* part of a snapshot; cut it last.
+
+**Naming + caveat (documented, not hidden):** these are *candidate* composition
+scores, **not** causal handoff evidence. Per-head RMSNorm on q/k and AdaLN
+modulation make them *approximate* under this architecture. A high score only
+nominates an upstream→downstream edge whose temporal alignment with τ dynamics is
+to be tested by path patching in Pillar ③ — the weight-based score is
+deliberately paired with that later causal cross-check rather than over-claimed.
 
 ### C. Training run
 
-- Add/confirm a launcher that runs `train_clean_aogpt` with
-  `run_kind=baseline data_source=continuous --attn-trajectory --eval-interval 200
-  --max-steps 10000` for 3 seeds.
+- Launcher runs `train_clean_aogpt` per seed with `run_kind=baseline
+  order_policy=random data_source=continuous --attn-trajectory --eval-interval 200
+  --max-steps 10000`, saving ckpts every 1000 steps. (Confirm the exact flag names
+  for `order_policy`/save-steps in the plan; the intent is uniform-random reveal
+  order, not any structured policy.)
+- **Overhead calibration gate (before launching all 3 seeds):** run seed 2 to 400
+  steps, record snapshot wall-clock at step 200 and 400, extrapolate to 10k. If
+  snapshot overhead > **10%** (hard cap; target ≤ **5%**), degrade in this order:
+  (1) lower heatmap/PNG interval; (2) save raw B only every 1000 steps (keep τ
+  summary every 200); (3) `bs_mean` dense 16→8 (keep 1000-step anchor at 16);
+  (4) `attn_traj_samples` 8→4. **Do not cut composition** — it is the cheapest
+  part. The expensive part is all-layer strict65 + none-separated rollout.
 - **Seed-label integrity:** record the true `--seed` and read it back from the
   saved ckpt; never trust directory names (existing trajectories had ambiguous
   seed2/seed123 labels).
@@ -133,10 +206,12 @@ weight-based score with that later causal cross-check rather than over-claiming.
 ### Outputs
 
 Per seed:
-- `tau[layer, head, method, step]` (signed τ + gate fields), JSONL/npz.
-- `composition[layer_pair][up_head, down_head, {Q,K,V}, step]`, npz.
-- Flow heatmaps (`layer×step` best-head τ) and per-head τ-vs-step curves.
-- Composition-vs-step curves for top candidate edges.
+- `tau[layer, head, method, step]` (signed τ + gate fields), JSONL/npz — raw +
+  derived views (§A).
+- `composition[layer_pair][up_head, down_head, {Q,K,V}, step]`, npz — all i<j.
+- Flow heatmaps (`layer×step` max_abs_tau **and** max_signed_tau) + per-head
+  τ-vs-step curves; composition-vs-step curves for top candidate edges.
+- Checkpoints at `[0, 1000, ..., 10000]` retained for Pillars ③④⑤.
 
 ## Hypotheses & Decision Criteria
 
@@ -151,9 +226,9 @@ Per seed:
 ## Risks
 
 - **Composition approximation** under RMSNorm/AdaLN (above) — mitigated by Pillar ③.
-- **Overhead:** all-layer strict65 + composition every 200 steps. Keep
-  `--attn-trajectory-samples` modest (8) and confirm per-snapshot wall-clock is a
-  small fraction of a 200-step interval before committing all 3 seeds.
+- **Overhead:** all-layer strict65 + none-separated rollout every 200 steps is the
+  expensive part (composition is cheap). Gated by the calibration step in §C
+  (target ≤5%, hard cap ≤10%, with an explicit degradation ladder).
 - **Random-order nondeterminism:** the random-baseline objective is degenerate and
   same-config runs diverge (compile/no-compile ablation). 3 seeds is a floor, not a
   guarantee of a clean cross-seed law; report per-seed first, aggregate second.
