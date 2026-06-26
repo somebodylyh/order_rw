@@ -314,6 +314,7 @@ class AttentionTrajectoryLogger:
         heatmap_png_interval: int = 10000,
         seed: int = 123,
         extra_metadata: Optional[dict] = None,
+        composition_pairs: Optional[list] = None,
     ):
         self.output_root = Path(output_root)
         self.run_name = run_name
@@ -364,6 +365,8 @@ class AttentionTrajectoryLogger:
         (self.output_root / "metadata.json").write_text(
             json.dumps(meta, indent=2) + "\n"
         )
+
+        self.composition_pairs = composition_pairs or []
 
         self._log_fn = print
 
@@ -531,6 +534,32 @@ class AttentionTrajectoryLogger:
             "extraction_time_s": round(elapsed, 3),
             "head_mean_entropy": float(np.mean([d["row_entropy_mean"] for d in per_head_mean])),
             "best_head_near_diag_d1": float(max(d.get("near_diag_mass_d1", 0) for d in per_head_mean)),
+        })
+
+        # ── Per-(layer,head) τ table + candidate composition ──────────
+        from batch_readout.order_tau_readout import layer_head_tau_table, derived_views
+        from batch_readout.attn_composition import extract_layer_weights, layer_pair_composition
+
+        # batch-mean over probe samples -> (L,H,65,65)
+        B_lhn = B_all.mean(axis=1)
+        tau_tbl = layer_head_tau_table(B_lhn, methods=("C-D+L", "L"))
+        dviews = derived_views(tau_tbl)
+        np.savez(step_dir / "tau_table.npz",
+                 tau=tau_tbl["tau"], phys0_rank=tau_tbl["phys0_rank"],
+                 prefix8=tau_tbl["prefix8"], methods=np.array(tau_tbl["methods"]),
+                 bs_mean=np.int64(B_all.shape[1]))
+
+        if self.composition_pairs:
+            c_attn_ws, c_proj_ws, n_head, n_embd = extract_layer_weights(model)
+            comp = layer_pair_composition(c_attn_ws, c_proj_ws, n_head, n_embd,
+                                          self.composition_pairs)
+            np.savez(step_dir / "composition.npz",
+                     **{f"{i}_{j}": comp[(i, j)] for (i, j) in self.composition_pairs})
+
+        self._summary_log[-1].update({
+            "max_signed_tau_per_layer": dviews["max_signed_tau_per_layer"].tolist(),
+            "max_abs_tau_per_layer": dviews["max_abs_tau_per_layer"].tolist(),
+            "strong_pass_count_per_layer": dviews["strong_pass_count_per_layer"].tolist(),
         })
 
         # ── Heatmap PNG (low frequency) ───────────────────────────────
