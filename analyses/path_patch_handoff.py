@@ -251,3 +251,139 @@ def patched_l1_head_output(model, x_clean_L1, x_corr_L1, dst_head, cond, device)
     scores = (q_c[:, dst_head] @ k_c[:, dst_head].transpose(-2, -1)) * (1.0 / math.sqrt(hs))
     att = _causal_softmax(scores)
     return att @ v_clean[:, dst_head]
+
+
+# ── Task 7: Stage-2 runner (readout 2a + downstream path_fraction) ────────────
+
+def global_tau(tau_LH):
+    """Global order signal = max |tau| over all (layer, head)."""
+    return float(np.abs(tau_LH).max())
+
+
+def redundancy_ordering(means):
+    """means: {'single':x,'loo':y,'full':z}. Reports the expected single<=LOO<=full
+    trend (not a hard gate)."""
+    s, l, f = means["single"], means["loo"], means["full"]
+    return {"single": s, "loo": l, "full": f, "monotone": bool(s <= l <= f)}
+
+
+def _patched_cproj_prehook(patched_by_head, n_head):
+    """c_proj pre-hook replacing each dst head's y-slice with a precomputed patched
+    head output (corr-QK, clean-V). Other heads untouched -> path-restricted."""
+    def _hook(module, args):
+        y = args[0].clone()
+        C = y.shape[-1]
+        hs = C // n_head
+        for h, y_patch in patched_by_head.items():
+            y[:, :, h * hs:(h + 1) * hs] = y_patch
+        return (y,) + tuple(args[1:])
+    return _hook
+
+
+@torch.no_grad()
+def _run_path_restricted(model, dst_heads_L1, x_clean_L1, x_corr_L1, cond,
+                         probe_chunks, probe_orders, device):
+    """Clean forward with only L1 dst heads' outputs replaced by the corr-QK/clean-V
+    patch; propagate to L2/L3 -> tau[L,H]."""
+    n_head = model.transformer.h[1].attn.n_head
+    patched_by_head = {
+        h: patched_l1_head_output(model, x_clean_L1, x_corr_L1, h, cond, device)
+        for h in dst_heads_L1
+    }
+    handle = model.transformer.h[1].attn.c_proj.register_forward_pre_hook(
+        _patched_cproj_prehook(patched_by_head, n_head)
+    )
+    try:
+        pc = probe_chunks.to(device)
+        po = torch.from_numpy(probe_orders).to(device)
+        _, _, attn_list = model.forward_fn(pc, po, return_attentions=True)
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+    finally:
+        handle.remove()
+    return tau_table_from_attn(attn_list, probe_orders)
+
+
+def _layer_delta(tau_a, tau_b, layer):
+    """Mean |tau_a - tau_b| over a layer's heads."""
+    return float(np.abs(tau_a[layer] - tau_b[layer]).mean())
+
+
+def _path_fraction(tau_clean, tau_full, tau_path, layer_or_global,
+                   downstream_layers=(2, 3), eps=1e-9):
+    """|Delta_path| / |Delta_full| for a downstream readout. layer_or_global is an
+    int layer index or the string 'global'.
+
+    The global readout aggregates over downstream layers (mean of per-layer
+    mean-|Delta|): a max-|tau| global is pinned at ~1.0 by the robust L1 carrier and
+    is insensitive to L0 ablation, so it is NOT used here. Returns nan if
+    |Delta_full| < eps.
+    """
+    if layer_or_global == "global":
+        d_path = float(np.mean([_layer_delta(tau_path, tau_clean, L) for L in downstream_layers]))
+        d_full = float(np.mean([_layer_delta(tau_full, tau_clean, L) for L in downstream_layers]))
+    else:
+        L = layer_or_global
+        d_path = _layer_delta(tau_path, tau_clean, L)
+        d_full = _layer_delta(tau_full, tau_clean, L)
+    return float(d_path / d_full) if d_full >= eps else float("nan")
+
+
+@torch.no_grad()
+def run_stage2(model, seed, src_heads_L0, dst_heads_L1, probe_batches, device,
+               downstream_layers=(2, 3), null_src_heads=None):
+    """Stage-2: per probe batch run clean, full-L0-ablation, and path-restricted
+    L0->L1-QK forwards; report readout 2a (L1-dst Delta-tau under full L0 ablation)
+    and readout 2b (downstream/global path_fraction), plus an optional null-path
+    control (src = L0 null heads)."""
+    rows = {"clean": [], "full": [], "path": [], "path_null": []}
+    for pc, po in probe_batches:
+        # 1. clean + capture L1 input
+        h1, store_clean = capture_block_input(model, 1)
+        _, tau_clean = run_clean(model, pc, po, device)
+        h1.remove()
+        x_clean_L1, cond = store_clean["x"], store_clean["cond"]
+        # 2. full L0-source ablation + capture L1 input
+        h2, store_corr = capture_block_input(model, 1)
+        _, tau_full = run_with_ablation(model, 0, src_heads_L0, pc, po, device)
+        h2.remove()
+        x_corr_L1 = store_corr["x"]
+        # 3. path-restricted L0->L1 QK
+        tau_path = _run_path_restricted(model, dst_heads_L1, x_clean_L1, x_corr_L1,
+                                        cond, pc, po, device)
+        rows["clean"].append(tau_clean)
+        rows["full"].append(tau_full)
+        rows["path"].append(tau_path)
+        # optional null-path control
+        if null_src_heads is not None:
+            h3, store_null = capture_block_input(model, 1)
+            _, _tau_full_null = run_with_ablation(model, 0, null_src_heads, pc, po, device)
+            h3.remove()
+            x_corr_null = store_null["x"]
+            rows["path_null"].append(
+                _run_path_restricted(model, dst_heads_L1, x_clean_L1, x_corr_null,
+                                     cond, pc, po, device)
+            )
+
+    tc = np.mean(rows["clean"], axis=0)
+    tf = np.mean(rows["full"], axis=0)
+    tp = np.mean(rows["path"], axis=0)
+    dst = list(dst_heads_L1)
+    out = {
+        "seed": int(seed),
+        "src_heads_L0": list(src_heads_L0),
+        "dst_heads_L1": dst,
+        # readout 2a: L1-dst tau collapse under full L0 ablation
+        "dtau_2a_l1_dst_mean": float((tf[1, dst] - tc[1, dst]).mean()),
+        "tau_clean_l1_dst": [float(tc[1, h]) for h in dst],
+        "tau_full_l1_dst": [float(tf[1, h]) for h in dst],
+        # readout 2b: downstream path_fraction (global aggregates downstream layers)
+        "path_fraction_global": _path_fraction(tc, tf, tp, "global", downstream_layers),
+        "n_batch": len(probe_batches),
+    }
+    for L in downstream_layers:
+        out[f"path_fraction_L{L}"] = _path_fraction(tc, tf, tp, L, downstream_layers)
+    if rows["path_null"]:
+        tpn = np.mean(rows["path_null"], axis=0)
+        out["path_fraction_global_null"] = _path_fraction(tc, tf, tpn, "global", downstream_layers)
+    return out
