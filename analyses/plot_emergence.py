@@ -79,3 +79,47 @@ def plot_emergence(summary_json, concentration_csv, eval_tsv, out_dir):
     ax1.axvspan(ev["onset"], ev["completion"], color="orange", alpha=0.15)
     ax1.set_title(f"seed{seed} A3 schedule/loss — {s['schedule']['classification']}")
     fig.tight_layout(); fig.savefig(out / "schedule_overlay.png", dpi=120); plt.close(fig)
+
+
+# ── A4: carrier-B structure across the event (Pattern A sharpening / B switch) ──
+
+def carrier_b_structure(seed, winning_layer, winner_heads,
+                        ckpt_steps=(1000, 2000, 10000), root=None):
+    """Re-extract the winning layer's carrier-head B at each ckpt step; classify
+    emergence as 'sharpening' (pre-step already L2R-like, mean|τ|≥0.5) vs 'switch'.
+    """
+    from analyses.emergence_characterization import extract_carrier_B
+    from batch_readout.order_tau_readout import per_head_tau
+    root = root or "runs/handoff_overnight"
+    by_step = {}
+    for st in ckpt_steps:
+        B = extract_carrier_B(seed, st, winning_layer, root=root)   # (8,65,65)
+        heads = {}
+        for h in winner_heads:
+            info = per_head_tau(B[h], "C-D+L")
+            heads[h] = {"B": B[h], "tau": float(info["tau_vs_l2r"])}
+        by_step[st] = heads
+    earliest = min(ckpt_steps)
+    pre_mean_abs_tau = float(np.mean([abs(by_step[earliest][h]["tau"]) for h in winner_heads]))
+    pattern = "sharpening" if pre_mean_abs_tau >= 0.5 else "switch"
+    return {"seed": seed, "winning_layer": winning_layer, "winner_heads": list(winner_heads),
+            "ckpt_steps": list(ckpt_steps), "by_step": by_step,
+            "pre_mean_abs_tau": pre_mean_abs_tau, "pattern": pattern}
+
+
+def plot_carrier_b(b_struct, out_dir):
+    out = pathlib.Path(out_dir)
+    heads = b_struct["winner_heads"]
+    steps = b_struct["ckpt_steps"]
+    nrow, ncol = len(heads), len(steps)
+    fig, axes = plt.subplots(nrow, ncol, figsize=(2.4 * ncol, 2.4 * nrow), squeeze=False)
+    for r, h in enumerate(heads):
+        for c, st in enumerate(steps):
+            entry = b_struct["by_step"][st][h]
+            ax = axes[r][c]
+            ax.imshow(entry["B"], cmap="viridis", aspect="auto")
+            ax.set_title(f"H{h} @ {st}  τ={entry['tau']:.2f}", fontsize=8)
+            ax.set_xticks([]); ax.set_yticks([])
+    fig.suptitle(f"seed{b_struct['seed']} L{b_struct['winning_layer']} carrier B — "
+                 f"{b_struct['pattern']} (pre|τ|={b_struct['pre_mean_abs_tau']:.2f})", fontsize=10)
+    fig.tight_layout(); fig.savefig(out / "carrier_b_structure.png", dpi=120); plt.close(fig)
