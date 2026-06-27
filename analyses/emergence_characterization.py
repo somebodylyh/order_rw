@@ -9,6 +9,7 @@ how is the carrier layer/head set *selected*? The order signal first appears
 diffusely (all layers/heads, step 0-1200), then a short winner-take-all pruning
 event (~1200-2000) leaves a seed-specific layer-local redundant carrier.
 """
+import csv as _csv
 import glob
 import pathlib
 import sys
@@ -162,3 +163,46 @@ def winner_predictability(seed_traj, winner_dict, early_steps=(0, 200, 600, 1000
     return {"auc": auc, "spearman": spearman,
             "winning_layer_rank_by_step": layer_rank, "verdict": verdict,
             "tier": winner_dict["tier"]}
+
+
+# ── Task 4: A3 schedule/loss overlay ─────────────────────────────────────────
+
+def load_eval_curve(seed, root=TRAJ_ROOT):
+    path = f"{root}/seed{seed}/eval_curve.tsv"
+    with open(path) as f:
+        rows = list(_csv.DictReader(f, delimiter="\t"))
+
+    def col(name):
+        return np.array([float(x[name]) if x[name] not in ("", "nan") else np.nan
+                         for x in rows])
+
+    return {"step": col("step").astype(int), "lr": col("lr"),
+            "val_train_objective": col("val_train_objective"),
+            "val_model_order": col("val_model_order")}
+
+
+def schedule_loss_overlay(eval_curve, event, lr_rel_eps=0.02, loss_rel_eps=0.15):
+    """Overlay pruning window against LR + loss. Correlational only: classify as
+    aligns-with-LR / aligns-with-loss-transition / intrinsic (no alignment)."""
+    s = eval_curve["step"]
+    win = (s >= event["onset"]) & (s <= event["completion"])
+    lr = eval_curve["lr"]
+    lrw = lr[win]
+    lr_range = float((lrw.max() - lrw.min()) / (np.nanmean(lr) + 1e-12))
+    loss = eval_curve["val_train_objective"]
+    full_drop = np.nanmax(loss) - np.nanmin(loss) + 1e-12
+    win_drop_frac = float((np.nanmax(loss[win]) - np.nanmin(loss[win])) / full_drop)
+    # Excess loss-drop rate: window's share of the total drop vs its share of steps.
+    # A smooth (linear) decline gives ~1; a transition concentrated in the window
+    # gives >> 1. This avoids flagging a wide window that simply covers most of
+    # the curve.
+    step_frac = float(win.sum()) / float(len(s))
+    excess = win_drop_frac / (step_frac + 1e-12)
+    if lr_range > lr_rel_eps:
+        cls = "aligns-with-LR"
+    elif excess > 1.0 + loss_rel_eps:
+        cls = "aligns-with-loss-transition"
+    else:
+        cls = "intrinsic (no alignment)"
+    return {"lr_range_in_window": lr_range, "loss_drop_frac_in_window": win_drop_frac,
+            "loss_drop_excess_rate": excess, "classification": cls}
