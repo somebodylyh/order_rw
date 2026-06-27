@@ -1,0 +1,68 @@
+{
+  "seed": 123,
+  "winner": {
+    "winning_layer": 1,
+    "winner_heads": [
+      0,
+      5,
+      6,
+      7
+    ],
+    "tier": "strong"
+  },
+  "event": {
+    "onset": 800,
+    "midpoint": 1400,
+    "completion": 1600
+  },
+  "predictability": {
+    "auc": {
+      "0": 0.3125,
+      "200": 0.625,
+      "600": 0.625,
+      "1000": 0.5
+    },
+    "spearman": {
+      "0": -0.14285714285713946,
+      "200": 0.11904761904761621,
+      "600": 0.21428571428570917,
+      "1000": 0.14285714285713946
+    },
+    "winning_layer_rank_by_step": {
+      "0": 3,
+      "200": 3,
+      "600": 1,
+      "1000": 1
+    },
+    "verdict": "contingent",
+    "tier": "strong"
+  },
+  "schedule": {
+    "lr_range_in_window": 0.0017536376255827867,
+    "loss_drop_frac_in_window": 0.06567679163620453,
+    "loss_drop_excess_rate": 0.6699032746824531,
+    "classification": "intrinsic (no alignment)"
+  },
+  "A4_pattern": "sharpening",
+  "A4_pre_mean_abs_tau": 0.9508928571428571,
+  "A4_tau_by_step": {
+    "1000": {
+      "0": 0.945,
+      "5": 0.969,
+      "6": 0.943,
+      "7": 0.945
+    },
+    "2000": {
+      "0": 0.97,
+      "5": 0.678,
+      "6": 0.798,
+      "7": 0.407
+    },
+    "10000": {
+      "0": 0.936,
+      "5": 1.0,
+      "6": 1.0,
+      "7": 1.0
+    }
+  }
+}
