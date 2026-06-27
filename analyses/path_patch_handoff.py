@@ -69,3 +69,47 @@ def run_clean(model, probe_chunks, probe_orders, device):
     if device.type == "cuda":
         torch.cuda.synchronize(device)
     return attn_list, tau_table_from_attn(attn_list, probe_orders)
+
+
+# ── Task 3: mean-ablation hook (forward_pre_hook on attn.c_proj) ──────────────
+
+def mean_ablation_prehook(head_indices, n_head):
+    """forward_pre_hook(module, args) replacing target heads' columns of y
+    (c_proj input, shape (B,T,C)) with their position-wise batch mean.
+
+    Only the batch dim is averaged; the token/block (position) dim is preserved.
+    Empty head set -> returns None (a true no-op, bit-identical).
+    """
+    heads = list(head_indices)
+
+    def _hook(module, args):
+        if not heads:
+            return None
+        y = args[0]
+        B, T, C = y.shape
+        hs = C // n_head
+        y = y.clone()
+        for h in heads:
+            sl = slice(h * hs, (h + 1) * hs)
+            y[:, :, sl] = y[:, :, sl].mean(dim=0, keepdim=True)  # position-wise batch mean
+        return (y,) + tuple(args[1:])
+
+    return _hook
+
+
+@torch.no_grad()
+def run_with_ablation(model, layer, head_indices, probe_chunks, probe_orders, device):
+    """Forward with target heads mean-ablated at `layer` -> (attn_list, tau[L,H])."""
+    n_head = model.transformer.h[layer].attn.n_head
+    handle = model.transformer.h[layer].attn.c_proj.register_forward_pre_hook(
+        mean_ablation_prehook(head_indices, n_head)
+    )
+    try:
+        pc = probe_chunks.to(device)
+        po = torch.from_numpy(probe_orders).to(device)
+        _, _, attn_list = model.forward_fn(pc, po, return_attentions=True)
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+    finally:
+        handle.remove()
+    return attn_list, tau_table_from_attn(attn_list, probe_orders)
