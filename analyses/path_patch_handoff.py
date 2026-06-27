@@ -11,11 +11,13 @@ so the order signal lives in the attention map (model-frame B -> tau_vs_l2r), no
 the loss. tau is built from att = softmax(q.k^T), which depends only on q,k.
 """
 import csv as _csv
+import math
 import pathlib
 import sys
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 # Make block_lo_arm_order_network modules importable regardless of CWD.
 _BLOCK_DIR = pathlib.Path(__file__).resolve().parents[1] / "block_lo_arm_order_network"
@@ -25,6 +27,7 @@ if str(_BLOCK_DIR) not in sys.path:
 from attention_trajectory import extract_all_layer_B  # noqa: E402
 from batch_readout.order_tau_readout import layer_head_tau_table  # noqa: E402
 from neural_readout.extract_b import _load_model_and_chunks  # noqa: E402
+from model_AOGPT_AdaLN6_NoRep_cond_128_trunc_qknorm import modulate  # noqa: E402
 
 
 # ── Task 2: probe loader + tau-readout wrapper ────────────────────────────────
@@ -184,3 +187,67 @@ def write_stage1_table(rows, out_csv):
         w.writeheader()
         for r in rows:
             w.writerow(r)
+
+
+# ── Task 6: path-restricted L0->L1 QK patch helpers ──────────────────────────
+
+def capture_block_input(model, layer):
+    """Pre-hook recording the residual `x` and conditioning `c` entering a block.
+
+    Block.forward is called positionally as block(x, cond, return_attn=...), so
+    args = (x, cond). Returns (handle, store) where store['x'], store['cond'] are
+    filled after a forward pass; remove the handle when done.
+    """
+    store = {}
+    blk = model.transformer.h[layer]
+
+    def _pre(module, args, kwargs):
+        store["x"] = args[0].detach().clone()
+        store["cond"] = args[1].detach().clone()
+        return None
+
+    handle = blk.register_forward_pre_hook(_pre, with_kwargs=True)
+    return handle, store
+
+
+def _l1_qkv_from_residual(model, x_resid, cond):
+    """Recompute L1's per-head q,k,v from a residual (applies ln_1 + AdaLN msa
+    modulation -> c_attn -> head split -> q_norm/k_norm). Returns q,k,v,(hs)."""
+    blk = model.transformer.h[1]
+    attn = blk.attn
+    shift, scale, *_ = blk.adaLN(cond).chunk(6, dim=-1)  # shift_msa, scale_msa, ...
+    xn = modulate(blk.ln_1(x_resid), shift, scale)
+    B, T, C = xn.shape
+    nh = attn.n_head
+    hs = C // nh
+    q, k, v = attn.c_attn(xn).split(C, dim=2)
+    q = q.view(B, T, nh, hs).transpose(1, 2)
+    k = k.view(B, T, nh, hs).transpose(1, 2)
+    v = v.view(B, T, nh, hs).transpose(1, 2)
+    q, k = attn.q_norm(q), attn.k_norm(k)
+    return q, k, v, hs
+
+
+def _causal_softmax(scores):
+    """scores (B,T,T) -> causal softmax att (B,T,T)."""
+    T = scores.size(-1)
+    causal = torch.tril(torch.ones(T, T, dtype=torch.bool, device=scores.device))
+    scores = scores.masked_fill(~causal.view(1, T, T), float("-inf"))
+    return F.softmax(scores, dim=-1)
+
+
+def l1_attn_from_residual(model, x_resid, cond, dst_head, device):
+    """L1 destination head's attention map (B,T,T) recomputed from a residual."""
+    q, k, _v, hs = _l1_qkv_from_residual(model, x_resid, cond)
+    scores = (q[:, dst_head] @ k[:, dst_head].transpose(-2, -1)) * (1.0 / math.sqrt(hs))
+    return _causal_softmax(scores)
+
+
+def patched_l1_head_output(model, x_clean_L1, x_corr_L1, dst_head, cond, device):
+    """Path-restricted patch: Q/K from the corrupted residual, V from the CLEAN
+    residual -> att @ v for the destination head. Returns (B,T,hs)."""
+    q_c, k_c, _vc, hs = _l1_qkv_from_residual(model, x_corr_L1, cond)
+    _qc2, _kc2, v_clean, _hs2 = _l1_qkv_from_residual(model, x_clean_L1, cond)
+    scores = (q_c[:, dst_head] @ k_c[:, dst_head].transpose(-2, -1)) * (1.0 / math.sqrt(hs))
+    att = _causal_softmax(scores)
+    return att @ v_clean[:, dst_head]
