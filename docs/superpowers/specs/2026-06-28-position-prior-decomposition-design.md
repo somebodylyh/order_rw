@@ -55,14 +55,30 @@ interact; the floors are different *kinds* of baselines).
 | **synthetic uniform-causal attention** | pure mask+readout theoretical floor: `att[i,j]=1/(i+1)` for `j≤i`, fed through `build_model_frame_strict65 → C-D+L rollout` |
 | **real step-0 zero-both-PE** | real architecture floor: the actual step-0 model with `wpe` *and* `wtpe` zeroed (random QK geometry + RMSNorm/qk-norm + causal mask, learned positional conditioning removed) |
 
+**Mask-convention requirement:** the synthetic uniform-causal baseline **must match the
+model's actual causal mask convention**, especially whether the diagonal/self edge
+(`j=i`) is allowed. The plan's first step verifies the model's mask (the formula above
+includes the diagonal); if the model forbids self-attention the synthetic must too,
+else the floor is biased.
+
 ### 1B — PE contribution (4 arms, hook-based)
 
 At `ckpt_step0`, run forward with: **full / zero-wpe / zero-wtpe / zero-both**. Zeroing
 is via a reversible `forward_hook` (or context manager) on the `wpe`/`wtpe` embedding
 modules returning zeros — **never a permanent parameter edit**; a bit-identical restore
 test guards it. Read per-(layer,head) τ, especially the eventual carrier-candidate
-heads. Report deltas (`full − zero_wpe`, `full − zero_wtpe`, `full − zero_both`), not an
-additive split.
+heads.
+
+**wpe and wtpe are semantically distinct and reported separately:**
+- `wpe` = **token-side** slot positional embedding (tells each token which model slot it
+  occupies);
+- `wtpe` = **target/AdaLN-conditioning** slot embedding (tells the block which slot is
+  being predicted).
+
+Report columns `τ_full, τ_zero_wpe, τ_zero_wtpe, τ_zero_both, Δ_wpe=full−zero_wpe,
+Δ_wtpe=full−zero_wtpe, Δ_both=full−zero_both` — **`Δ_wpe + Δ_wtpe ≠ Δ_both` (not
+additive).** If `Δ_wpe` is small but `Δ_wtpe` large, the conclusion is not "PE is
+useless" but **"the slot prior comes mainly from target-position conditioning."**
 
 **Optional robustness arm (only if zeroing causes a scale/OOD artifact):**
 `permute_wpe_indices` / `permute_wtpe_indices` (shuffle which slot gets which PE — keeps
@@ -86,9 +102,13 @@ floor)` vs `τ_random_B (null)`; `full − zero_both` = learned PE/target-PE con
 
 **1C-1 (main, no forward change):** from the *same* forward/B, evaluate the rolled-out
 order in two frames — `τ_model_slot = τ(σ_model, arange)` and
-`τ_physical = τ(inv_perm[σ_model], arange)`. **Expected: `τ_model_slot` high,
-`τ_physical` low/near-random** — the clean proof that the step-0 prior is **model-slot**
-order, not physical/content order.
+`τ_physical = τ(inv_perm[σ_model], arange)`. Also report the
+**permutation-only baseline** `τ_perm_baseline = τ(training_inv_perm[arange(N)],
+arange(N))` (the τ induced by the fixed CleanPermutation alone). **Expected:
+`τ_model_slot ≫ τ_physical`, and `τ_physical ≈ τ_perm_baseline`** (i.e. when
+`σ_model ≈ arange`, the physical-frame τ is explained by the permutation itself, *not* by
+learned physical-order recovery). The key claim is the inequality, **not** that
+`τ_physical = 0`.
 
 **1C-2 (optional):** probe_orders robustness — identity vs random probe_orders;
 explicitly a *probe-order* robustness check, not the frame sanity. Off the main line.
@@ -126,6 +146,15 @@ Rollout gives the model-slot order `σ_k_model`; `σ_k_phys = inv_perm_k[σ_k_mo
 - **anchor + drop (always reported):** `τ` at `layout_0`, `relayout_mean τ`, and
   `relayout_drop = relayout_mean − anchor`. If relayout τ collapses, Part 2 is **OOD
   inconclusive** (the circuit broke, not a binding result).
+
+**Anchor-validity gate (before interpreting any binding score):** require the carrier
+readout to be *valid on the training layout* — `τ_pos(anchor)` high for the intended
+carrier heads. If the anchor τ is already low, the checkpoint/head extraction failed or
+the carrier is not active, so binding is marked **invalid/inconclusive** and not
+interpreted (this is distinct from an OOD break, where the anchor is high but relayout
+collapses). Tier-specific expectation (not a hard gate): strong-carrier seeds (2/123) →
+`τ_pos(anchor) ≥ 0.95` at step10000; seed42 weak tier → weak-carrier range, e.g.
+`≥ 0.60`.
 - **secondary (optional):** cross-layout pairwise stability
   `stability_slot = mean_{i<j} τ(σ_i_model, σ_j_model)`,
   `stability_phys = mean_{i<j} τ(σ_i_phys, σ_j_phys)`.
@@ -175,8 +204,11 @@ whether (and when) any content binding appears relative to the pruning event.
 - Frame sanity: on a synthetic σ with a known permutation, `τ_model_slot` and
   `τ_physical = τ(inv_perm[σ])` match hand-computed values.
 - Relayout: `relayout_chunks` with `layout_0 = training` reproduces the original chunks
-  (identity round-trip); `τ_content` at the training anchor equals `τ_model_slot`
-  translated by the training inv_perm.
+  (identity round-trip). At `layout_0`, `τ_content` is the **hand-computed physical-frame
+  translation** of `σ_model` (apply `training_inv_perm` then Kendall-τ vs `arange`); it
+  **need not equal `τ_pos`** (they coincide only if the training layout ≈ identity). A
+  low anchor `τ_content` under a slot-bound model is expected, set by the CleanPermutation
+  — not a bug.
 
 ## Risks
 
