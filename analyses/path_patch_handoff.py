@@ -10,6 +10,7 @@ Why tau-only (not NLL): any-order training makes the objective order-insensitive
 so the order signal lives in the attention map (model-frame B -> tau_vs_l2r), not
 the loss. tau is built from att = softmax(q.k^T), which depends only on q,k.
 """
+import csv as _csv
 import pathlib
 import sys
 
@@ -146,3 +147,40 @@ def run_stage1(model, ablate_layer, target_heads, readout_layers, probe_batches,
         "n_batch": len(per_batch),
         "readout_layers": list(readout_layers),
     }
+
+
+# ── Task 5: multiplicity-collapse readout + Stage-1 table writer ──────────────
+
+def multiplicity_collapse(tau_before_LH, tau_after_LH, layer, strong=0.95):
+    """How many heads at `layer` are strong (|tau|>=strong) before vs after, plus
+    the layer's mean signed tau before/after."""
+    b = np.abs(tau_before_LH[layer])
+    a = np.abs(tau_after_LH[layer])
+    return {
+        "n_strong_before": int((b >= strong).sum()),
+        "n_strong_after": int((a >= strong).sum()),
+        "mean_tau_before": float(tau_before_LH[layer].mean()),
+        "mean_tau_after": float(tau_after_LH[layer].mean()),
+    }
+
+
+def consensus_tau(tau_after_LH, layer, carrier_heads):
+    """Mean signed tau over a carrier set at `layer` (carrier-set aggregation)."""
+    if not carrier_heads:
+        return float("nan")
+    return float(np.mean([tau_after_LH[layer, h] for h in carrier_heads]))
+
+
+_STAGE1_COLS = [
+    "seed", "stage", "intervention", "target_layer", "target_heads",
+    "mean_tau_before", "mean_tau_after", "n_strong_before",
+    "n_strong_after", "delta_global_tau",
+]
+
+
+def write_stage1_table(rows, out_csv):
+    with open(out_csv, "w", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=_STAGE1_COLS)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
