@@ -166,22 +166,40 @@ other heads, MLP, direct paths ← clean
 
 This isolates the question: does the L0 source influence the L1 destination through
 its **attention pattern / order-reading (QK)** path, rather than through V content or
-other routes? The readout is the L1 destination carrier's **τ_vs_l2r Δ** (whether the
-B structure collapses) — matching "is the order structure inherited via QK".
+other routes?
 
-**Pre-registered effect-size ratio** (avoids post-hoc drift; magnitude-based because
-collapse may show as a τ drop of either sign):
+**Methodological fact that shapes the readout (important).** τ is built from the
+attention *map* `att = softmax(q·kᵀ)`, which depends **only on q and k** — V never
+enters the τ readout (V only affects `y = att·v`, the value-weighted output, not the
+map). Consequence: for the **L1-destination's own τ**, the only route by which L0
+affects it *is* the QK route (L0.OV → L1 residual → L1 q/k). So at the L1-dst level,
+"L0→L1 QK patch" and "full L0-source ablation" produce an **identical** L1 attention
+map and identical Δτ — `path_fraction ≡ 1` there, trivially. The direct/indirect
+decomposition is only meaningful **downstream** (L2/L3/global), where full ablation
+also propagates through L1's V, L1's MLP, and direct L0→L2/L3 paths, whereas the
+QK-only route keeps those clean. **Stage 2 therefore reports two readouts:**
+
+**Readout 2a — L1-dst τ (confirmation, not decomposition).** Δτ of the L1 destination
+carrier under the L0→L1 patch. Confirms L0's residual contribution genuinely enters
+L1's q/k (equivalent to Stage 1b's L1 readout). `path_fraction` is *not* computed here
+(it is trivially 1).
+
+**Readout 2b — downstream path_fraction (the real decomposition).** Patch only the L1
+dst head's *output* using the corrupted att (q,k from the L0-ablated L1 residual) while
+keeping its **V clean, all other L1 heads clean, L1 MLP clean, and direct L0→L2/L3
+paths clean**; propagate the modified L1 output to L2/L3 and read **downstream/global**
+τ. Pre-registered, magnitude-based (collapse may be a τ drop of either sign):
 
 ```
-path_fraction = |Δτ_path-restricted_QK| / |Δτ_full_L0-source_ablation|
+path_fraction = |Δτ_downstream via L0→L1-QK-only route| / |Δτ_downstream via full L0-source ablation|
 ```
 
 Report `path_fraction` as a **continuous value with a matched null-path control**
 (patching a null-head OV → L1 dst QK). A `path_fraction` substantially above the
 null-path CI supports that the L0→L1 QK route accounts for a meaningful part of the
-full L0-ablation effect. We **do not hard-gate** on a fixed threshold at 3-seed scale
-(a provisional `≥ 0.3 and above null CI` may be noted, but the continuous fraction +
-null comparison is the operative report).
+full L0-ablation downstream effect. We **do not hard-gate** on a fixed threshold at
+3-seed scale (a provisional `≥ 0.3 and above null CI` may be noted, but the continuous
+fraction + null comparison is the operative report).
 
 **Contrast (not a hard "no effect" claim).** Because seed42 lacks a strong L1 carrier
 set, its L0→L1 path-restricted effects should be **substantially weaker, more diffuse,
@@ -200,9 +218,10 @@ The handoff (L0 → redundant L1 carrier → downstream/global order) is **suppo
    full-set (within CI; reported, not a hard gate).
 2. **L0 weak-source ablation** causes **L1 carrier collapse** (multiplicity drop +
    Δτ beyond null) (Stage 1b).
-3. **L0→L1 path-restricted QK patch** yields `path_fraction = |Δτ_path| /
-   |Δτ_full_L0-ablation|` **substantially above the matched null-path control CI**
-   (Stage 2) — reported as a continuous fraction, not hard-gated.
+3. **L0→L1 path-restricted QK patch**: (2a) the L1-dst τ collapses under the L0→L1
+   patch, and (2b) the **downstream** `path_fraction = |Δτ_downstream via L0→L1-QK| /
+   |Δτ_downstream via full L0-ablation|` is **substantially above the matched null-path
+   control CI** — reported as a continuous fraction, not hard-gated.
 4. **seed42** lacks the same coherent L0→L1 edge effect (cross-seed contrast).
 
 Report **per-seed first**; cross-seed aggregation is secondary (random-order runs
