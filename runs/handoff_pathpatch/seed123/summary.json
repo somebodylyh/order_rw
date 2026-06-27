@@ -1,0 +1,200 @@
+{
+  "seed": 123,
+  "ckpt": "../runs/handoff_overnight/seed123/ckpt_step10000.pt",
+  "n_batches": 4,
+  "bs_mean": 16,
+  "dst_tier": "strong",
+  "l1_target": [
+    0,
+    5,
+    6,
+    7
+  ],
+  "l0_src": [
+    6,
+    7
+  ],
+  "redundancy_ladder": {
+    "single": 0.012028769841269825,
+    "loo": 0.019593253968253985,
+    "full": 0.020337301587301612,
+    "monotone": true
+  },
+  "stage1": [
+    {
+      "seed": 123,
+      "stage": "1a",
+      "intervention": "full",
+      "target_layer": 1,
+      "target_heads": "[0, 5, 6, 7]",
+      "mean_tau_before": 0.4244,
+      "mean_tau_after": 0.4324,
+      "n_strong_before": 0,
+      "n_strong_after": 0,
+      "delta_global_tau": 0.0
+    },
+    {
+      "seed": 123,
+      "stage": "1a",
+      "intervention": "loo",
+      "target_layer": 1,
+      "target_heads": "[5, 6, 7]",
+      "mean_tau_before": 0.4244,
+      "mean_tau_after": 0.4358,
+      "n_strong_before": 0,
+      "n_strong_after": 0,
+      "delta_global_tau": 0.0
+    },
+    {
+      "seed": 123,
+      "stage": "1a",
+      "intervention": "loo",
+      "target_layer": 1,
+      "target_heads": "[0, 6, 7]",
+      "mean_tau_before": 0.4244,
+      "mean_tau_after": 0.4222,
+      "n_strong_before": 0,
+      "n_strong_after": 0,
+      "delta_global_tau": 0.0
+    },
+    {
+      "seed": 123,
+      "stage": "1a",
+      "intervention": "loo",
+      "target_layer": 1,
+      "target_heads": "[0, 5, 7]",
+      "mean_tau_before": 0.4244,
+      "mean_tau_after": 0.433,
+      "n_strong_before": 0,
+      "n_strong_after": 0,
+      "delta_global_tau": 0.0
+    },
+    {
+      "seed": 123,
+      "stage": "1a",
+      "intervention": "loo",
+      "target_layer": 1,
+      "target_heads": "[0, 5, 6]",
+      "mean_tau_before": 0.4244,
+      "mean_tau_after": 0.433,
+      "n_strong_before": 0,
+      "n_strong_after": 0,
+      "delta_global_tau": 0.0
+    },
+    {
+      "seed": 123,
+      "stage": "1a",
+      "intervention": "single",
+      "target_layer": 1,
+      "target_heads": "[0]",
+      "mean_tau_before": 0.4244,
+      "mean_tau_after": 0.4281,
+      "n_strong_before": 0,
+      "n_strong_after": 0,
+      "delta_global_tau": 0.0
+    },
+    {
+      "seed": 123,
+      "stage": "1a",
+      "intervention": "single",
+      "target_layer": 1,
+      "target_heads": "[5]",
+      "mean_tau_before": 0.4244,
+      "mean_tau_after": 0.427,
+      "n_strong_before": 0,
+      "n_strong_after": 0,
+      "delta_global_tau": 0.0
+    },
+    {
+      "seed": 123,
+      "stage": "1a",
+      "intervention": "single",
+      "target_layer": 1,
+      "target_heads": "[6]",
+      "mean_tau_before": 0.4244,
+      "mean_tau_after": 0.4341,
+      "n_strong_before": 0,
+      "n_strong_after": 0,
+      "delta_global_tau": 0.0
+    },
+    {
+      "seed": 123,
+      "stage": "1a",
+      "intervention": "single",
+      "target_layer": 1,
+      "target_heads": "[7]",
+      "mean_tau_before": 0.4244,
+      "mean_tau_after": 0.4133,
+      "n_strong_before": 0,
+      "n_strong_after": 0,
+      "delta_global_tau": 0.0
+    },
+    {
+      "seed": 123,
+      "stage": "1a",
+      "intervention": "null",
+      "target_layer": 1,
+      "target_heads": "[2, 3]",
+      "mean_tau_before": 0.4244,
+      "mean_tau_after": 0.4369,
+      "n_strong_before": 0,
+      "n_strong_after": 0,
+      "delta_global_tau": 0.0
+    },
+    {
+      "seed": 123,
+      "stage": "1b",
+      "intervention": "L0-source",
+      "target_layer": 0,
+      "target_heads": "[6, 7]",
+      "mean_tau_before": 0.7792,
+      "mean_tau_after": 0.7507,
+      "n_strong_before": 3,
+      "n_strong_after": 3,
+      "delta_global_tau": 0.0
+    },
+    {
+      "seed": 123,
+      "stage": "1b",
+      "intervention": "null",
+      "target_layer": 0,
+      "target_heads": "[3, 4, 1]",
+      "mean_tau_before": 0.7792,
+      "mean_tau_after": 0.8049,
+      "n_strong_before": 3,
+      "n_strong_after": 2,
+      "delta_global_tau": 0.0
+    }
+  ],
+  "stage2": {
+    "seed": 123,
+    "src_heads_L0": [
+      6,
+      7
+    ],
+    "dst_heads_L1": [
+      0,
+      5,
+      6,
+      7
+    ],
+    "dtau_2a_l1_dst_mean": -0.01829117063492064,
+    "tau_clean_l1_dst": [
+      0.8936011904761904,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "tau_full_l1_dst": [
+      0.8526785714285713,
+      0.9677579365079365,
+      1.0,
+      1.0
+    ],
+    "path_fraction_global": 0.32139148494288683,
+    "n_batch": 4,
+    "path_fraction_L2": 0.3115530303030294,
+    "path_fraction_L3": 0.3333333333333345,
+    "path_fraction_global_null": 0.42627206645898175
+  }
+}
