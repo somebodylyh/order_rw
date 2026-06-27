@@ -21,6 +21,18 @@ def test_entropy_high_diffuse_low_concentrated():
     assert m["mass_entropy"].shape == (S,)
 
 
+def test_diffuse_count_collapses_after_pruning():
+    # diffuse_count = cells |tau|>=0.7 model-wide; high (diffuse) early, low after
+    S = 4
+    A = np.zeros((S, 4, 8))
+    A[:2] = 0.9            # first 2 steps: all 32 cells diffuse-high
+    A[2:] = 0.1; A[2:, 1, [0, 3]] = 0.9   # later: only 2 cells survive
+    traj = {"steps": np.arange(S) * 200, "tau": A, "abs_tau": A}
+    m = concentration_metrics(traj)
+    assert m["diffuse_count"][0] == 32
+    assert m["diffuse_count"][-1] == 2
+
+
 def test_event_timing_finds_drop_step():
     steps = np.arange(6) * 200
     ent = np.array([2.0, 2.0, 1.9, 0.5, 0.4, 0.4])  # steep drop between idx2->3

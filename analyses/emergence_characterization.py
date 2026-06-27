@@ -64,20 +64,28 @@ def _entropy(p, eps=1e-12):
     return float(-(p * np.log(p + eps)).sum())
 
 
-def concentration_metrics(seed_traj, strong=0.95):
-    """Order-signal concentration over training. Primary entropy = normalized
-    |tau|-mass entropy; softmax(|tau|) entropy is a robustness variant."""
+def concentration_metrics(seed_traj, strong=0.95, diffuse_tau=0.7):
+    """Order-signal concentration over training.
+
+    Empirically the winner-take-all event is sharpest in the *diffuse_count* — the
+    number of (layer,head) cells with |tau|>=diffuse_tau (0.7) — which collapses
+    32 -> ~10 (matching the Pillar-1/2 strong_pass story). |tau|-mass entropy and
+    layer-mass entropy barely move (pruned heads keep moderate |tau|, mass stays
+    near-uniform), so they are reported as secondary/robustness signals and the
+    *event* is timed on diffuse_count, not entropy.
+    """
     A = seed_traj["abs_tau"]                                   # (S,4,8)
     S = A.shape[0]
-    strong_head_count = (A >= strong).sum(axis=2)             # (S,4)
+    strong_head_count = (A >= strong).sum(axis=2)             # (S,4)  |tau|>=0.95
+    diffuse_count = (A >= diffuse_tau).sum(axis=(1, 2))       # (S,)   |tau|>=0.7 model-wide
     mass_entropy = np.array([_entropy(A[s].ravel()) for s in range(S)])
     softmax_entropy = np.array([
         _entropy(np.exp(A[s].ravel()) / np.exp(A[s].ravel()).sum()) for s in range(S)])
     layer_mass = A.sum(axis=2)                                # (S,4)
     top1_layer_share = layer_mass.max(axis=1) / (layer_mass.sum(axis=1) + 1e-12)
-    return {"strong_head_count": strong_head_count, "mass_entropy": mass_entropy,
-            "softmax_entropy": softmax_entropy, "layer_mass": layer_mass,
-            "top1_layer_share": top1_layer_share}
+    return {"strong_head_count": strong_head_count, "diffuse_count": diffuse_count,
+            "mass_entropy": mass_entropy, "softmax_entropy": softmax_entropy,
+            "layer_mass": layer_mass, "top1_layer_share": top1_layer_share}
 
 
 def _smooth3(x):
@@ -96,15 +104,17 @@ def event_timing(steps, mass_entropy, plateau_eps=0.1):
     ent = _smooth3(np.asarray(mass_entropy, dtype=float))
     diffs = np.diff(ent)
     mid_i = int(np.argmin(diffs)) + 1            # step after the steepest drop
-    pre_plateau = ent[:mid_i].max() if mid_i > 0 else ent[0]
-    post_plateau = ent[mid_i:].min()
+    # Local plateaus around the event (robust to late wander / dips in the tail).
+    pre_plateau = float(np.median(ent[max(0, mid_i - 4):mid_i])) if mid_i > 0 else ent[0]
+    post_plateau = float(np.median(ent[mid_i:mid_i + 4]))
     band = plateau_eps * (pre_plateau - post_plateau + 1e-12)
-    onset_i = mid_i
-    while onset_i > 0 and ent[onset_i - 1] >= pre_plateau - band:
-        onset_i -= 1
-    comp_i = mid_i
-    while comp_i < len(ent) - 1 and ent[comp_i + 1] <= post_plateau + band:
-        comp_i += 1
+    # Scan-based plateau crossings (tolerate one-step noise, no contiguous walk):
+    # onset = last step <= midpoint still at the pre-drop plateau;
+    # completion = first step >= midpoint at the post-drop plateau.
+    pre_idx = [i for i in range(mid_i + 1) if ent[i] >= pre_plateau - band]
+    post_idx = [i for i in range(mid_i, len(ent)) if ent[i] <= post_plateau + band]
+    onset_i = max(pre_idx) if pre_idx else mid_i
+    comp_i = min(post_idx) if post_idx else mid_i
     return {"onset": int(steps[onset_i]), "midpoint": int(steps[mid_i]),
             "completion": int(steps[comp_i])}
 
@@ -206,3 +216,38 @@ def schedule_loss_overlay(eval_curve, event, lr_rel_eps=0.02, loss_rel_eps=0.15)
         cls = "intrinsic (no alignment)"
     return {"lr_range_in_window": lr_range, "loss_drop_frac_in_window": win_drop_frac,
             "loss_drop_excess_rate": excess, "classification": cls}
+
+
+# ── Task 5: per-seed driver + table/JSON writers ─────────────────────────────
+
+def run_seed_emergence(seed, root=TRAJ_ROOT, out_dir=None):
+    """Run A1-A3 for one seed; write concentration.csv + summary.json; return summary."""
+    import json
+
+    out = pathlib.Path(out_dir or f"runs/emergence/seed{seed}")
+    out.mkdir(parents=True, exist_ok=True)
+    traj = load_tau_trajectory(seed, root)
+    w = winner(traj, seed)
+    conc = concentration_metrics(traj)
+    # Time the event on the diffuse_count collapse (mass entropy is too flat).
+    event = event_timing(traj["steps"], conc["diffuse_count"])
+    pred = winner_predictability(traj, w)
+    ec = load_eval_curve(seed, root)
+    sched = schedule_loss_overlay(ec, event)
+
+    with open(out / "concentration.csv", "w", newline="") as f:
+        wcsv = _csv.writer(f)
+        wcsv.writerow(["step", "diffuse_count", "mass_entropy", "softmax_entropy",
+                       "top1_layer_share", *[f"strong_L{L}" for L in range(4)]])
+        for i, st in enumerate(traj["steps"]):
+            wcsv.writerow([int(st), int(conc["diffuse_count"][i]),
+                           round(float(conc["mass_entropy"][i]), 4),
+                           round(float(conc["softmax_entropy"][i]), 4),
+                           round(float(conc["top1_layer_share"][i]), 4),
+                           *[int(conc["strong_head_count"][i, L]) for L in range(4)]])
+
+    summary = {"seed": seed, "winner": w, "event": event,
+               "predictability": pred, "schedule": sched}
+    with open(out / "summary.json", "w") as f:
+        json.dump(summary, f, indent=2, default=float)
+    return summary
