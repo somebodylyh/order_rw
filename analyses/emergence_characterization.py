@@ -54,3 +54,55 @@ def winner(seed_traj, seed, strong=0.95):
                 "tier": "strong"}
     weak = load_carrier_sets(seed)[winning_layer]["weak"]
     return {"winning_layer": winning_layer, "winner_heads": list(weak), "tier": "weak"}
+
+
+# ── Task 2: A1 concentration metrics + event timing ──────────────────────────
+
+def _entropy(p, eps=1e-12):
+    p = p / (p.sum() + eps)
+    return float(-(p * np.log(p + eps)).sum())
+
+
+def concentration_metrics(seed_traj, strong=0.95):
+    """Order-signal concentration over training. Primary entropy = normalized
+    |tau|-mass entropy; softmax(|tau|) entropy is a robustness variant."""
+    A = seed_traj["abs_tau"]                                   # (S,4,8)
+    S = A.shape[0]
+    strong_head_count = (A >= strong).sum(axis=2)             # (S,4)
+    mass_entropy = np.array([_entropy(A[s].ravel()) for s in range(S)])
+    softmax_entropy = np.array([
+        _entropy(np.exp(A[s].ravel()) / np.exp(A[s].ravel()).sum()) for s in range(S)])
+    layer_mass = A.sum(axis=2)                                # (S,4)
+    top1_layer_share = layer_mass.max(axis=1) / (layer_mass.sum(axis=1) + 1e-12)
+    return {"strong_head_count": strong_head_count, "mass_entropy": mass_entropy,
+            "softmax_entropy": softmax_entropy, "layer_mass": layer_mass,
+            "top1_layer_share": top1_layer_share}
+
+
+def _smooth3(x):
+    if len(x) < 3:
+        return x.copy()
+    out = x.copy()
+    out[1:-1] = (x[:-2] + x[1:-1] + x[2:]) / 3.0
+    return out
+
+
+def event_timing(steps, mass_entropy, plateau_eps=0.1):
+    """onset/midpoint/completion of the winner-take-all entropy drop, robust to
+    one-step noise (smoothed curve; midpoint = steepest drop; onset/completion =
+    pre/post plateau boundaries)."""
+    steps = np.asarray(steps)
+    ent = _smooth3(np.asarray(mass_entropy, dtype=float))
+    diffs = np.diff(ent)
+    mid_i = int(np.argmin(diffs)) + 1            # step after the steepest drop
+    pre_plateau = ent[:mid_i].max() if mid_i > 0 else ent[0]
+    post_plateau = ent[mid_i:].min()
+    band = plateau_eps * (pre_plateau - post_plateau + 1e-12)
+    onset_i = mid_i
+    while onset_i > 0 and ent[onset_i - 1] >= pre_plateau - band:
+        onset_i -= 1
+    comp_i = mid_i
+    while comp_i < len(ent) - 1 and ent[comp_i + 1] <= post_plateau + band:
+        comp_i += 1
+    return {"onset": int(steps[onset_i]), "midpoint": int(steps[mid_i]),
+            "completion": int(steps[comp_i])}
