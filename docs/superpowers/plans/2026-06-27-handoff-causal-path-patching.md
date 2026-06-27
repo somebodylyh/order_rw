@@ -134,11 +134,18 @@ git commit -m "feat: frozen Pillar-3 carrier-set config + tau-table integrity ch
 - Create: `analyses/path_patch_handoff.py` (start the module here)
 - Test: `block_lo_arm_order_network/tests/test_handoff_probe_readout.py`
 
+**Resolved confirmations (verified before execution):**
+- Loader: `_load_model_and_chunks(ckpt_path, total, seed, device, split)` from
+  `neural_readout.extract_b`, returns `(model, chunks, clean_perm, dev, _ci)` — gives the
+  model **and** the eval-token `chunks` source in one call.
+- Seed read-back: `ckpt['args']['seed']` (ckpt['args'] is a **dict**). Dir names match.
+- model_args: `n_layer=4, n_head=8, n_embd=384` (→ `hs=48`). Block container `model.transformer.h`.
+
 **Interfaces:**
-- Consumes: `extract_all_layer_B` (from `attention_trajectory`), `layer_head_tau_table`/`per_head_tau` (from `batch_readout.order_tau_readout`), ckpt/model loader from `per_head_order_scan`.
+- Consumes: `extract_all_layer_B` (from `attention_trajectory`), `layer_head_tau_table`/`per_head_tau` (from `batch_readout.order_tau_readout`), `_load_model_and_chunks` (from `neural_readout.extract_b`).
 - Produces:
-  - `load_model_and_seed(ckpt_path: str, device) -> tuple[model, int]` (returns model in eval mode + seed read from ckpt).
-  - `make_probe_batch(eval_model_tokens, n: int, rng) -> tuple[Tensor, np.ndarray]` returns `(probe_chunks[n,257], probe_orders[n,256]=identity)`.
+  - `load_model_and_chunks_seed(ckpt_path: str, total: int, device, split="train") -> tuple[model, chunks, int]` (model in eval mode, eval-token chunks, seed from `ckpt['args']['seed']`).
+  - `make_probe_batch(eval_model_tokens, n: int, rng) -> tuple[Tensor, np.ndarray]` returns `(probe_chunks[n,257], probe_orders[n,256]=identity)` by drawing `n` random rows.
   - `tau_table_from_attn(attn_list, probe_orders) -> np.ndarray` returns `tau[L,H]` (signed, method `C-D+L`) via `extract_all_layer_B(...).mean(axis=1)` → `layer_head_tau_table`.
   - `run_clean(model, probe_chunks, probe_orders, device) -> (attn_list, tau_LH)`.
 
@@ -147,24 +154,16 @@ git commit -m "feat: frozen Pillar-3 carrier-set config + tau-table integrity ch
 ```python
 # tests/test_handoff_probe_readout.py
 import numpy as np, torch
-from analyses.path_patch_handoff import load_model_and_seed, make_probe_batch, run_clean
+from analyses.path_patch_handoff import load_model_and_chunks_seed, make_probe_batch, run_clean
 
-def test_clean_tau_matches_saved_table():
+def test_clean_tau_reproduces_l1_carrier():
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, seed = load_model_and_seed(
-        "runs/handoff_overnight/seed2/ckpt_step10000.pt", dev)
-    assert seed == 2
-    # use the SAME fixed probe samples the logger used, so tau reproduces
-    samp = np.load("runs/handoff_overnight/seed2/attention_trajectory/"
-                   "attention_sample_indices.npz")
-    # build probe batch from those indices (helper accepts explicit indices)
-    pc, po = make_probe_batch(None, n=16, rng=np.random.default_rng(0),
-                              fixed_indices=samp[samp.files[0]][:16])
-    _, tau = run_clean(model, pc, po, dev)
-    saved = np.load("runs/handoff_overnight/seed2/attention_trajectory/"
-                    "raw/step_010000/tau_table.npz", allow_pickle=True)
-    mi = list(saved["methods"]).index("C-D+L")
-    # L1 strong heads should read ~1.0 in both
+    model, chunks, seed = load_model_and_chunks_seed(
+        "runs/handoff_overnight/seed2/ckpt_step10000.pt", total=64, device=dev)
+    assert seed == 2                                   # read from ckpt['args']['seed']
+    pc, po = make_probe_batch(chunks, n=16, rng=np.random.default_rng(0))
+    _, tau = run_clean(model, pc, po, dev)             # tau: (L,H) signed C-D+L
+    # seed2 L1 strong carrier set {0,3,5,7} should read ~1.0 (robust to sample identity)
     for h in (0, 3, 5, 7):
         assert tau[1, h] > 0.9
 ```
@@ -184,19 +183,18 @@ docs/superpowers/specs/2026-06-27-handoff-causal-path-patching-design.md."""
 import numpy as np, torch
 from attention_trajectory import extract_all_layer_B
 from batch_readout.order_tau_readout import layer_head_tau_table
-import per_head_order_scan as scan   # reuse its ckpt loader
+from neural_readout.extract_b import _load_model_and_chunks
 
-def load_model_and_seed(ckpt_path, device):
-    model, ckpt = scan.load_model_from_ckpt(ckpt_path, device)  # follow scan's loader
+def load_model_and_chunks_seed(ckpt_path, total, device, split="train"):
+    model, chunks, clean_perm, dev, _ci = _load_model_and_chunks(
+        ckpt_path, total, seed=0, device=device, split=split)
     model.eval()
-    seed = int(ckpt.get("seed", ckpt.get("config", {}).get("seed", -1)))
-    return model, seed
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    seed = int(ckpt["args"]["seed"])      # integrity: read seed from ckpt, not dir name
+    return model, chunks, seed
 
-def make_probe_batch(eval_model_tokens, n, rng, fixed_indices=None):
-    if fixed_indices is not None:
-        idx = np.asarray(fixed_indices)[:n]
-    else:
-        idx = rng.choice(len(eval_model_tokens), size=n, replace=False)
+def make_probe_batch(eval_model_tokens, n, rng):
+    idx = rng.choice(len(eval_model_tokens), size=n, replace=False)
     chunks = eval_model_tokens[idx]
     probe_orders = np.tile(np.arange(256, dtype=np.int64), (n, 1))  # identity
     return chunks, probe_orders
