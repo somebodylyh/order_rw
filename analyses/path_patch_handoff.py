@@ -113,3 +113,36 @@ def run_with_ablation(model, layer, head_indices, probe_chunks, probe_orders, de
     finally:
         handle.remove()
     return attn_list, tau_table_from_attn(attn_list, probe_orders)
+
+
+# ── Task 4: Stage-1 intervention variants + runner ───────────────────────────
+
+def stage1_variants(strong_set):
+    """Redundancy ladder: full set, leave-one-out, and single-head ablations."""
+    s = list(strong_set)
+    return {
+        "full": [list(s)],
+        "loo": [[h for h in s if h != drop] for drop in s],
+        "single": [[h] for h in s],
+    }
+
+
+@torch.no_grad()
+def run_stage1(model, ablate_layer, target_heads, readout_layers, probe_batches, device):
+    """Ablate `target_heads` at `ablate_layer`; return mean/std Delta-tau[L,H] over
+    probe batches. `readout_layers` is recorded (must be downstream of ablate_layer).
+    """
+    per_batch = []
+    for pc, po in probe_batches:
+        _, tau_clean = run_clean(model, pc, po, device)
+        _, tau_abl = run_with_ablation(model, ablate_layer, target_heads, pc, po, device)
+        per_batch.append(tau_abl - tau_clean)
+    arr = np.stack(per_batch)  # (Nbatch, L, H)
+    return {
+        "ablate_layer": ablate_layer,
+        "target_heads": list(target_heads),
+        "dtau_mean": arr.mean(axis=0),
+        "dtau_std": arr.std(axis=0),
+        "n_batch": len(per_batch),
+        "readout_layers": list(readout_layers),
+    }
