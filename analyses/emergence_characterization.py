@@ -251,3 +251,25 @@ def run_seed_emergence(seed, root=TRAJ_ROOT, out_dir=None):
     with open(out / "summary.json", "w") as f:
         json.dump(summary, f, indent=2, default=float)
     return summary
+
+
+# ── Task 7: A4 winning-layer B re-extraction from ckpts ──────────────────────
+
+def extract_carrier_B(seed, ckpt_step, winning_layer, root=TRAJ_ROOT,
+                      bs_mean=16, n_batches=4, device="cpu"):
+    """Batch-mean B (8,65,65) for the winning layer at a given ckpt step, via the
+    Pillar-3 forward pipeline (B_model.pt only stores L0, so we re-extract)."""
+    import torch
+    from analyses.path_patch_handoff import (
+        load_model_and_chunks_seed, make_probe_batch, run_clean)
+    from attention_trajectory import extract_all_layer_B
+    ckpt = f"{root}/seed{seed}/ckpt_step{ckpt_step}.pt"
+    dev = torch.device(device)
+    model, chunks, _ = load_model_and_chunks_seed(ckpt, max(64, bs_mean * n_batches), dev)
+    accum = []
+    for i in range(n_batches):
+        pc, po = make_probe_batch(chunks, bs_mean, np.random.default_rng(i))
+        attn_list, _ = run_clean(model, pc, po, dev)
+        B_all = extract_all_layer_B(attn_list, po)        # (L,S,H,65,65)
+        accum.append(B_all[winning_layer].mean(axis=0))   # (H,65,65)
+    return np.mean(accum, axis=0)
