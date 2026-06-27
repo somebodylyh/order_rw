@@ -12,9 +12,9 @@ a clear but *non-trivial* picture of where the order signal lives:
 
 | seed  | dominant carrier layer | shape |
 |-------|------------------------|-------|
-| seed2  | **L1** (τ=1.0 on 4 heads from step ~2000) | L0 stable ~0.80 |
+| seed2  | **L1** (4-head strong set {H0,H3,H5,H7}, all τ=1.0, from step ~2000) | L0 stable ~0.80 |
 | seed42 | **L0** (no strong head anywhere; weak ~0.85) | L1/L2/L3 decay to weak |
-| seed123 | **L1** (τ=1.0 on 4 heads from step ~3000) | L3 secondary ~0.80 |
+| seed123 | **L1** (4-head strong set {H0,H5,H6,H7}; H0 τ=0.96, others τ=1.0; from step ~3000) | L3 secondary ~0.80 |
 
 Two facts drive this design:
 
@@ -25,8 +25,9 @@ Two facts drive this design:
    moving handoff but a *static causal dependency* between heads/layers in the
    converged ckpt.
 2. **The carrier is multi-head redundant.** In the L1-carrier seeds, the order
-   signal is replicated across **4 heads at τ=1.0** (seed2 {H0,H3,H5,H7}, seed123
-   {H0,H5,H6,H7}). This is not a one-head/one-mechanism circuit; it looks like a
+   signal is replicated across a **4-head strong set** (seed2 {H0,H3,H5,H7} all τ=1.0;
+   seed123 {H0,H5,H6,H7} with H0 τ=0.96 and the other three τ=1.0 — all ≥ the 0.95
+   strong threshold). This is not a one-head/one-mechanism circuit; it looks like a
    **redundant / distributed carrier subspace**. Single-head ablation will therefore
    easily produce **false negatives** — absence of effect from one head is evidence
    of redundancy, not absence of causality.
@@ -95,8 +96,18 @@ seed123:
 
 **Intervention.** In a forward pass over the fixed probe set, replace a source head
 set's per-example output slice (the head's `hs` columns of `y`, *before* `c_proj`)
-with its **mean over the probe batch** (mean-ablation — stays in-distribution; not
-zero-ablation). All other heads/layers/MLPs unchanged.
+with its **position-wise batch mean** (mean-ablation — stays in-distribution; not
+zero-ablation). Precisely, only the **batch** dimension is averaged; the token/block
+**position** structure is preserved:
+
+```
+y[:, pos, head_slice]  ←  mean_over_batch( y[:, pos, head_slice] )   for every pos
+```
+
+The position/block dimension is **not** averaged out (doing so would erase positional
+information, making the intervention too strong and inflating the null). All other
+heads/layers/MLPs unchanged. (A global position-collapsed mean is a stronger variant,
+out of scope for the main experiment.)
 
 **Readout.** Re-extract attention of all layers **downstream of the ablated layer**,
 rebuild model-frame B65 per head → `none_separated` rollout (`C-D+L`) → record:
@@ -116,11 +127,12 @@ rebuild model-frame B65 per head → `none_separated` rollout (`C-D+L`) → reco
   L0→L1 is a handoff.**
 
 **Redundancy granularity (the core of this pillar).** For the L1 strong carrier set,
-run the ablation at four granularities and require the monotone ordering as a
-redundancy signature:
+run the ablation at four granularities. We **expect** an approximate monotone trend
+(within CI), but it is **reported, not used as a hard exclusion criterion** — τ
+sampling noise can locally violate it (e.g. LOO 0.21 vs full 0.19):
 
 ```
-single-head ablation  ≤  leave-one-out ablation  ≤  full-set ablation
+single-head ablation  ≤  leave-one-out ablation  ≤  full-set ablation   (expected, within CI)
 (ablate 1)               (ablate all but 1)          (ablate all 4)
 ```
 
@@ -157,6 +169,20 @@ its **attention pattern / order-reading (QK)** path, rather than through V conte
 other routes? The readout is the L1 destination carrier's **τ_vs_l2r Δ** (whether the
 B structure collapses) — matching "is the order structure inherited via QK".
 
+**Pre-registered effect-size ratio** (avoids post-hoc drift; magnitude-based because
+collapse may show as a τ drop of either sign):
+
+```
+path_fraction = |Δτ_path-restricted_QK| / |Δτ_full_L0-source_ablation|
+```
+
+Report `path_fraction` as a **continuous value with a matched null-path control**
+(patching a null-head OV → L1 dst QK). A `path_fraction` substantially above the
+null-path CI supports that the L0→L1 QK route accounts for a meaningful part of the
+full L0-ablation effect. We **do not hard-gate** on a fixed threshold at 3-seed scale
+(a provisional `≥ 0.3 and above null CI` may be noted, but the continuous fraction +
+null comparison is the operative report).
+
 **Contrast (not a hard "no effect" claim).** Because seed42 lacks a strong L1 carrier
 set, its L0→L1 path-restricted effects should be **substantially weaker, more diffuse,
 or fail the load-bearing criterion** vs seed2/seed123 — *not* asserted to be exactly
@@ -170,11 +196,13 @@ zero (seed42 L1 H2 τ=0.70 may carry weak relay). Concretely:
 The handoff (L0 → redundant L1 carrier → downstream/global order) is **supported** if:
 
 1. **L1 carrier-set ablation** causes downstream/global Δτ **beyond the null-head
-   distribution** (Stage 1a), with the redundancy ordering single ≤ LOO ≤ full-set.
+   distribution** (Stage 1a), with an **expected** redundancy trend single ≤ LOO ≤
+   full-set (within CI; reported, not a hard gate).
 2. **L0 weak-source ablation** causes **L1 carrier collapse** (multiplicity drop +
    Δτ beyond null) (Stage 1b).
-3. **L0→L1 path-restricted QK patch** reproduces a **significant fraction of the full
-   L0-ablation effect** on L1 (Stage 2).
+3. **L0→L1 path-restricted QK patch** yields `path_fraction = |Δτ_path| /
+   |Δτ_full_L0-ablation|` **substantially above the matched null-path control CI**
+   (Stage 2) — reported as a continuous fraction, not hard-gated.
 4. **seed42** lacks the same coherent L0→L1 edge effect (cross-seed contrast).
 
 Report **per-seed first**; cross-seed aggregation is secondary (random-order runs
