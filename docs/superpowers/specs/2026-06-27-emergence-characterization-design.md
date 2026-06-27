@@ -5,8 +5,9 @@
 **Predecessors:** `2026-06-26-order-signal-handoff-circuit-design.md` (Pillars ①②),
 `2026-06-27-handoff-causal-path-patching-design.md` (Pillar ③, falsified handoff)
 **Branch:** `attn-order-alternating`
-**Compute:** **no GPU** (existing trajectories + cheap re-extraction from saved ckpts).
-GPU is a fallback only if a no-GPU readout proves impossible.
+**Compute:** **no new training.** A1/A2/A3 are pure file reads. A4 may require model
+forward re-extraction from saved checkpoints — run on CPU if feasible, with GPU used
+**only as an execution accelerator, not as a new experiment.**
 
 ## Context & Motivation
 
@@ -20,9 +21,10 @@ shifts from "how is order handed off L0→L1→…" to:
 The existing every-200-step trajectory already shows the shape of the answer (two
 phases, three seeds):
 
-- **Phase A (step 0–~1200): diffuse alignment.** All layers, all heads reach
-  max|τ|≈0.9–1.0, `strong_pass=8` everywhere — a generic position/order signal is
-  *everywhere*.
+- **Phase A (step 0–~1200): diffuse alignment.** Most layers/heads transiently show
+  high |τ| (max|τ|≈0.9–1.0), with layer-level `strong_pass` often reaching 8 — a
+  generic position/order signal is broadly present. (A1 quantifies this; Context stays
+  no more absolute than the data.)
 - **Phase B (step ~1200–2000): winner-take-all pruning / symmetry-breaking.** Around
   step 1200–1400 `strong_pass` collapses 8→2–5; the order signal is pruned out of most
   heads and concentrates onto one **seed-specific** layer's set (seed2/123→L1,
@@ -63,25 +65,38 @@ From the 51 per-step `tau_table.npz`, compute three concentration metrics over s
 (avoid relying on a single 0.95-thresholded count):
 
 1. **strong_head_count(layer, step):** number of heads with `|τ|≥0.95` per layer.
-2. **τ-mass entropy(step):** Shannon entropy of `softmax(|τ|)` over all 32 (layer,head)
-   cells — high = diffuse, low = concentrated.
+2. **τ-mass entropy(step) — primary:** Shannon entropy of the normalized mass
+   `p_i = |τ_i| / Σ_j |τ_j|` over all 32 (layer,head) cells — high = diffuse, low =
+   concentrated. Report **`softmax(|τ|)` entropy as a robustness variant** (τ∈[0,1] makes
+   softmax less peaked, so the mass-normalized form is the main signal).
 3. **layer concentration(step):** per layer, `sum_h |τ[layer,h]|` (and its share of the
    total), plus the top-1 layer's share.
 
 Method `C-D+L`, signed τ read but metrics use `|τ|`. Output per seed:
-**pruning onset / midpoint / completion** (defined on the entropy curve: onset = last
-step before entropy begins its monotone drop; completion = first step entropy
-re-plateaus; midpoint = steepest-descent step), **winning layer**, **winning head set**
-(final `|τ|≥0.95` members at step 10000).
+**pruning onset / midpoint / completion**, **winning layer**, **winning head set**
+(final strong members at step 10000; see A2 for the seed42 weak-tier fallback).
+
+**Event-timing definition (robust to noise):** lightly smooth the primary entropy curve
+(3-point median/mean filter); **midpoint** = step of the largest negative finite
+difference (steepest sustained drop); **onset/completion** = the nearest steps
+before/after the midpoint where entropy is within ε of the pre/post plateau, computed
+from the largest sustained entropy-drop segment and tolerating one-step noise (no strict
+monotonicity assumption).
 
 ### A2 — Winner predictability / predetermination (mainline; sets Spec B direction)
 
 Trace the final carrier heads backward through early steps. Readouts:
 
 1. **early→final membership AUC:** at each early step `s∈{0,200,600,1000}`, rank heads
-   by `|τ[s]|`; treat final carrier membership (step-10000 `|τ|≥0.95`) as the label;
-   report ROC-AUC of the early-`|τ|` score. AUC≈1 → winners already lead early;
-   AUC≈0.5 → not predictable early.
+   by `|τ[s]|`; treat final carrier membership as the label; report ROC-AUC of the
+   early-`|τ|` score. AUC≈1 → winners already lead early; AUC≈0.5 → not predictable early.
+
+   **Final-label definition + seed42 edge case:** the label is step-10000 `|τ|≥0.95`
+   membership (strong-carrier predictability). **If a seed has no final `|τ|≥0.95`
+   strong carrier (seed42), define the final winner set as the winning layer's frozen
+   *weak* carrier set (or its top-k by `|τ|`, k = weak-set size) and report seed42 as
+   *weak-tier* predictability, separately from the strong-carrier seeds** — otherwise the
+   all-zero label makes ROC-AUC undefined.
 2. **early→final Spearman:** Spearman ρ between `|τ[s]|` (per head) and `|τ[10000]|`,
    per early step.
 3. **winner vs pruned τ trajectories:** per-head τ-vs-step curves, winners vs pruned,
@@ -118,6 +133,9 @@ winning carrier head, render: B heatmap, rolled-out order (`rollout_by_method`,
   and merely sharpens post-pruning.
 - **Pattern B (structural switch):** the pre-pruning B is unstructured/different and
   becomes L2R-like only post-pruning.
+
+**Compute (A4):** no new training — forward re-extraction from the three saved ckpts
+only; CPU if feasible, GPU only as an accelerator.
 
 **Limitation (documented):** pre=1000 is just before onset and post=2000 just after
 completion, so the event is bracketed but the *transition* (1200–1400) B is not
