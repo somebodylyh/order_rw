@@ -11,6 +11,7 @@ so the order signal lives in the attention map (model-frame B -> tau_vs_l2r), no
 the loss. tau is built from att = softmax(q.k^T), which depends only on q,k.
 """
 import csv as _csv
+import json
 import math
 import pathlib
 import sys
@@ -387,3 +388,131 @@ def run_stage2(model, seed, src_heads_L0, dst_heads_L1, probe_batches, device,
         tpn = np.mean(rows["path_null"], axis=0)
         out["path_fraction_global_null"] = _path_fraction(tc, tf, tpn, "global", downstream_layers)
     return out
+
+
+# ── Task 8: per-seed driver + tables + summary ───────────────────────────────
+
+_STAGE2_COLS = [
+    "seed", "src_heads_L0", "dst_heads_L1", "dst_tier",
+    "dtau_2a_l1_dst_mean", "path_fraction_L2", "path_fraction_L3",
+    "path_fraction_global", "path_fraction_global_null",
+]
+
+
+def write_stage2_table(rows, out_csv):
+    with open(out_csv, "w", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=_STAGE2_COLS)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+
+
+def _tau_table_path_for_ckpt(ckpt_path):
+    seed_dir = pathlib.Path(ckpt_path).resolve().parent
+    return str(seed_dir / "attention_trajectory/raw/step_010000/tau_table.npz")
+
+
+@torch.no_grad()
+def _mean_tau(model, probe_batches, device, ablate_layer=None, heads=None):
+    """Mean tau[L,H] over probe batches (clean if ablate_layer is None)."""
+    accum = []
+    for pc, po in probe_batches:
+        if ablate_layer is None:
+            _, t = run_clean(model, pc, po, device)
+        else:
+            _, t = run_with_ablation(model, ablate_layer, heads, pc, po, device)
+        accum.append(t)
+    return np.mean(accum, axis=0)
+
+
+def run_seed(ckpt_path, out_dir, n_batches=4, bs_mean=16, device="cpu"):
+    """Orchestrate Stage 0 (verify) -> Stage 1a/1b (full/LOO/single/null) ->
+    Stage 2 (2a + downstream path_fraction + null-path) for one seed.
+
+    Writes stage1_table.csv, stage2_table.csv, summary.json. Returns the summary.
+    """
+    from analyses.handoff_carrier_config import load_carrier_sets, verify_against_tau_table
+
+    out = pathlib.Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    dev = torch.device(device)
+    model, chunks, seed = load_model_and_chunks_seed(ckpt_path, max(64, bs_mean * 4), dev)
+
+    # Stage 0: integrity
+    verify_against_tau_table(seed, _tau_table_path_for_ckpt(ckpt_path))
+    cfg = load_carrier_sets(seed)
+
+    probe_batches = [make_probe_batch(chunks, bs_mean, np.random.default_rng(i))
+                     for i in range(n_batches)]
+
+    tau_clean = _mean_tau(model, probe_batches, dev)
+
+    l1_strong = cfg[1]["strong"]
+    l1_target = l1_strong if l1_strong else cfg[1]["weak"]
+    dst_tier = "strong" if l1_strong else "weak"
+    l1_null = cfg[1]["null"]
+    l0_src = cfg[0]["weak"]
+    l0_null = cfg[0]["null"]
+
+    stage1_rows = []
+
+    def _row(stage, intervention, layer, heads, readout_layer):
+        tau_after = _mean_tau(model, probe_batches, dev, ablate_layer=layer, heads=heads)
+        mc = multiplicity_collapse(tau_clean, tau_after, readout_layer)
+        return {
+            "seed": seed, "stage": stage, "intervention": intervention,
+            "target_layer": layer, "target_heads": str(heads),
+            "mean_tau_before": round(mc["mean_tau_before"], 4),
+            "mean_tau_after": round(mc["mean_tau_after"], 4),
+            "n_strong_before": mc["n_strong_before"],
+            "n_strong_after": mc["n_strong_after"],
+            "delta_global_tau": round(global_tau(tau_after) - global_tau(tau_clean), 4),
+        }
+
+    # Stage 1a: ablate L1 target set, read downstream L2 (+ multiplicity at L2)
+    variants = stage1_variants(l1_target)
+    redundancy = {}
+    if l1_target:
+        for name, sets in (("full", variants["full"]),
+                           ("loo", variants["loo"]),
+                           ("single", variants["single"])):
+            deltas = []
+            for hs in sets:
+                r = _row("1a", name, 1, hs, readout_layer=2)
+                stage1_rows.append(r)
+                # magnitude of downstream L2 collapse for redundancy ladder
+                t_after = _mean_tau(model, probe_batches, dev, ablate_layer=1, heads=hs)
+                deltas.append(_layer_delta(t_after, tau_clean, 2))
+            redundancy[name] = float(np.mean(deltas))
+        stage1_rows.append(_row("1a", "null", 1, l1_null, readout_layer=2))
+
+    # Stage 1b: ablate L0 weak source, read L1 (does L1 carrier depend on L0?)
+    stage1_rows.append(_row("1b", "L0-source", 0, l0_src, readout_layer=1))
+    stage1_rows.append(_row("1b", "null", 0, l0_null, readout_layer=1))
+
+    write_stage1_table(stage1_rows, str(out / "stage1_table.csv"))
+
+    # Stage 2
+    s2 = run_stage2(model, seed, l0_src, l1_target, probe_batches, dev,
+                    downstream_layers=(2, 3), null_src_heads=l0_null)
+    stage2_row = {
+        "seed": seed, "src_heads_L0": str(l0_src), "dst_heads_L1": str(l1_target),
+        "dst_tier": dst_tier,
+        "dtau_2a_l1_dst_mean": round(s2["dtau_2a_l1_dst_mean"], 4),
+        "path_fraction_L2": round(s2["path_fraction_L2"], 4),
+        "path_fraction_L3": round(s2["path_fraction_L3"], 4),
+        "path_fraction_global": round(s2["path_fraction_global"], 4),
+        "path_fraction_global_null": round(s2.get("path_fraction_global_null", float("nan")), 4),
+    }
+    write_stage2_table([stage2_row], str(out / "stage2_table.csv"))
+
+    summary = {
+        "seed": seed, "ckpt": str(ckpt_path), "n_batches": n_batches, "bs_mean": bs_mean,
+        "dst_tier": dst_tier, "l1_target": l1_target, "l0_src": l0_src,
+        "redundancy_ladder": redundancy_ordering(redundancy) if redundancy else None,
+        "stage1": stage1_rows,
+        "stage2": s2,
+    }
+    with open(out / "summary.json", "w") as f:
+        json.dump(summary, f, indent=2, default=float)
+    return summary
