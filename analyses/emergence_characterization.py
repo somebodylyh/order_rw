@@ -106,3 +106,59 @@ def event_timing(steps, mass_entropy, plateau_eps=0.1):
         comp_i += 1
     return {"onset": int(steps[onset_i]), "midpoint": int(steps[mid_i]),
             "completion": int(steps[comp_i])}
+
+
+# ── Task 3: A2 winner predictability ─────────────────────────────────────────
+
+def _auc(scores, labels):
+    """Rank-based ROC-AUC; nan if single-class (e.g. all-zero label)."""
+    labels = np.asarray(labels)
+    scores = np.asarray(scores, dtype=float)
+    pos = labels == 1
+    neg = ~pos
+    if pos.sum() == 0 or neg.sum() == 0:
+        return float("nan")
+    order = scores.argsort()
+    ranks = np.empty_like(order, dtype=float)
+    ranks[order] = np.arange(1, len(scores) + 1)
+    return float((ranks[pos].sum() - pos.sum() * (pos.sum() + 1) / 2)
+                 / (pos.sum() * neg.sum()))
+
+
+def _spearman(a, b):
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    ra = a.argsort().argsort().astype(float)
+    rb = b.argsort().argsort().astype(float)
+    ra -= ra.mean()
+    rb -= rb.mean()
+    denom = np.sqrt((ra ** 2).sum() * (rb ** 2).sum()) + 1e-12
+    return float((ra * rb).sum() / denom)
+
+
+def winner_predictability(seed_traj, winner_dict, early_steps=(0, 200, 600, 1000)):
+    """Does early |tau| rank predict final carrier membership? Verdict = early-bias
+    (winners lead early) vs contingent (tied until the pruning window)."""
+    steps = seed_traj["steps"]
+    A = seed_traj["abs_tau"]
+    L = winner_dict["winning_layer"]
+    wh = set(winner_dict["winner_heads"])
+    final = A[-1, L]                                  # (8,)
+    labels = np.array([1 if h in wh else 0 for h in range(8)])
+    step_idx = {int(s): i for i, s in enumerate(steps)}
+    auc, spearman = {}, {}
+    for s in early_steps:
+        i = step_idx[s]
+        early = A[i, L]                              # (8,) within winning layer
+        auc[s] = _auc(early, labels)
+        spearman[s] = _spearman(early, final)
+    layer_rank = {}
+    for s in early_steps:
+        i = step_idx[s]
+        sums = A[i].sum(axis=1)
+        layer_rank[s] = int((sums > sums[L]).sum() + 1)   # 1 = highest
+    early_auc = np.nanmean([auc[s] for s in early_steps if s <= 600])
+    verdict = "early-bias" if early_auc >= 0.8 else "contingent"
+    return {"auc": auc, "spearman": spearman,
+            "winning_layer_rank_by_step": layer_rank, "verdict": verdict,
+            "tier": winner_dict["tier"]}
