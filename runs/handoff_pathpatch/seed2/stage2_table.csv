@@ -1,0 +1,2 @@
+seed,src_heads_L0,dst_heads_L1,dst_tier,dtau_2a_l1_dst_mean,path_fraction_L2,path_fraction_L3,path_fraction_global,path_fraction_global_null
+2,"[1, 6, 7]","[0, 3, 5, 7]",strong,-0.0204,0.2069,0.1589,0.184,0.3165
