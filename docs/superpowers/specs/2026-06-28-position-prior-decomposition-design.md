@@ -52,14 +52,19 @@ interact; the floors are different *kinds* of baselines).
 | control | what it isolates |
 |---|---|
 | **random/destroyed-B null** | rollout/readout chance baseline (no structure) |
-| **synthetic uniform-causal attention** | pure mask+readout theoretical floor: `att[i,j]=1/(i+1)` for `j≤i`, fed through `build_model_frame_strict65 → C-D+L rollout` |
+| **synthetic uniform-causal B** | pure structure+readout theoretical floor: a 65-node strict65-convention block graph (**diagonal zeroed, no self-edge**) with uniform causal edges, fed straight to the `C-D+L rollout` |
 | **real step-0 zero-both-PE** | real architecture floor: the actual step-0 model with `wpe` *and* `wtpe` zeroed (random QK geometry + RMSNorm/qk-norm + causal mask, learned positional conditioning removed) |
 
-**Mask-convention requirement:** the synthetic uniform-causal baseline **must match the
-model's actual causal mask convention**, especially whether the diagonal/self edge
-(`j=i`) is allowed. The plan's first step verifies the model's mask (the formula above
-includes the diagonal); if the model forbids self-attention the synthetic must too,
-else the floor is biased.
+**Mask/diagonal-convention requirement (critical).** The order readout operates on the
+**strict65 B graph, whose diagonal is zeroed** (`build_model_frame_strict65` docstring:
+"Diagonal is zero"; a node has no self-edge). The synthetic floor is therefore defined
+**at the B level** to match that convention, *not* at the raw-attention level: content
+edges `B[i,j] = uniform for j<i` (**strict** lower-triangle, no `j=i`), diagonal `0`,
+and the None-node structure (`B[:,0]=0`; `B[0,1:]` = uniform None→content). Building at
+the B level both matches the real readout's zeroed diagonal and avoids the
+token→block projection ambiguity. (The model's raw attention mask *does* include the
+diagonal — `tril` — but that self-mass is discarded when the B diagonal is zeroed, so it
+is irrelevant to the floor.)
 
 ### 1B — PE contribution (4 arms, hook-based)
 
@@ -187,7 +192,8 @@ whether (and when) any content binding appears relative to the pruning event.
 
 ## Units
 
-- `synthetic_uniform_causal_attn(S,H,T)` → causal-uniform attention stack.
+- `synthetic_uniform_causal_B(n_nodes=65)` → strict65-convention block graph, diagonal
+  zeroed, uniform causal `j<i` content edges + None-node structure (B-level floor).
 - `pe_ablation(model, which)` context manager (`which ∈ {wpe,wtpe,both,none}`),
   bit-identical on `none`.
 - `tau_table_under(model, chunks, ablation) -> tau[L,H]`.
@@ -197,8 +203,9 @@ whether (and when) any content binding appears relative to the pruning event.
 
 ## Testing (TDD)
 
-- `synthetic_uniform_causal_attn` fed to the rollout yields a **known** ascending τ
-  (regression-pinned value), confirming the mask/readout floor is computed correctly.
+- `synthetic_uniform_causal_B` (diagonal zeroed, strict `j<i`) fed to the rollout yields
+  an ascending τ **above the random-B null** (and its diagonal is exactly 0), confirming
+  the structure/readout floor is computed under the correct zeroed-diagonal convention.
 - `pe_ablation(none)` is **bit-identical** to a plain `run_clean` (τ Δ ≡ 0); restoration
   after the context manager leaves weights unchanged.
 - Frame sanity: on a synthetic σ with a known permutation, `τ_model_slot` and
