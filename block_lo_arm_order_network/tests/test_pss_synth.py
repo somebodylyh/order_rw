@@ -11,6 +11,11 @@ def test_synthetic_baselines_shapes():
     inv = synthetic_content_invariant(5)
     rnd = synthetic_content_randomized(5)
     assert len(inv) == 5 and len(rnd) == 5
+    assert all(isinstance(B, np.ndarray) and B.shape == (65, 65) for B in inv + rnd)
+
+    valid = valid_edge_mask(65)
+    assert all(np.count_nonzero(B[~valid]) == 0 for B in inv + rnd)
+
     assert np.allclose(inv[0], inv[4])                 # content-invariant: identical
     assert not np.allclose(rnd[0], rnd[4])             # randomized: differ
 
