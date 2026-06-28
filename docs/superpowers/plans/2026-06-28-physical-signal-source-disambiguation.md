@@ -726,9 +726,9 @@ git commit -m "feat: E3 relayout supporting diagnostic (anchor vs relayout drop)
 - Test: `block_lo_arm_order_network/tests/test_pss_verdict.py`
 
 **Interfaces:**
-- Produces: `matched_r2_null(M, mask, seeds=range(16)) -> dict` with deterministic raw/normalized randomized-null `mean` and population `std`; each draw uses `synthetic_content_randomized(M, seed=s)` and the same default text split as the real sample. `null_adjusted_excess(r2, null_mean) -> (r2-null_mean)/(1-null_mean)`.
-- Produces: `classify_source(content_variance, noise_floor, r2_raw_excess, r2_norm_excess, r2_raw_z, r2_norm_z) -> str`. Clear fixed-map evidence requires **both** excesses `>=0.15` and both matched-null z-scores `>=2`; clear absence requires both excesses `<=0.05` and both z-scores `<=1`. Then: map evidence + content ratio `<=0.5` → `B`; map evidence + ratio `>0.5` → `B+`; map absence + ratio `>=2` → `C`; every disagreement/near-null/boundary case → `mixed`. Absolute R² (including normalized R² `>=0.8`) never decides the class alone.
-- Produces: `run_seed(seed, root, out_dir, M=24, K_relayout=4, n_reveals=32) -> dict` — full E1(+E3) per carrier head. Every row reports `r2_slot_only_raw`, `r2_slot_only_norm`, both matched-null means/stds, both null-adjusted excesses, and both z-scores; nulls are matched to `len(use)` after validity gating. Writes `source.json` + `source.csv`.
+- Produces: `default_r2_null_base_seeds(M) -> tuple(i*M for i in range(16))` and `matched_r2_null(M, mask, base_seeds=None) -> dict`. Each of the 16 draws uses `synthetic_content_randomized(M, seed=base)`, which consumes seed block `[base, base+M-1]`; supplied bases must be 16 nonnegative, non-bool integers whose blocks do not overlap. The returned raw/normalized null `mean` and population `std` use the same default text split as the real sample. `null_adjusted_excess(r2, null_mean) -> (r2-null_mean)/(1-null_mean)`.
+- Produces: `classify_source(content_variance, noise_floor, r2_raw_excess, r2_norm_excess, r2_raw_null_effect, r2_norm_null_effect) -> str`. A null effect is the descriptive standardized distance `(r2-null_mean)/(null_std+1e-12)` across the 16 synthetic draws; it is **not** a z-test or inferential-significance claim. Clear fixed-map evidence requires both excesses `>=0.15` and both null effects `>=2`; clear absence requires both excesses `<=0.05` and both null effects `<=1`. These conservative heuristic thresholds require agreement of two representations. Then: map evidence + content ratio `<=0.5` → `B`; map evidence + ratio `>0.5` → `B+`; map absence + ratio `>=2` → `C`; every disagreement/near-null/boundary case → `mixed`. Absolute R² never decides the class alone.
+- Produces: `run_seed(seed, root, out_dir, M=24, K_relayout=4, n_reveals=32) -> dict` — full E1(+E3) per carrier head. Every row reports `r2_slot_only_raw`, `r2_slot_only_norm`, both matched-null means/stds, both null-adjusted excesses, and both descriptive null effects. Nulls are count-matched to `len(use)` after validity gating, but **not tau-selection-matched**: the synthetic draws do not reproduce carrier-validity selection and must not be described as inferential controls. Writes `source.json` + `source.csv`.
 - Consumes/extends: modifies `carrier_b65_per_text` (Task 1) to add `return_halves=False` → when True also returns `(halfA_list, halfB_list)` per-text B65 from two disjoint reveal halves.
 
 - [ ] **Step 1: Write the failing tests**
@@ -736,21 +736,37 @@ git commit -m "feat: E3 relayout supporting diagnostic (anchor vs relayout drop)
 ```python
 # tests/test_pss_verdict.py
 import pathlib, sys
+import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from analyses.physical_signal_source import classify_source
+from analyses.physical_signal_source import (
+    classify_source, default_r2_null_base_seeds, matched_r2_null, valid_edge_mask)
+
+def test_default_null_seed_blocks_are_disjoint():
+    M = 24
+    bases = default_r2_null_base_seeds(M)
+    assert len(bases) == 16
+    blocks = [set(range(base, base + M)) for base in bases]
+    assert all(blocks[i].isdisjoint(blocks[j])
+               for i in range(16) for j in range(i + 1, 16))
+
+def test_matched_null_rejects_overlapping_seed_blocks():
+    bases = list(default_r2_null_base_seeds(4))
+    bases[1] = bases[0] + 1
+    with pytest.raises(ValueError, match="overlap"):
+        matched_r2_null(4, valid_edge_mask(65), base_seeds=bases)
 
 def test_classify_source_rules():
     strong_map = dict(r2_raw_excess=0.3, r2_norm_excess=0.3,
-                      r2_raw_z=3.0, r2_norm_z=3.0)
+                      r2_raw_null_effect=3.0, r2_norm_null_effect=3.0)
     absent_map = dict(r2_raw_excess=0.0, r2_norm_excess=0.0,
-                      r2_raw_z=0.0, r2_norm_z=0.0)
+                      r2_raw_null_effect=0.0, r2_norm_null_effect=0.0)
     assert classify_source(0.001, 0.05, **strong_map) == "B"
     assert classify_source(0.2, 0.02, **absent_map) == "C"
     assert classify_source(0.06, 0.02, **strong_map) == "B+"
     # A high normalized absolute R² cannot rescue raw/null disagreement.
     disagree = dict(r2_raw_excess=0.02, r2_norm_excess=0.5,
-                    r2_raw_z=0.5, r2_norm_z=5.0)
+                    r2_raw_null_effect=0.5, r2_norm_null_effect=5.0)
     assert classify_source(0.001, 0.05, **disagree) == "mixed"
 ```
 
@@ -768,22 +784,36 @@ import csv as _csv, json as _json
 def null_adjusted_excess(r2, null_mean):
     return float((r2 - null_mean) / (1.0 - null_mean + 1e-12))
 
-def matched_r2_null(M, mask, seeds=range(16)):
+def default_r2_null_base_seeds(M):
+    if not isinstance(M, int) or isinstance(M, bool) or M < 2:
+        raise ValueError("M must be an integer >= 2")
+    return tuple(i * M for i in range(16))
+
+def matched_r2_null(M, mask, base_seeds=None):
+    bases = default_r2_null_base_seeds(M) if base_seeds is None else tuple(base_seeds)
+    if len(bases) != 16:
+        raise ValueError("base_seeds must contain exactly 16 entries")
+    if any(isinstance(b, bool) or not isinstance(b, (int, np.integer)) or b < 0
+           for b in bases):
+        raise ValueError("base_seeds must be nonnegative integers")
+    ordered = sorted(int(b) for b in bases)
+    if any(right < left + M for left, right in zip(ordered, ordered[1:])):
+        raise ValueError("base_seeds define overlapping seed blocks")
     vals = {"raw": [], "norm": []}
-    for seed in seeds:
-        Bs = synthetic_content_randomized(M, seed=seed)
+    for base in bases:
+        Bs = synthetic_content_randomized(M, seed=int(base))
         vals["raw"].append(slot_only_r2(Bs, mask, normalize=False))
         vals["norm"].append(slot_only_r2(Bs, mask, normalize=True))
     return {k: {"mean": float(np.mean(v)), "std": float(np.std(v, ddof=0))}
             for k, v in vals.items()}
 
 def classify_source(content_variance, noise_floor, r2_raw_excess, r2_norm_excess,
-                    r2_raw_z, r2_norm_z):
+                    r2_raw_null_effect, r2_norm_null_effect):
     ratio = content_variance / (noise_floor + 1e-9)
     map_evidence = (r2_raw_excess >= 0.15 and r2_norm_excess >= 0.15 and
-                    r2_raw_z >= 2.0 and r2_norm_z >= 2.0)
+                    r2_raw_null_effect >= 2.0 and r2_norm_null_effect >= 2.0)
     map_absent = (r2_raw_excess <= 0.05 and r2_norm_excess <= 0.05 and
-                  r2_raw_z <= 1.0 and r2_norm_z <= 1.0)
+                  r2_raw_null_effect <= 1.0 and r2_norm_null_effect <= 1.0)
     if map_evidence and ratio <= 0.5:
         return "B"
     if map_absent and ratio >= 2.0:
@@ -824,13 +854,16 @@ def run_seed(seed, root="runs/handoff_overnight", out_dir=None, M=24, K_relayout
         var = cross_text_variance(use, mask)
         r2_raw = slot_only_r2(use, mask, normalize=False)
         r2_norm = slot_only_r2(use, mask, normalize=True)
-        null = matched_r2_null(len(use), mask, seeds=range(16))
+        null = matched_r2_null(len(use), mask)
         raw_excess = null_adjusted_excess(r2_raw, null["raw"]["mean"])
         norm_excess = null_adjusted_excess(r2_norm, null["norm"]["mean"])
-        raw_z = (r2_raw - null["raw"]["mean"]) / (null["raw"]["std"] + 1e-12)
-        norm_z = (r2_norm - null["norm"]["mean"]) / (null["norm"]["std"] + 1e-12)
+        raw_null_effect = ((r2_raw - null["raw"]["mean"]) /
+                           (null["raw"]["std"] + 1e-12))
+        norm_null_effect = ((r2_norm - null["norm"]["mean"]) /
+                            (null["norm"]["std"] + 1e-12))
         sim = pairwise_similarity(use, mask)
-        verdict = classify_source(cvar, floor, raw_excess, norm_excess, raw_z, norm_z)
+        verdict = classify_source(
+            cvar, floor, raw_excess, norm_excess, raw_null_effect, norm_null_effect)
         rows.append({"seed": seed, "layer": layer, "head": h, "n_valid": len(Bv),
                      "variance": var, "noise_floor": floor, "content_variance": cvar,
                      "r2_slot_only_raw": r2_raw, "r2_slot_only_norm": r2_norm,
@@ -839,7 +872,8 @@ def run_seed(seed, root="runs/handoff_overnight", out_dir=None, M=24, K_relayout
                      "r2_null_norm_mean": null["norm"]["mean"],
                      "r2_null_norm_std": null["norm"]["std"],
                      "r2_raw_excess": raw_excess, "r2_norm_excess": norm_excess,
-                     "r2_raw_z": raw_z, "r2_norm_z": norm_z, "pairwise_sim": sim,
+                     "r2_raw_null_effect": raw_null_effect,
+                     "r2_norm_null_effect": norm_null_effect, "pairwise_sim": sim,
                      "var_invariant": vi, "var_randomized": vr, "verdict": verdict})
     relay = relayout_diagnostic(ckpt, layer, heads, K=K_relayout, M=8)
     with open(out / "source.csv", "w", newline="") as f:
@@ -932,7 +966,7 @@ Expected: `source.json/csv/png` per seed.
 
 - [ ] **Step 2: Write `analyses/physical_signal_source_README.md`**
 
-Per seed: per-head variance (vs synthetic anchors), raw + normalized slot-only R² with matched-null mean/std, null-adjusted excess and z-score, pairwise sim, carrier-valid fraction, relayout drop, and the **B/B+/C/mixed verdict** (seed42 single-head reported separately). The line-level statement: is the L0 physical-order signal a fixed-layout map (B), content-dependent (C), or B+. Then the **pre-registered P3′ fork**: B → positional/QK causal intervention; C → content-feature causal intervention; B+ → separate base map from modulation; never output-ablation→same-head-readout.
+Per seed: per-head variance (vs synthetic anchors), raw + normalized slot-only R² with count-matched synthetic-null mean/std, null-adjusted excess and descriptive null effect (not inferential significance; not tau-selection-matched), pairwise sim, carrier-valid fraction, relayout drop, and the **B/B+/C/mixed verdict** (seed42 single-head reported separately). The line-level statement: is the L0 physical-order signal a fixed-layout map (B), content-dependent (C), or B+. Then the **pre-registered P3′ fork**: B → positional/QK causal intervention; C → content-feature causal intervention; B+ → separate base map from modulation; never output-ablation→same-head-readout.
 
 - [ ] **Step 3: Commit**
 
