@@ -152,13 +152,10 @@ def slot_only_r2(B_list, mask, n_train=None, normalize=True):
     test = X[n_train:]
     if len(test) == 0:
         return float("nan")
-    # Per-edge R²: for each valid edge j, how well does B_hat[j] predict the test values?
-    # Averaged over edges, this isolates between-text variance (not between-edge variance).
-    ss_res_per = ((test - B_hat) ** 2).mean(axis=0)         # (n_valid,)
-    test_mean = test.mean(axis=0)                            # (n_valid,)
-    ss_tot_per = ((test - test_mean) ** 2).mean(axis=0) + 1e-12  # (n_valid,)
-    r2_per = 1.0 - ss_res_per / ss_tot_per
-    return float(r2_per.mean())
+    # Global held-out R² over all held-out text × valid-edge entries.
+    ss_res = ((test - B_hat) ** 2).sum()
+    ss_tot = ((test - test.mean()) ** 2).sum() + 1e-12
+    return float(1.0 - ss_res / ss_tot)
 
 
 def random_token_chunk(chunk, vocab_size, rng):

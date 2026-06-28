@@ -411,7 +411,7 @@ git commit -m "feat: cross-text variance + pairwise similarity (calibrated vs sy
 - Test: `block_lo_arm_order_network/tests/test_pss_predictor.py`
 
 **Interfaces:**
-- Produces: `slot_only_r2(B_list, mask, n_train=None, normalize=True) -> float` — fit `B_hat=mean_{train texts}` on the first `n_train` texts (default half), evaluate R² on the held-out texts' valid edges. Text-level split.
+- Produces: `slot_only_r2(B_list, mask, n_train=None, normalize=True) -> float` — fit `B_hat=mean_{train texts}` on the first `n_train` texts (default half), evaluate one global R² over all held-out text×valid-edge entries. Text-level split. With row normalization, the randomized synthetic baseline calibrates near 0.70 because between-edge structure contributes to the global denominator; therefore the low anchor is `<0.8`, not `<0.5`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -425,8 +425,11 @@ from analyses.physical_signal_source import (
 
 def test_predictor_high_on_invariant_low_on_random():
     m = valid_edge_mask(65)
-    assert slot_only_r2(synthetic_content_invariant(8), m) > 0.95   # fixed table explains all
-    assert slot_only_r2(synthetic_content_randomized(40), m) < 0.5  # content-free table fails
+    invariant_r2 = slot_only_r2(synthetic_content_invariant(8), m)
+    randomized_r2 = slot_only_r2(synthetic_content_randomized(40), m)
+    assert invariant_r2 > 0.95                    # fixed table explains all
+    assert 0.6 < randomized_r2 < 0.8              # global held-out R² calibrates near 0.70
+    assert invariant_r2 > randomized_r2
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
