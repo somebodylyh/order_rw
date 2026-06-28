@@ -241,3 +241,31 @@ def content_dependence(ckpt_path, carrier_layer, carrier_head, method="C-D+L",
     return {"tau_clean": abs(tau_clean), "tau_content_permuted_mean": cp_mean,
             "tau_entry_shuffled_mean": float(np.mean(es)),
             "content_dependent": bool(abs(tau_clean) - cp_mean > 0.4)}
+
+
+# ── Physical-order emergence trajectory (per-layer + L0 per-head) ─────────────
+
+def emergence_curves(seed, root="runs/handoff_overnight", steps=DEFAULT_STEPS, K=3,
+                     primary="C-D+L", out_dir=None):
+    """Per-step canonical physical tau: per-layer max|tau| + L0 per-head signed tau +
+    strong-carrier multiplicity. Writes emergence_curves.json; returns the summary."""
+    out = pathlib.Path(out_dir or f"runs/physical_emergence/seed{seed}")
+    out.mkdir(parents=True, exist_ok=True)
+    by_step = {}
+    for st in steps:
+        agg = scan_aggregated(f"{root}/seed{seed}/ckpt_step{st}.pt", K=K, primary=primary)
+        per = agg["per"]
+        layer_max = {L: max((abs(v["tau_mean"]) for (l, h, m), v in per.items()
+                             if l == L and m == primary), default=0.0) for L in range(4)}
+        l0_heads = {h: next((v["tau_mean"] for (l, hh, m), v in per.items()
+                             if l == 0 and hh == h and m == primary), 0.0) for h in range(8)}
+        n_strong_L0 = sum(1 for (l, h) in agg["strong_pass_heads"] if l == 0)
+        by_step[str(st)] = {"layer_max": layer_max, "l0_heads": l0_heads,
+                            "n_strong": len(agg["strong_pass_heads"]),
+                            "n_strong_L0": n_strong_L0, "floor": agg["destroyed_floor_mean"]}
+    summary = {"seed": seed, "primary": primary, "by_step": by_step,
+               "carrier_L0_step10000": [h for (l, h) in
+                   scan_aggregated(f"{root}/seed{seed}/ckpt_step10000.pt", K=K, primary=primary)["strong_pass_heads"]
+                   if l == 0]}
+    _json.dump(summary, open(out / "emergence_curves.json", "w"), indent=2, default=float)
+    return summary
