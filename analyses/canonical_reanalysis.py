@@ -109,3 +109,29 @@ def canonical_scan(ckpt_path, M=8, batch_size=8, sampling_seed=0,
                              "gate_status": classify_gate_status(m, dz),
                              "combined_score": combined_discovery_score(m, dz)})
     return rows
+
+
+# ── Task 2: multi-sampling-seed aggregation + carrier ────────────────────────
+
+def scan_aggregated(ckpt_path, K=3, primary="C-D+L", **kw):
+    """Run canonical_scan for sampling_seed in range(K); aggregate per
+    (layer,head,method) tau mean/std + strong_frac; pick the primary-method carrier."""
+    by_key = defaultdict(list)
+    gate_by_key = defaultdict(list)
+    floors = []
+    for s in range(K):
+        for r in canonical_scan(ckpt_path, sampling_seed=s, **kw):
+            k = (r["layer"], r["head"], r["method"])
+            by_key[k].append(r["tau_vs_l2r"])
+            gate_by_key[k].append(r["gate_status"])
+            floors.append(r["destroyed_abs_tau_mean"])
+    per = {}
+    for k, taus in by_key.items():
+        per[k] = {"tau_mean": float(np.mean(taus)), "tau_std": float(np.std(taus)),
+                  "strong_frac": float(np.mean([g == "strong_pass" for g in gate_by_key[k]]))}
+    prim = {k: v for k, v in per.items() if k[2] == primary}
+    best_k = max(prim, key=lambda k: abs(prim[k]["tau_mean"]))
+    strong = sorted({(l, h) for (l, h, m), v in prim.items() if v["strong_frac"] >= 0.5})
+    return {"per": per, "best_head": (best_k[0], best_k[1]), "best_method": primary,
+            "best_tau": abs(prim[best_k]["tau_mean"]), "strong_pass_heads": strong,
+            "destroyed_floor_mean": float(np.mean(floors))}
