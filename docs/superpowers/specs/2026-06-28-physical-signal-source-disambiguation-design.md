@@ -50,18 +50,30 @@ Hold the **training layout fixed** and a **shared set of reveal orders fixed**; 
 **text content** across `M` natural samples. For each carrier head compute, on its per-text
 B65 (the loss-aligned canonical extraction, batch-meaned over the shared reveals):
 
-1. **τ_physical per sample** — *validity only* (confirm the carrier is active on each text;
-   `τ≈1`). **Never used to judge B/C.**
+1. **τ_physical per sample + carrier-validity gate** — *validity only* (confirm the carrier is
+   active on each text; `τ≈1`). **Never used to judge B/C**, but used to **gate**: a (text,head)
+   enters the variance/R² analysis only if its canonical τ_physical clears a carrier-validity
+   threshold on that text (strong heads ≥0.9; seed42's single weak head reported separately with
+   a lower/soft threshold, never hard-excluded). Otherwise a text where the carrier simply isn't
+   active would inflate attention variance and masquerade as C. **Report metrics both
+   all-sample and carrier-valid-only.**
 2. **Cross-text attention/B variance (primary B/C metric):** per causal edge,
-   `Var_text B_text[i,j]`, normalized per query row (divide each row by its mean to remove
-   entropy/scale shifts). Report the row-normalized mean edge variance. **Low → B; high → C/B+.**
-3. **Pairwise cross-text similarity:** mean over text pairs of `sim(B_text_a, B_text_b)`
-   (row-normalized Frobenius/Spearman). **≈1 → B; lower → C/B+.**
+   `Var_text B_text[i,j]`, computed **only on the valid canonical B65 edge support** (the edges
+   the readout uses — None→content and content→content; **exclude structurally-invalid /
+   always-zero edges** so that masked zeros do not deflate variance toward B). **Row-normalize**
+   each valid row by its **L1 mass**: `B_norm[i,:] = B[i,:] / (Σ_{valid j}|B[i,j]| + ε)`.
+   **Report both raw and row-normalized variance** as a robustness check (agreement = stable).
+   **Low → B; high → C/B+.**
+3. **Pairwise cross-text similarity:** mean over text pairs of `sim(B_text_a, B_text_b)` on the
+   valid-edge support (row-normalized Frobenius/Spearman). **≈1 → B; lower → C/B+.**
 4. **Slot-only predictor held-out R² (strong modeling B-evidence):** the strongest *content-
    free fixed-layout* predictor is the per-edge mean over training texts,
-   `B_hat[i,j] = mean_{train texts} B[i,j]`. Predict B on **held-out** texts using only
-   slot-pair identity; report `R²_slot_only` (row-normalized). **High R² → a content-free
-   slot-pair table explains the carrier = B; low R² with τ still high → content-dependent = C/B+.**
+   `B_hat[i,j] = mean_{train texts} B[i,j]`. **The train/held-out split is over *text samples*,
+   not over edges** — the predictor sees **no activations from held-out texts** (any edge split
+   would leak content and void the "content-free" meaning). Predict B on held-out texts using
+   only slot-pair identity; report `R²_slot_only` on the valid-edge support (raw and
+   row-normalized). **High R² → a content-free slot-pair table explains the carrier = B; low R²
+   with τ still high → content-dependent = C/B+.**
 
    Predictor complexity is fixed deliberately at the **mean-table** level (one free value per
    edge, no content features) — strong enough not to under-estimate B, but it *cannot* absorb
@@ -80,8 +92,8 @@ B65 (the loss-aligned canonical extraction, batch-meaned over the shared reveals
 |---|---|---|
 | low | high | **B** (fixed map) |
 | high | low | **C / B+** (content-driven) |
-| high | high | scale/entropy artifact → re-check row normalization, inspect residual |
-| low | low | predictor/metric error → debug before interpreting |
+| high | high | **inspect residual** — could be insufficient row-normalization, or a global strength shift with fixed pattern shape, or structured content modulation; do **not** auto-judge |
+| low | low | predictor / metric / valid-edge-mask error → debug before interpreting |
 
 ### E3 — Relayout OOD diagnostic **[supporting / appendix, not verdict]**
 Reuse `position_prior_decomp.relayout_chunks`: training-layout **anchor** + `K` random
@@ -93,8 +105,16 @@ override E1.
 
 ## Verdict (per seed, pre-registered)
 
-- **B (fixed-layout map):** τ_physical high; cross-text variance **low**; slot-only R² **high**;
-  perturbations weak except severe OOD.
+**Calibrate "low/high" against synthetic baselines, not absolute numbers:** build a
+**content-invariant** synthetic B (identical across texts → variance≈0, R²≈1) and a
+**content-randomized** synthetic B (variance high, R² low). A real carrier's metrics are read
+*relative to* these two anchors (and to a shuffled-text baseline). Avoid hard B/C calls when a
+metric sits near the boundary between the anchors. Suggested operational guides (refined in the
+plan, not hard-coded): held-out R² ≥ 0.8 *and* clearly above the shuffled-text baseline for B;
+variance substantially above the content-invariant anchor for C/B+.
+
+- **B (fixed-layout map):** τ_physical high; cross-text variance **near the content-invariant
+  anchor (low)**; slot-only R² **high**; perturbations weak except severe OOD.
 - **B+ (map with content modulation):** τ high; R² high **but incomplete**; measurable
   content-dependent residual variance; perturbations modulate but don't destroy.
 - **C (content-dependent recovery):** τ high; cross-text variance **high in structured ways**;
