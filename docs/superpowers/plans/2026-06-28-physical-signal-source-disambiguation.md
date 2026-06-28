@@ -284,6 +284,10 @@ git commit -m "feat: synthetic content-invariant/randomized baselines + order-ta
 - Produces:
   - `cross_text_variance(B_list, mask, normalize=True) -> float` — mean over valid edges of `Var_text` (row-normalized if `normalize`).
   - `pairwise_similarity(B_list, mask, normalize=True) -> float` — mean over text pairs of Pearson r on valid edges.
+  - `within_text_noise_floor(halfA_list, halfB_list, mask, normalize=True) -> float` — the **sampling-noise variance floor**: for each text, the mean per-edge squared difference between its two reveal-half B65s, averaged over texts (×0.5 to match a single-estimate variance). `halfA_list`/`halfB_list` are the per-text B65 built from two disjoint halves of that text's reveals.
+  - `content_variance(B_list, halfA_list, halfB_list, mask, normalize=True) -> float` — `max(0, cross_text_variance(B_list) − within_text_noise_floor(halfA, halfB))`: the between-text variance **above the sampling floor**, i.e. the content-attributable variance.
+
+  **Why (resolved during Task 1):** at low n_reveals a single text's B65 is noisy (τ swings to ~−0.3); the synthetic content-invariant baseline (exact copies) has zero sampling noise and so under-estimates the real floor. A fixed-layout (B) carrier could otherwise show high cross-text variance purely from sampling noise and be mis-read as C. The within-text reveal-split floor measures that sampling noise on the *real* data so `content_variance` isolates genuine between-text (content) structure.
 
 - [ ] **Step 1: Write the failing tests** (calibrate against the synthetic anchors)
 
@@ -294,7 +298,8 @@ import numpy as np
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from analyses.physical_signal_source import (
-    cross_text_variance, pairwise_similarity, valid_edge_mask,
+    cross_text_variance, pairwise_similarity, within_text_noise_floor,
+    content_variance, valid_edge_mask,
     synthetic_content_invariant, synthetic_content_randomized)
 
 def test_variance_and_similarity_calibration():
@@ -304,6 +309,18 @@ def test_variance_and_similarity_calibration():
     assert cross_text_variance(rnd, m) > cross_text_variance(inv, m)
     assert pairwise_similarity(inv, m) > 0.99               # invariant -> ~1
     assert pairwise_similarity(rnd, m) < pairwise_similarity(inv, m)
+
+def test_within_text_floor_and_content_variance():
+    m = valid_edge_mask(65)
+    # identical halves -> zero floor; identical B_list -> zero content variance
+    inv = synthetic_content_invariant(6)
+    assert within_text_noise_floor(inv, inv, m) < 1e-9
+    assert content_variance(inv, inv, inv, m) < 1e-9
+    # if cross-text variance is entirely sampling noise (floor == cross var),
+    # content_variance clamps to 0
+    rnd = synthetic_content_randomized(6)
+    cv = content_variance(rnd, rnd, rnd, m)               # floor uses same-as-cross here
+    assert cv >= 0.0
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -335,6 +352,17 @@ def pairwise_similarity(B_list, mask, normalize=True):
             if np.isfinite(r):
                 sims.append(r)
     return float(np.mean(sims)) if sims else 1.0
+
+def within_text_noise_floor(halfA_list, halfB_list, mask, normalize=True):
+    XA = _stack(halfA_list, mask, normalize)
+    XB = _stack(halfB_list, mask, normalize)
+    # per-text per-edge half-difference variance; 0.5*mean((a-b)^2) ~ single-estimate var
+    return float((0.5 * (XA - XB) ** 2).mean())
+
+def content_variance(B_list, halfA_list, halfB_list, mask, normalize=True):
+    cv = cross_text_variance(B_list, mask, normalize)
+    floor = within_text_noise_floor(halfA_list, halfB_list, mask, normalize)
+    return float(max(0.0, cv - floor))
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -641,7 +669,8 @@ git commit -m "feat: E3 relayout supporting diagnostic (anchor vs relayout drop)
 - Test: `block_lo_arm_order_network/tests/test_pss_verdict.py`
 
 **Interfaces:**
-- Produces: `classify_source(variance, r2, var_invariant, var_randomized, r2_threshold=0.8) -> str` — `"B"|"B+"|"C"|"mixed"` from the calibrated metrics; `run_seed(seed, root, out_dir, M=24, K_relayout=4) -> dict` — full E1(+E3) per carrier head + verdict, writes `source.json` + `source.csv`.
+- Produces: `classify_source(content_variance, noise_floor, r2, r2_threshold=0.8) -> str` — `"B"|"B+"|"C"|"mixed"` from the **content-variance-vs-noise-floor ratio** + R²; `run_seed(seed, root, out_dir, M=24, K_relayout=4, n_reveals=32) -> dict` — full E1(+E3) per carrier head (using `carrier_b65_per_text(..., n_reveals=32, return_halves=True)` + `content_variance` over the within-text floor) + verdict, writes `source.json` + `source.csv`.
+- Consumes/extends: modifies `carrier_b65_per_text` (Task 1) to add `return_halves=False` → when True also returns `(halfA_list, halfB_list)` per-text B65 from two disjoint reveal halves.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -653,12 +682,12 @@ sys.path.insert(0, str(ROOT))
 from analyses.physical_signal_source import classify_source
 
 def test_classify_source_rules():
-    # low variance (near invariant) + high R2 -> B
-    assert classify_source(variance=0.001, r2=0.95, var_invariant=0.001, var_randomized=0.2) == "B"
-    # high variance + low R2 -> C
-    assert classify_source(variance=0.15, r2=0.3, var_invariant=0.001, var_randomized=0.2) == "C"
-    # high R2 but not complete + mid variance -> B+
-    assert classify_source(variance=0.05, r2=0.85, var_invariant=0.001, var_randomized=0.2) == "B+"
+    # content_variance ~ noise floor (almost all variance is sampling noise) + high R2 -> B
+    assert classify_source(content_variance=0.001, noise_floor=0.05, r2=0.95) == "B"
+    # content_variance >> floor + low R2 -> C
+    assert classify_source(content_variance=0.2, noise_floor=0.02, r2=0.3) == "C"
+    # high R2 but content_variance clearly above floor -> B+
+    assert classify_source(content_variance=0.06, noise_floor=0.02, r2=0.85) == "B+"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -672,41 +701,53 @@ Expected: FAIL
 # append to analyses/physical_signal_source.py
 import csv as _csv, json as _json
 
-def classify_source(variance, r2, var_invariant, var_randomized, r2_threshold=0.8):
-    # relative position of variance between the two synthetic anchors
-    span = max(var_randomized - var_invariant, 1e-9)
-    var_frac = (variance - var_invariant) / span        # 0=invariant, 1=randomized
-    if r2 >= 0.92 and var_frac <= 0.25:
+def classify_source(content_variance, noise_floor, r2, r2_threshold=0.8):
+    # content_variance is between-text variance ABOVE the within-text sampling floor.
+    # Reference it to the real noise floor: content_ratio = content_var / (floor + eps).
+    # ratio ~0 => cross-text variance is just sampling noise => B.
+    ratio = content_variance / (noise_floor + 1e-9)
+    if r2 >= 0.92 and ratio <= 0.5:
         return "B"
-    if r2 < r2_threshold and var_frac >= 0.5:
+    if r2 < r2_threshold and ratio >= 2.0:
         return "C"
-    if r2 >= r2_threshold:
+    if r2 >= r2_threshold and ratio > 0.5:
         return "B+"
     return "mixed"
 
-def run_seed(seed, root="runs/handoff_overnight", out_dir=None, M=24, K_relayout=4):
+# FIRST modify carrier_b65_per_text (Task 1) to add `return_halves=False`: when True it
+# also returns halfA_list, halfB_list — per-text B65 built from two disjoint halves of that
+# text's reveals (first n_reveals//2 vs the rest). Run with n_reveals=32 (per Task-1 finding
+# that per-text B saturates at ~8-32 reveals; 32 gives a clean within-text floor).
+def run_seed(seed, root="runs/handoff_overnight", out_dir=None, M=24, K_relayout=4, n_reveals=32):
     from analyses.physical_signal_source import (
         carrier_b65_per_text, carrier_valid_filter, valid_edge_mask,
         cross_text_variance, pairwise_similarity, slot_only_r2,
+        content_variance, within_text_noise_floor,
         synthetic_content_invariant, synthetic_content_randomized, relayout_diagnostic)
     CARRIERS = {2: (0, [2,3,4,5]), 42: (0, [2]), 123: (0, [1,2,3,4])}
     layer, heads = CARRIERS[seed]
     out = pathlib.Path(out_dir or f"runs/physical_signal_source/seed{seed}")
     out.mkdir(parents=True, exist_ok=True)
     mask = valid_edge_mask(65)
-    vi = cross_text_variance(synthetic_content_invariant(M), mask)
+    vi = cross_text_variance(synthetic_content_invariant(M), mask)   # synthetic anchors (0 / high)
     vr = cross_text_variance(synthetic_content_randomized(M), mask)
     ckpt = f"{root}/seed{seed}/ckpt_step10000.pt"
     rows = []
     for h in heads:
-        B_list, tau_list = carrier_b65_per_text(ckpt, layer, h, M=M)
+        B_list, tau_list, hA, hB = carrier_b65_per_text(
+            ckpt, layer, h, M=M, n_reveals=n_reveals, return_halves=True)
         Bv, idx = carrier_valid_filter(B_list, tau_list, thr=0.9 if len(heads) > 1 else 0.6)
-        use = Bv if len(Bv) >= max(4, M // 4) else B_list      # fall back if gate too strict
+        use = Bv if len(Bv) >= max(4, M // 4) else B_list
+        hAv = [hA[i] for i in idx] if len(Bv) == len(idx) and use is Bv else hA
+        hBv = [hB[i] for i in idx] if len(Bv) == len(idx) and use is Bv else hB
+        floor = within_text_noise_floor(hAv, hBv, mask)
+        cvar = content_variance(use, hAv, hBv, mask)            # between-text minus sampling floor
         var = cross_text_variance(use, mask); r2 = slot_only_r2(use, mask)
         sim = pairwise_similarity(use, mask)
-        verdict = classify_source(var, r2, vi, vr)
+        verdict = classify_source(cvar, floor, r2)             # classify: content vs noise floor
         rows.append({"seed": seed, "layer": layer, "head": h, "n_valid": len(Bv),
-                     "variance": var, "r2_slot_only": r2, "pairwise_sim": sim,
+                     "variance": var, "noise_floor": floor, "content_variance": cvar,
+                     "r2_slot_only": r2, "pairwise_sim": sim,
                      "var_invariant": vi, "var_randomized": vr, "verdict": verdict})
     relay = relayout_diagnostic(ckpt, layer, heads, K=K_relayout, M=8)
     with open(out / "source.csv", "w", newline="") as f:
