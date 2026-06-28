@@ -22,6 +22,8 @@ if str(_BLOCK_DIR) not in sys.path:
 
 from none_separated_block_graph import rollout_by_method  # noqa: E402
 
+TRAJ_ROOT = "runs/handoff_overnight"
+
 
 # ── Task 1: frame-aware tau helpers ──────────────────────────────────────────
 
@@ -267,3 +269,70 @@ def relayout_chunks(chunks_model, training_clean_perm, layout_clean_perm):
     """Model-frame chunks (trained layout) -> physical -> model-frame under layout."""
     idx_phys = model_to_phys_idx_clean(chunks_model, training_clean_perm)
     return phys_to_model_idx_clean(idx_phys, layout_clean_perm)
+
+
+# ── Task 8: binding scores (tau_pos / tau_content) + anchor-validity gate ─────
+
+from attention_trajectory import extract_all_layer_B  # noqa: E402
+
+
+def _training_clean_perm(ckpt_path):
+    ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    proto = ck["clean_protocol"]
+    return CleanPermutation(
+        block_perm_phys_to_model=torch.tensor(proto["block_perm_phys_to_model"], dtype=torch.long),
+        inv_perm_model_to_phys=torch.tensor(proto["inv_perm_model_to_phys"], dtype=torch.long))
+
+
+def _layout_binding(model, chunks, training_perm, layout, winning_layer, carrier_heads,
+                    n_batches, bs_mean, device):
+    """Mean tau_pos / tau_content over carrier heads & batches for one layout."""
+    dev = torch.device(device)
+    lp = clean_perm_from_layout(layout)
+    inv_k = np.asarray(layout["inv_perm"], dtype=int)
+    pos_acc, cont_acc = [], []
+    for i in range(n_batches):
+        pc, po = make_probe_batch(chunks, bs_mean, np.random.default_rng(i))
+        pc_re = relayout_chunks(pc, training_perm, lp)
+        attn_list, _ = run_clean(model, pc_re, po, dev)
+        B = extract_all_layer_B(attn_list, po)[winning_layer].mean(axis=0)  # (8,65,65)
+        for h in carrier_heads:
+            order = rollout_order(B[h])
+            pos_acc.append(tau_vs_arange(order))
+            cont_acc.append(tau_vs_arange(inv_k[order]))
+    return float(np.mean(pos_acc)), float(np.mean(cont_acc))
+
+
+def binding_scores(seed, ckpt_step, layouts, winning_layer, carrier_heads, tier,
+                   root=TRAJ_ROOT, bs_mean=16, n_batches=4, device="cpu",
+                   collapse=0.3):
+    ckpt = f"{root}/seed{seed}/ckpt_step{ckpt_step}.pt"
+    model, chunks, _ = load_model_and_chunks_seed(
+        ckpt, max(64, bs_mean * n_batches), torch.device(device))
+    training_perm = _training_clean_perm(ckpt)
+    per_layout = []
+    for lay in layouts:
+        tp, tc = _layout_binding(model, chunks, training_perm, lay, winning_layer,
+                                 carrier_heads, n_batches, bs_mean, device)
+        per_layout.append({"layout_id": lay["layout_id"], "is_training": lay["is_training_layout"],
+                           "tau_pos": tp, "tau_content": tc})
+    anchor = next(p for p in per_layout if p["is_training"])
+    relay = [p for p in per_layout if not p["is_training"]]
+    relay_pos = float(np.mean([p["tau_pos"] for p in relay])) if relay else float("nan")
+    relay_cont = float(np.mean([p["tau_content"] for p in relay])) if relay else float("nan")
+    anchor_thr = 0.95 if tier == "strong" else 0.60
+    anchor_valid = bool(anchor["tau_pos"] >= anchor_thr)
+    if not anchor_valid:
+        verdict = "invalid"
+    elif relay_pos < collapse and relay_cont < collapse:
+        verdict = "ood-break"
+    elif relay_cont > relay_pos:
+        verdict = "content-bound"
+    else:
+        verdict = "slot-scaffold"
+    return {"seed": seed, "ckpt_step": ckpt_step, "winning_layer": winning_layer,
+            "carrier_heads": list(carrier_heads), "tier": tier,
+            "anchor_tau_pos": anchor["tau_pos"], "anchor_tau_content": anchor["tau_content"],
+            "relayout_mean_pos": relay_pos, "relayout_mean_content": relay_cont,
+            "relayout_drop": relay_pos - anchor["tau_pos"],
+            "anchor_valid": anchor_valid, "verdict": verdict, "per_layout": per_layout}
