@@ -135,3 +135,33 @@ def scan_aggregated(ckpt_path, K=3, primary="C-D+L", **kw):
     return {"per": per, "best_head": (best_k[0], best_k[1]), "best_method": primary,
             "best_tau": abs(prim[best_k]["tau_mean"]), "strong_pass_heads": strong,
             "destroyed_floor_mean": float(np.mean(floors))}
+
+
+# ── Task 3: per-seed ckpt sweep (C1 emergence baseline) ──────────────────────
+
+import csv as _csv  # noqa: E402
+import json as _json  # noqa: E402
+
+DEFAULT_STEPS = tuple(range(0, 10001, 1000))
+
+
+def sweep_seed(seed, root="runs/handoff_overnight", steps=DEFAULT_STEPS, K=3, out_dir=None):
+    out = pathlib.Path(out_dir or f"runs/canonical_reanalysis/seed{seed}")
+    out.mkdir(parents=True, exist_ok=True)
+    by_step = {}
+    for st in steps:
+        agg = scan_aggregated(f"{root}/seed{seed}/ckpt_step{st}.pt", K=K)
+        by_step[str(st)] = {"best_head": list(agg["best_head"]), "best_method": agg["best_method"],
+                            "best_tau": agg["best_tau"], "n_strong": len(agg["strong_pass_heads"]),
+                            "strong_pass_heads": [list(h) for h in agg["strong_pass_heads"]],
+                            "destroyed_floor": agg["destroyed_floor_mean"]}
+    with open(out / "strict65_sweep.tsv", "w", newline="") as f:
+        w = _csv.writer(f, delimiter="\t")
+        w.writerow(["step", "n_strong", "best_head", "best_method", "best_tau", "destroyed_floor"])
+        for st in steps:
+            b = by_step[str(st)]
+            w.writerow([st, b["n_strong"], f"L{b['best_head'][0]}H{b['best_head'][1]}",
+                        b["best_method"], round(b["best_tau"], 4), round(b["destroyed_floor"], 4)])
+    summary = {"seed": seed, "by_step": by_step}
+    _json.dump(summary, open(out / "sweep.json", "w"), indent=2, default=float)
+    return summary
