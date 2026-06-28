@@ -53,16 +53,21 @@ method C-D+L, destroyed-floor anchored:
 Absent at init (≈ destroyed floor), τ→1.0 around step ~2000, in a **redundant L0** head set.
 This matches `analyses/figures/head_signal_emergence.png` (~1800) and Spec A's ~1400–2000.
 
-### S4 — the canonical signal is content-bound, not slot-bound, not an inv artifact
+### S4 — the canonical signal is real and not an inv-construction artifact (but its *source* is NOT yet content)
 For the L0 carrier (seed2 L0H2, τ=1.0):
-- **content-label permutation** collapses τ **1.00 → 0.08** ⇒ it tracks content identity.
-- **entry-shuffled / destroyed floor** ≈ **0.05–0.07** ⇒ τ=1.0 is far above null.
+- **destroyed / entry-shuffled floor** ≈ **0.05–0.07** ⇒ τ=1.0 is far above null.
 - **strict-LF (model-frame build + posthoc inv) ≡ oracle-remapped (inv in construction)**:
   both give L0 = **1.00** on handoff_overnight AND on `overnight_20260625_random_baseline`
   ⇒ the signal is **not** an inv_perm construction cheat.
+- ⚠️ **`content_label_permutation_control` collapse (1.0→0.08) does NOT prove content-binding.**
+  It permutes the B65 graph's *node labels* posthoc (`B[ix_(perm,perm)]`) — *any* order-recovering
+  graph loses τ-vs-`arange` under relabeling. It is a graph-structure / null control, and it
+  **cannot distinguish** a fixed-layout slot→physical map from genuine content recovery.
 
-**One-line claim this supports:** *The recovered physical order is content-bound and not an
-artifact of slot position, reveal order, causal masking, or oracle remapping.*
+**Corrected claim:** *The canonical readout reveals a real, emergent global physical-order-aligned
+signal in L0 — above the null floor and not an inv_perm-construction artifact. Whether its source
+is **content** (C) or a **fixed-layout slot→physical position map** (B) is UNRESOLVED and is the
+subject of P2 (signal-source disambiguation). Do not call it "content-bound" yet.*
 
 ## Layer split (the same ckpt read two ways)
 
@@ -80,7 +85,7 @@ seed2 step10000, per-layer best |τ|:
 | mechanism | name | layer | readout | at init? | content-bound? | paper role |
 |-----------|------|-------|---------|----------|----------------|------------|
 | reveal/slot following | **slot-order scaffold** | L1 | model-frame / identity | yes | no | confound / control |
-| original-order reconstruction | **physical-order carrier** | L0 | canonical / random | no (emerges ~2k) | yes | **main claim** |
+| original-order reconstruction | **physical-order carrier** | L0 | canonical / random | no (emerges ~2k) | **unresolved (B vs C)** | **main claim** |
 
 ## Status of the prior pillars
 
