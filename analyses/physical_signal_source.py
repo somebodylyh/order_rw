@@ -16,23 +16,45 @@ from none_separated_block_graph import build_none_separated_B, rollout_by_method
 
 @torch.no_grad()
 def carrier_b65_per_text(ckpt_path, layer, head, M=24, fixed_reveal_seed=0, n_reveals=8,
-                         device="cpu"):
+                         device="cpu", return_halves=False):
+    """Per-text carrier B65 at fixed layout + shared reveal orders.
+
+    When return_halves=True, also returns (halfA_list, halfB_list): per-text B65
+    built from the FIRST n_reveals//2 reveals vs the REMAINING reveals (two disjoint
+    halves) so callers can estimate the within-text sampling-noise floor.
+    When return_halves=False (default), returns (B_list, tau_list) unchanged.
+    """
     model, chunks, clean_perm, dev, _ = _load_model_and_chunks(
         ckpt_path, M, seed=0, device=device, split="train")
     inv = clean_perm.inv_perm_model_to_phys.cpu().numpy()
     reveals = random_reveal_orders(n_reveals, fixed_reveal_seed)   # SHARED across texts
+    half = n_reveals // 2
     B_list, tau_list = [], []
+    halfA_list, halfB_list = [], []
     for t in range(M):
         A_acc = None
-        for rev in reveals:
+        A_accA = None   # first half
+        A_accB = None   # second half
+        for ri, rev in enumerate(reveals):
             po = torch.from_numpy(rev[None, :]).to(dev)
             _, _, attn_list = model.forward_fn(chunks[t:t+1].to(dev), po, return_attentions=True)
             attn = torch.stack(attn_list, 0).cpu().numpy()[:, 0]   # (L,H,257,257)
             A = _attn_to_A_block_loss_aligned_with_none_vec(attn, rev, inv)  # (L,H,64,65)
             A_acc = A.astype(np.float64) if A_acc is None else A_acc + A
+            if return_halves:
+                if ri < half:
+                    A_accA = A.astype(np.float64) if A_accA is None else A_accA + A
+                else:
+                    A_accB = A.astype(np.float64) if A_accB is None else A_accB + A
         B = build_none_separated_B((A_acc / n_reveals)[layer, head])
         B_list.append(B)
         tau_list.append(float(discovery_metrics(rollout_by_method(B, "C-D+L"))["tau_vs_l2r"]))
+        if return_halves:
+            nA = max(half, 1); nB = max(n_reveals - half, 1)
+            halfA_list.append(build_none_separated_B((A_accA / nA)[layer, head]))
+            halfB_list.append(build_none_separated_B((A_accB / nB)[layer, head]))
+    if return_halves:
+        return B_list, tau_list, halfA_list, halfB_list
     return B_list, tau_list
 
 
@@ -61,6 +83,39 @@ def synthetic_content_invariant(M, seed=0):
 
 def synthetic_content_randomized(M, seed=0):
     return [_random_valid_B(np.random.default_rng(seed + i)) for i in range(M)]
+
+def _stack(B_list, mask, normalize):
+    rows = []
+    for B in B_list:
+        Bn = row_normalize_l1(B, mask) if normalize else (np.asarray(B, float) * mask)
+        rows.append(Bn[mask])
+    return np.stack(rows)                                   # (M, n_valid)
+
+def cross_text_variance(B_list, mask, normalize=True):
+    X = _stack(B_list, mask, normalize)
+    return float(X.var(axis=0).mean())
+
+def pairwise_similarity(B_list, mask, normalize=True):
+    X = _stack(B_list, mask, normalize)
+    M = len(X); sims = []
+    for a in range(M):
+        for b in range(a + 1, M):
+            r = np.corrcoef(X[a], X[b])[0, 1]
+            if np.isfinite(r):
+                sims.append(r)
+    return float(np.mean(sims)) if sims else 1.0
+
+def within_text_noise_floor(halfA_list, halfB_list, mask, normalize=True):
+    XA = _stack(halfA_list, mask, normalize)
+    XB = _stack(halfB_list, mask, normalize)
+    # per-text per-edge half-difference variance; 0.5*mean((a-b)^2) ~ single-estimate var
+    return float((0.5 * (XA - XB) ** 2).mean())
+
+def content_variance(B_list, halfA_list, halfB_list, mask, normalize=True):
+    cv = cross_text_variance(B_list, mask, normalize)
+    floor = within_text_noise_floor(halfA_list, halfB_list, mask, normalize)
+    return float(max(0.0, cv - floor))
+
 
 def synthetic_ascending_B(n=65):
     # Chain: None->1->2->...->64 in the upper triangle (B[u,v]=1 for v=u+1).
