@@ -9,10 +9,12 @@ order with tau=+1.0 — so the synthetic floor is generated via that pipeline, n
 hand-stamping a 65x65 B (hand-stamping mis-specifies the C-D+L sign convention and
 yields tau=-1). The strict65 builder enforces the zeroed-diagonal convention.
 """
+import contextlib
 import pathlib
 import sys
 
 import numpy as np
+import torch
 
 _BLOCK_DIR = pathlib.Path(__file__).resolve().parents[1] / "block_lo_arm_order_network"
 if str(_BLOCK_DIR) not in sys.path:
@@ -95,3 +97,25 @@ def floor_taus(rng=None):
     rb = float(np.mean([tau_vs_arange(rollout_order(random_B(np.random.default_rng(i))))
                         for i in range(8)]))
     return {"uniform_causal": float(uc), "random_B": rb}
+
+
+# ── Task 3: reversible PE-ablation context manager ───────────────────────────
+
+@contextlib.contextmanager
+def pe_ablation(model, which):
+    """Temporarily zero wpe / wtpe / both embedding outputs via forward hooks.
+    which='none' registers nothing (bit-identical). Hooks removed on exit."""
+    def _zero_hook(_m, _inp, out):
+        return torch.zeros_like(out)
+
+    targets = []
+    if which in ("wpe", "both"):
+        targets.append(model.transformer.wpe)
+    if which in ("wtpe", "both"):
+        targets.append(model.transformer.wtpe)
+    handles = [m.register_forward_hook(_zero_hook) for m in targets]
+    try:
+        yield model
+    finally:
+        for h in handles:
+            h.remove()
