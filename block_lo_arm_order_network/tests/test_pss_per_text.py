@@ -37,6 +37,7 @@ def test_per_text_b65_public_signature():
     [
         (0, False, "n_reveals must be at least 1"),
         (1, True, "n_reveals must be at least 2 when return_halves=True"),
+        (3, True, "n_reveals must be even when return_halves=True"),
     ],
 )
 def test_n_reveals_is_validated_before_checkpoint_load(

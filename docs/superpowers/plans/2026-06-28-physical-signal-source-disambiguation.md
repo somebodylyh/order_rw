@@ -30,7 +30,7 @@
 - Test: `block_lo_arm_order_network/tests/test_pss_per_text.py`
 
 **Interfaces:**
-- Produces: `carrier_b65_per_text(ckpt_path, layer, head, M=24, fixed_reveal_seed=0, n_reveals=4, device="cpu") -> (B_list, tau_list)` — `B_list`: list of `M` per-text `(65,65)` B65 for that head (each batch-meaned over `n_reveals` **shared** reveal orders, fixed layout); `tau_list`: per-text physical `tau_vs_l2r` (C-D+L).
+- Produces: `carrier_b65_per_text(ckpt_path, layer, head, M=24, n_reveals=8, fixed_reveal_seed=0, device="cpu", return_halves=False)` — normally returns `(B_list, tau_list)`; with `return_halves=True`, returns `(B_list, tau_list, halfA_list, halfB_list)`. The latter mode requires an even `n_reveals >= 2` and uses two equal, disjoint reveal halves, as required by Task 4's noise-floor estimator. Validation occurs before checkpoint loading.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -284,10 +284,12 @@ git commit -m "feat: synthetic content-invariant/randomized baselines + order-ta
 - Produces:
   - `cross_text_variance(B_list, mask, normalize=True) -> float` — mean over valid edges of `Var_text` (row-normalized if `normalize`).
   - `pairwise_similarity(B_list, mask, normalize=True) -> float` — mean over text pairs of Pearson r on valid edges.
-  - `within_text_noise_floor(halfA_list, halfB_list, mask, normalize=True) -> float` — the **sampling-noise variance floor**: for each text, the mean per-edge squared difference between its two reveal-half B65s, averaged over texts (×0.5 to match a single-estimate variance). `halfA_list`/`halfB_list` are the per-text B65 built from two disjoint halves of that text's reveals.
+  - `within_text_noise_floor(halfA_list, halfB_list, mask, normalize=True) -> float` — the **sampling-noise variance floor** for the full estimator: `0.25 * mean_edge(Var_text(halfA - halfB, ddof=0))`. `halfA_list`/`halfB_list` must be equal-length B65 lists built from two equal, disjoint reveal halves.
   - `content_variance(B_list, halfA_list, halfB_list, mask, normalize=True) -> float` — `max(0, cross_text_variance(B_list) − within_text_noise_floor(halfA, halfB))`: the between-text variance **above the sampling floor**, i.e. the content-attributable variance.
 
-  **Why (resolved during Task 1):** at low n_reveals a single text's B65 is noisy (τ swings to ~−0.3); the synthetic content-invariant baseline (exact copies) has zero sampling noise and so under-estimates the real floor. A fixed-layout (B) carrier could otherwise show high cross-text variance purely from sampling noise and be mis-read as C. The within-text reveal-split floor measures that sampling noise on the *real* data so `content_variance` isolates genuine between-text (content) structure.
+  **Why (resolved during Task 1 and corrected during Task 4):** at low n_reveals a single text's B65 is noisy (τ swings to ~−0.3); the synthetic content-invariant baseline (exact copies) has zero sampling noise and so under-estimates the real floor. For equal independent halves A and B, the full estimator is `(A+B)/2`, hence its sampling variance is `0.25 Var(A-B)`. Reveal orders are shared across texts, so a reveal-half-specific per-edge bias is common-mode: it contributes to raw `mean((A-B)^2)` but contributes zero cross-text variance. Centering via `Var_text(A-B)` removes that common-mode bias. The former `0.5 * mean((A-B)^2)` formula was therefore both incorrectly scaled for the full estimator and scientifically confounded by shared-reveal bias.
+
+  `_stack` rejects empty input, non-2D/non-boolean/empty masks, matrix/mask shape mismatch, and non-finite values on valid edges. The floor additionally rejects unequal half-list lengths. These contracts prevent silent NumPy broadcasting or invalid variance estimates.
 
 - [ ] **Step 1: Write the failing tests** (calibrate against the synthetic anchors)
 
@@ -295,6 +297,7 @@ git commit -m "feat: synthetic content-invariant/randomized baselines + order-ta
 # tests/test_pss_variance.py
 import pathlib, sys
 import numpy as np
+import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from analyses.physical_signal_source import (
@@ -316,11 +319,17 @@ def test_within_text_floor_and_content_variance():
     inv = synthetic_content_invariant(6)
     assert within_text_noise_floor(inv, inv, m) < 1e-9
     assert content_variance(inv, inv, inv, m) < 1e-9
-    # if cross-text variance is entirely sampling noise (floor == cross var),
-    # content_variance clamps to 0
-    rnd = synthetic_content_randomized(6)
-    cv = content_variance(rnd, rnd, rnd, m)               # floor uses same-as-cross here
-    assert cv >= 0.0
+    # normalize=False synthetic checks also cover the estimator's scale:
+    # independent half noise + a half-specific common shift gives a centered
+    # floor matching Var_text((A+B)/2), with content_variance near zero.
+    # Adding genuine per-text content leaves content_variance strictly positive.
+
+def test_metric_input_contracts():
+    m = np.ones((2, 2), dtype=bool)
+    with pytest.raises(ValueError, match="must not be empty"):
+        cross_text_variance([], m, normalize=False)
+    with pytest.raises(ValueError, match="equal length"):
+        within_text_noise_floor([np.zeros((2, 2))], [], m, normalize=False)
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -333,9 +342,22 @@ Expected: FAIL
 ```python
 # append to analyses/physical_signal_source.py
 def _stack(B_list, mask, normalize):
+    mask = np.asarray(mask)
+    if mask.ndim != 2 or mask.dtype != np.bool_:
+        raise ValueError("mask must be a 2D boolean array")
+    if not mask.any():
+        raise ValueError("mask must select at least one value")
+    B_list = list(B_list)
+    if not B_list:
+        raise ValueError("B_list must not be empty")
     rows = []
-    for B in B_list:
-        Bn = row_normalize_l1(B, mask) if normalize else (np.asarray(B, float) * mask)
+    for i, B in enumerate(B_list):
+        B = np.asarray(B, dtype=np.float64)
+        if B.shape != mask.shape:
+            raise ValueError(f"B_list[{i}] shape {B.shape} does not match mask shape {mask.shape}")
+        if not np.isfinite(B[mask]).all():
+            raise ValueError(f"B_list[{i}] contains non-finite values selected by mask")
+        Bn = row_normalize_l1(B, mask) if normalize else (B * mask)
         rows.append(Bn[mask])
     return np.stack(rows)                                   # (M, n_valid)
 
@@ -354,10 +376,13 @@ def pairwise_similarity(B_list, mask, normalize=True):
     return float(np.mean(sims)) if sims else 1.0
 
 def within_text_noise_floor(halfA_list, halfB_list, mask, normalize=True):
+    if len(halfA_list) != len(halfB_list):
+        raise ValueError("halfA_list and halfB_list must have equal length")
     XA = _stack(halfA_list, mask, normalize)
     XB = _stack(halfB_list, mask, normalize)
-    # per-text per-edge half-difference variance; 0.5*mean((a-b)^2) ~ single-estimate var
-    return float((0.5 * (XA - XB) ** 2).mean())
+    # Equal independent halves: Var((A+B)/2) = 0.25 Var(A-B). Centering
+    # across texts removes half-specific common bias from shared reveal orders.
+    return float(0.25 * (XA - XB).var(axis=0, ddof=0).mean())
 
 def content_variance(B_list, halfA_list, halfB_list, mask, normalize=True):
     cv = cross_text_variance(B_list, mask, normalize)

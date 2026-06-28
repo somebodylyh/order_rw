@@ -28,6 +28,8 @@ def carrier_b65_per_text(ckpt_path, layer, head, M=24, n_reveals=8, fixed_reveal
         raise ValueError("n_reveals must be at least 1")
     if return_halves and n_reveals < 2:
         raise ValueError("n_reveals must be at least 2 when return_halves=True")
+    if return_halves and n_reveals % 2:
+        raise ValueError("n_reveals must be even when return_halves=True")
 
     model, chunks, clean_perm, dev, _ = _load_model_and_chunks(
         ckpt_path, M, seed=0, device=device, split="train")
@@ -90,9 +92,23 @@ def synthetic_content_randomized(M, seed=0):
     return [_random_valid_B(np.random.default_rng(seed + i)) for i in range(M)]
 
 def _stack(B_list, mask, normalize):
+    mask = np.asarray(mask)
+    if mask.ndim != 2 or mask.dtype != np.bool_:
+        raise ValueError("mask must be a 2D boolean array")
+    if not mask.any():
+        raise ValueError("mask must select at least one value")
+    B_list = list(B_list)
+    if not B_list:
+        raise ValueError("B_list must not be empty")
     rows = []
-    for B in B_list:
-        Bn = row_normalize_l1(B, mask) if normalize else (np.asarray(B, float) * mask)
+    for i, B in enumerate(B_list):
+        B = np.asarray(B, dtype=np.float64)
+        if B.shape != mask.shape:
+            raise ValueError(
+                f"B_list[{i}] shape {B.shape} does not match mask shape {mask.shape}")
+        if not np.isfinite(B[mask]).all():
+            raise ValueError(f"B_list[{i}] contains non-finite values selected by mask")
+        Bn = row_normalize_l1(B, mask) if normalize else (B * mask)
         rows.append(Bn[mask])
     return np.stack(rows)                                   # (M, n_valid)
 
@@ -111,10 +127,13 @@ def pairwise_similarity(B_list, mask, normalize=True):
     return float(np.mean(sims)) if sims else 1.0
 
 def within_text_noise_floor(halfA_list, halfB_list, mask, normalize=True):
+    if len(halfA_list) != len(halfB_list):
+        raise ValueError("halfA_list and halfB_list must have equal length")
     XA = _stack(halfA_list, mask, normalize)
     XB = _stack(halfB_list, mask, normalize)
-    # per-text per-edge half-difference variance; 0.5*mean((a-b)^2) ~ single-estimate var
-    return float((0.5 * (XA - XB) ** 2).mean())
+    # Equal independent halves: Var((A+B)/2) = 0.25 Var(A-B). Centering
+    # across texts removes half-specific common bias from shared reveal orders.
+    return float(0.25 * (XA - XB).var(axis=0, ddof=0).mean())
 
 def content_variance(B_list, halfA_list, halfB_list, mask, normalize=True):
     cv = cross_text_variance(B_list, mask, normalize)
