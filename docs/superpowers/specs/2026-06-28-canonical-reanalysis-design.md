@@ -1,144 +1,130 @@
-# Canonical Physical-Frame Re-analysis of the Order-Emergence Line — design
+# Canonical 65-node Re-analysis of the Order-Emergence Line — design
 
 **Date:** 2026-06-28
-**Status:** design (approved direction, sync-with-existing)
-**Predecessors:** `2026-06-27-handoff-causal-path-patching-design.md` (③),
-`2026-06-27-emergence-characterization-design.md` (A),
-`2026-06-28-position-prior-decomposition-design.md` (⑤). All three used the
-**model-frame + identity-reveal** readout, now shown to be tautological at init and
-to identify a different carrier (L1) than the project's canonical metric (L0).
-**Branch:** `attn-order-alternating`. **Compute:** no GPU (11 existing ckpts/seed); GPU
-only if coarse timing proves insufficient.
+**Status:** design (approved direction; synced to the sealed strict-65-node protocol)
+**Predecessors:** ③ `2026-06-27-handoff-causal-path-patching-design.md`,
+A `2026-06-27-emergence-characterization-design.md`,
+⑤ `2026-06-28-position-prior-decomposition-design.md` — all three used a model-frame
+readout **without the posthoc-inv scoring**, making step-0 τ tautological (identity
+reveal) and picking the wrong carrier (L1 vs the canonical L0).
+**Branch:** `attn-order-alternating`. **Compute:** no GPU (11 ckpts/seed); GPU only if
+coarse timing is insufficient.
 
-## Motivation (why redo)
+## The canonical protocol to sync with (already sealed)
 
-The recent ③/A/⑤ arc read order via `build_model_frame_strict65` (model-frame, NO
-inv_perm) on the trajectory's **identity** `probe_orders`. Under identity reveal + a
-causal mask, the C-D+L rollout reconstructs ascending model-slot order **near-
-tautologically** — so step-0 τ≈0.77 and the τ=1.0 "carrier" are artifacts of that
-protocol, and the carrier it picks (seed2 = L1) differs from the project's canonical
-metric.
+`reports/strict_65node_discovery_ckpt_verification_20260617/` defines the **strict
+65-node None-separated discovery protocol**, and `scripts/search_none_separated_65_heads.py`
+implements it. The redo **reuses that tool**; it does not invent a readout.
 
-The project's **canonical, sealed** readout is **physical-frame + random reveal**: per
-sample, a *random* reveal order; single-head attention → physical block-agg via
-`inv_perm` (so blocks are in original-text coordinates) → `B=Aᵀ`, zero diagonal →
-batch-mean → teacher-CDL σ → `τ_vs_l2r` vs `arange(N)` (physical). Decisive contrast on
-seed2 (canonical `per_head_order_scan`): **step0 max|τ|=0.07 → step10000 max|τ|=0.96,
-carriers L0H4/H2/H5** — i.e. the order signal is **absent at init and genuinely emerges**,
-recovering the original-text block order (which, under a shuffled layout, *requires
-content*), matching `analyses/figures/head_signal_emergence.png` and the early L0H2/L0H5
-work. **This is the real finding; the model-frame arc characterized a metric artifact.**
+Protocol (from `01_protocol_definition.md`):
+- **65 nodes**: node 0 = `[None]`/BOS (separate, not folded into a content block);
+  nodes 1..64 = content blocks. `B65 = build_none_separated_B(A)` (`diag=0`).
+- **Loss-aligned AR frame** `attn[:T,:T]`: query axis = target block, key axis = source
+  block with node-0 reserved for `[None]`. Extraction
+  `_attn_to_A_block_loss_aligned_with_none_vec`.
+- **`inv_perm` for scoring (posthoc), not avoided**: the order is rolled out, then scored
+  against **physical L2R**. (Strict-LF model-frame and oracle-remapped are proven
+  *equivalent*, `05_extraction_frame_comparison.md`: gate distribution identical, Δ=0.000
+  — permutation-equivariance. The search tool uses the oracle-remapped path.)
+- **Random reveal** orders per sample (seeded `seed+i`).
+- **Methods**: `("C-D+L","L","C-D","C+L","C","none_edge",…)`; **`L` is the primary
+  strong-pass method** in the existing sweep (not C-D+L). Report L + C-D+L + none_edge.
+- **Gate**: `classify_gate_status` → `strong_pass` (τ=1.0, first_block=0, phys0_rank=0,
+  prefix@4=4, prefix@8=8) / `weak_pass` / `fail`.
+- **Destroyed controls** (the null + the content-dependence test): `entry_shuffled_control`
+  + `content_label_permutation_control`, 5 seeds → mean |τ| ≈ 0.05–0.07 (random floor).
 
-## Principle: SYNC with the sealed pipeline (do not reinvent)
+Authoritative `clean_base` sweep (`strict_65node_ckpt_sweep.tsv`) shows the **real
+emergence**: best_tau **0.19 @step0 → 0.14 @1000 → 1.0 @5000+**, strong heads **L0H1–H4
+(method L)**, destroyed floor ≈0.05. This is the metric the redo runs on
+`runs/handoff_overnight`.
 
-The project already has the canonical machinery; the redo **reuses it**, pointed at the
-`runs/handoff_overnight/seed{2,42,123}` checkpoints:
+## Why this corrects ③/A/⑤
 
-- `scripts/diag_l0h5_evolution_scan.py` — per (ckpt, sampling-seed) **full (L,H)** scan
-  (random reveal seeded `seed+i`, physical block-agg, `B=Aᵀ`, teacher-CDL, heavy
-  baseline). Outputs `scan_step{S}_seed{D}.json` with
-  `per_head_layer_sorted_by_abs_tau_vs_l2r` + `heavy_baseline`.
-- `scripts/scan_all_heads_across_ckpts.py` — multi-ckpt orchestrator producing a
-  32-head × steps τ matrix heatmap + per-step winner / per-layer best.
-- `scripts/aggregate_l0h5_evolution.py` — aggregates over sampling seeds → per-step
-  `modal_winner`, `winner_per_seed`, τ mean±std, layer0 fraction, winner-drift (Q2).
+⑤/handoff used `build_model_frame_strict65` (same 65-node *extraction*) **but scored τ vs
+`arange` in the model frame under identity reveal — skipping the posthoc-inv physical
+scoring and using identity instead of random reveal** → step-0 τ≈0.77 (tautology) and an
+L1 "carrier". The canonical tool restores: random reveal + posthoc-inv physical scoring +
+method L + gate/destroyed controls → order **absent at init, emerges to τ=1.0 in L0**.
 
-**none_mode = `b0`** (the sealed-canonical B0 variant), pinned throughout; the scan
-scripts also support `old`/`predictor` but the redo fixes `b0` and records it.
-
-## Variance control
-
-The extraction's per-sample reveal RNG (`seed+i`) makes a single scan noisy
-(documented). Run each (seed, ckpt) at **K=3 sampling seeds**, aggregate mean±std per
-(layer,head) (the `aggregate_l0h5_evolution.py` pattern). Carriers and emergence timing
-are read from the **aggregated** curves, never a single scan.
-
-## Components
+## Components (C0–C4, one spec per user choice)
 
 ### C0/C1 — Canonical emergence + carrier baseline (foundation)
 
-Run the canonical full-(L,H) scan on **3 seeds × 11 ckpts** (`step0,1000,…,10000`) ×
-**K=3 sampling seeds**, `none_mode=b0`. Adapt `scan_all_heads_across_ckpts.py`'s ckpt
-list to be parametrized per seed (it currently hardcodes the old clean_base trajectory).
-Aggregate per seed:
+Run `search_none_separated_65_heads.py` (or the existing sweep driver that produced
+`strict_65node_ckpt_sweep.tsv`) on **3 seeds × 11 ckpts** (`step0,1000,…,10000`),
+**M=8, batch_size=8, methods=L/C-D+L/none_edge, control_seeds=5**, random reveal. Per
+seed, per step record: **gate distribution** (#strong/#weak/#fail), **best_head /
+best_method / best_tau**, and **destroyed mean |τ|**.
 
-- **Carrier (localization):** per-step `modal_winner` and per-layer best |τ|; the
-  step-10000 modal winner = the **real carrier** (expect L0; confirm per seed, compare
-  to the model-frame L1).
-- **Emergence (strength + timing):** carrier-head `τ_vs_l2r` mean±std vs step; the coarse
-  (1000-step) interval where τ crosses from ~0 to high (the real emergence window).
-- **Heavy baseline** τ as the multi-head reference (already in the scan).
+Outputs per seed: `strict65_sweep.tsv` (step × {gate counts, best_head, best_tau,
+destroyed_floor}) + a `32 heads × 11 steps` strong-pass/τ heatmap.
 
-**Anchor:** reproduce the seed2 contrast (step0 ≈ 0, step10000 ≈ 0.9+ on an L0 head)
-under `b0` before trusting the rest.
+Read off:
+- **Real carrier**: the strong-pass heads at step 10000 (expect **L0**; record per seed
+  and contrast with the model-frame L1).
+- **Real emergence timing**: the coarse interval where best_tau crosses the destroyed
+  floor toward 1.0 / strong_pass count rises from 0.
+- **Anchor**: reproduce the seed2 contrast (step0 best_tau ≈ destroyed floor; step10000
+  best_tau = 1.0, L0 strong heads) before trusting the rest.
 
-Output: `runs/canonical_reanalysis/seed{2,42,123}/heads_tau.json` + 32×11 heatmap +
-emergence curve; cross-seed carrier/timing table.
+### C2 — ③ re-assessment (load-bearing on the real carrier, canonical readout)
 
-### C2 — ③ re-assessment (load-bearing / handoff on the real carrier)
-
-The real carrier is single-layer (L0). The "L0→L1 handoff" question dissolves; the
-meaningful tests on the **canonical** readout are:
-
-- **Load-bearing:** mean-ablate the real carrier head set (reuse
-  `path_patch_handoff.mean_ablation_prehook` on `attn.c_proj`), re-run the canonical scan
-  on the ablated model, measure the carrier/global `τ_vs_l2r` collapse vs a null-head
-  ablation.
-- **Cross-layer structure:** does ablating L0 carrier change later-layer (L1/L2/L3)
-  canonical τ? (Is there any L0→later propagation in the *physical* frame, or is order
-  read entirely in L0?)
-
-Reuses the ablation hook; **swaps the readout to the canonical scan**.
+The real carrier is single-layer L0 → "L0→L1 handoff" dissolves. On the **canonical
+readout**: mean-ablate the L0 strong-pass head set (reuse
+`path_patch_handoff.mean_ablation_prehook` on `attn.c_proj`), re-run
+`search_none_separated_65_heads.py`, and measure the **strong_pass count / best_tau
+collapse** vs a null-head ablation. Also: does ablating L0 change any later-layer
+strong passes (cross-layer structure in the physical frame)?
 
 ### C3 — A re-assessment (emergence shape, coarse)
 
-From the C1 aggregated curves: is emergence a clean single rise (~0→0.9) or the
-model-frame dip-then-sharpen? Single carrier locked from the first non-zero step, or
-winner-drift before locking (Q2)? Contingency/early-bias at 1000-step resolution is
-**coarse**; if the crossing is hidden inside `0→1000`, flag that fine timing needs a GPU
-re-train with online canonical logging (out of scope for v1).
+From the C1 sweep: is emergence a single clean rise (floor→1.0) and at which interval;
+does the strong-pass head set drift (Q2 winner-drift) before locking; how many seeds
+agree on L0. 1000-step resolution is coarse — if the crossing hides inside `0→1000` or
+`1000→5000`, flag that fine timing needs a GPU re-train with online canonical logging
+(deferred).
 
-### C4 — ⑤ re-assessment (content vs position binding — correction)
+### C4 — ⑤ re-assessment (content vs position — correction, partly built-in)
 
-Under the canonical physical-frame readout, `τ_vs_l2r ≈ 0.9+` at convergence **is**
-recovery of the original-text block order. Because the layout is shuffled, recovering it
-requires content/structure, so the carrier is **content/structure-bound**, not the
-"slot scaffold" the model-frame ⑤ wrongly concluded. C4 states this correction with the
-canonical numbers and the identity-vs-random / model-vs-physical contrast already
-measured (identity-model τ=1.0 tautology vs random-physical τ=0.96 real). No new
-relocation run needed for the headline; an optional canonical relayout confirmation is
-deferred.
+Under the canonical tool, a strong-pass `τ=1.0` **is** recovery of the physical
+(original-text) block order via posthoc inv — which under a shuffled layout requires
+content. The tool's **`content_label_permutation_control`** already tests content
+dependence: if permuting content-node labels collapses τ to the destroyed floor, the
+signal is **content/label-dependent**, not a positional slot artifact. C4 reports this
+control at the converged carrier and **corrects ⑤'s "slot-scaffold" to content/structure-
+bound** with the canonical numbers.
 
 ## Architecture
 
-- Thin orchestrator `analyses/canonical_reanalysis.py` that (a) parametrizes the
-  existing scan over `runs/handoff_overnight/seed{2,42,123}` ckpts × K sampling seeds
-  (`none_mode=b0`), (b) aggregates (reusing the `aggregate_l0h5_evolution.py` logic,
-  generalized from hardcoded L0H5 to the modal winner), (c) drives C2 ablation via the
-  canonical scan. Plots reuse the existing heatmap/curve code.
-- Outputs under `runs/canonical_reanalysis/`; a `analyses/canonical_reanalysis_README.md`
-  that **restates ③/A/⑤ corrected** and supersedes the model-frame conclusions.
+- Thin orchestrator `analyses/canonical_reanalysis.py`: loop
+  `search_none_separated_65_heads.py` over `runs/handoff_overnight/seed{2,42,123}` ckpts
+  (or reuse the existing sweep driver), aggregate per-seed sweep TSV + heatmap; drive C2
+  ablation by registering the mean-ablation hook before the canonical scan.
+- Reuse `none_separated_block_graph` (rollout/gate/controls), `per_head_order_scan`
+  extraction, existing plotting.
+- Outputs `runs/canonical_reanalysis/`; `analyses/canonical_reanalysis_README.md` that
+  **restates ③/A/⑤ corrected** and supersedes the model-frame conclusions.
 
 ## Decision criteria
 
-- **Carrier:** the step-10000 aggregated modal winner per seed (expect L0); report
-  whether all 3 seeds agree and how it differs from the model-frame L1.
-- **Emergence:** τ rises from within-noise (~|τ|<0.2, anchored by step0) to a stable high
-  value; report the coarse crossing interval and heavy-baseline reference.
-- **③:** carrier ablation drops canonical τ beyond null (load-bearing); cross-layer
+- **Carrier** = step-10000 strong-pass heads per seed (expect L0); report cross-seed
+  agreement + contrast with model-frame L1.
+- **Emergence** = best_tau rises from the destroyed floor (~0.05) to 1.0; strong_pass
+  count 0 → N; report the coarse crossing interval.
+- **③** = L0-carrier ablation collapses strong_pass/best_tau beyond null; cross-layer
   effect reported.
-- **⑤:** convergence τ_vs_l2r (physical) is high ⇒ content/structure recovery; correct
-  the slot-scaffold claim.
-- Per-seed first; K=3 sampling seeds for variance; 3 training seeds is a floor.
+- **⑤** = converged strong-pass τ=1.0 + `content_label_permutation_control` collapse ⇒
+  content/structure-bound; slot-scaffold claim corrected.
+- Per-seed first; control_seeds=5 + M-averaging for variance; 3 training seeds is a floor.
 
 ## Risks
 
-- **none_mode choice** (`b0` vs `old`/`predictor`) shifts absolute τ; pinned to `b0`
-  (sealed) and anchored against the seed2 0.07→0.96 contrast.
-- **Coarse timing** — 11 ckpts give 1000-step resolution; emergence crossing may sit
-  inside one interval → GPU fine run deferred, flagged not hidden.
-- **Sampling variance** — K=3 sampling seeds + mean±std; never decide on a single scan.
-- **Existing-script fidelity** — adapt the sealed scripts minimally (ckpt list + winner
-  generalization); do not silently change the extraction math.
-- **Scope** — C0–C4 in one spec (user choice); C2 is the heaviest (readout swap into the
-  ablation path).
+- **Protocol fidelity** — pin method `L` primary, 65-node None-separated, posthoc-inv
+  scoring, random reveal, destroyed controls; anchor against the clean_base sweep numbers
+  (0.19→1.0, L0 strong heads, floor 0.05). Do not silently alter the extraction math.
+- **Coarse timing** — 11 ckpts = 1000-step resolution; crossing may sit inside an
+  interval → GPU fine run deferred, flagged.
+- **Sampling variance** — control_seeds=5 + M-averaging; never decide on a single scan.
+- **Scope** — C0–C4 in one spec (user choice); C2 (readout swap into the ablation path)
+  is heaviest.
