@@ -336,3 +336,39 @@ def binding_scores(seed, ckpt_step, layouts, winning_layer, carrier_heads, tier,
             "relayout_mean_pos": relay_pos, "relayout_mean_content": relay_cont,
             "relayout_drop": relay_pos - anchor["tau_pos"],
             "anchor_valid": anchor_valid, "verdict": verdict, "per_layout": per_layout}
+
+
+# ── Task 9: Part-2 driver across steps ───────────────────────────────────────
+
+def run_part2(seed, root, out_dir, K=8, steps=(0, 2000, 10000), bs_mean=16,
+              n_batches=4, device="cpu"):
+    out = pathlib.Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    w = _winner_for_seed(seed, root)
+    L, heads, tier = w["winning_layer"], w["winner_heads"], w["tier"]
+
+    training_perm = _training_clean_perm(f"{root}/seed{seed}/ckpt_step10000.pt")
+    layouts = make_layouts(training_perm, K=K, seed_base=1000)
+    save_layouts(layouts, str(out / "layouts.json"))
+
+    by_step = {}
+    for st in steps:
+        by_step[str(st)] = binding_scores(seed, st, layouts, L, heads, tier,
+                                          root=root, bs_mean=bs_mean,
+                                          n_batches=n_batches, device=device)
+
+    with open(out / "part2_binding.csv", "w", newline="") as f:
+        wr = _csv.writer(f)
+        wr.writerow(["step", "anchor_tau_pos", "anchor_tau_content",
+                     "relayout_mean_pos", "relayout_mean_content", "relayout_drop",
+                     "anchor_valid", "verdict"])
+        for st in steps:
+            b = by_step[str(st)]
+            wr.writerow([st, round(b["anchor_tau_pos"], 4), round(b["anchor_tau_content"], 4),
+                         round(b["relayout_mean_pos"], 4), round(b["relayout_mean_content"], 4),
+                         round(b["relayout_drop"], 4), b["anchor_valid"], b["verdict"]])
+
+    summary = {"seed": seed, "winning_layer": L, "carrier_heads": heads, "tier": tier,
+               "by_step": by_step}
+    _json.dump(summary, open(out / "part2.json", "w"), indent=2, default=float)
+    return summary
