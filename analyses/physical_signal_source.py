@@ -34,3 +34,17 @@ def carrier_b65_per_text(ckpt_path, layer, head, M=24, fixed_reveal_seed=0, n_re
         B_list.append(B)
         tau_list.append(float(discovery_metrics(rollout_by_method(B, "C-D+L"))["tau_vs_l2r"]))
     return B_list, tau_list
+
+
+def valid_edge_mask(n=65):
+    m = np.zeros((n, n), dtype=bool)
+    m[0, 1:] = True                                   # None -> content
+    for i in range(1, n):
+        for j in range(1, i):
+            m[i, j] = True                            # content causal lower-tri
+    return m
+
+def row_normalize_l1(B, mask, eps=1e-9):
+    B = np.asarray(B, dtype=np.float64) * mask
+    mass = np.abs(B).sum(axis=1, keepdims=True) + eps
+    return B / mass
