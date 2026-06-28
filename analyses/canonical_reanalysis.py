@@ -199,3 +199,45 @@ def ablation_effect(seed, ckpt_step, carrier_layer, carrier_heads, null_heads,
             "strong_after_null": float(np.mean(sn)),
             "best_tau_before": float(np.mean(tb)),
             "best_tau_after_carrier": float(np.mean(tc))}
+
+
+# ── Task 5: C4 content-dependence (built-in control) ─────────────────────────
+
+def _carrier_B65(ckpt_path, layer, head, M=8, batch_size=8, sampling_seed=0, device="cpu"):
+    total = M * batch_size
+    model, chunks, clean_perm, dev, _ = _load_model_and_chunks(
+        ckpt_path, total, seed=sampling_seed, device=device, split="train")
+    inv_perm = clean_perm.inv_perm_model_to_phys.cpu().numpy()
+    orders = random_reveal_orders(total, sampling_seed)
+    A_acc = None
+    with torch.no_grad():
+        for start in range(0, total, batch_size):
+            bs = min(batch_size, total - start)
+            tok = chunks[start:start + bs].to(dev)
+            po = torch.from_numpy(orders[start:start + bs]).to(dev)
+            _, _, attn_list = model.forward_fn(tok, po, return_attentions=True)
+            attn = torch.stack(attn_list, 0).cpu().numpy()
+            for bi in range(bs):
+                A = _attn_to_A_block_loss_aligned_with_none_vec(
+                    attn[:, bi], orders[start + bi], inv_perm)
+                A_acc = A.astype(np.float64) if A_acc is None else A_acc + A
+    return build_none_separated_B((A_acc / total)[layer, head])
+
+
+def content_dependence(ckpt_path, carrier_layer, carrier_head, method="C-D+L",
+                       control_seeds=(0, 1, 2, 3, 4), **kw):
+    """Clean carrier tau vs content-label-permuted and entry-shuffled controls.
+    A content-bound carrier reads high clean and collapses to the floor under
+    content_label_permutation_control."""
+    B65 = _carrier_B65(ckpt_path, carrier_layer, carrier_head, **kw)
+    tau_clean = float(discovery_metrics(rollout_by_method(B65, method))["tau_vs_l2r"])
+    cp = [abs(discovery_metrics(rollout_by_method(
+        content_label_permutation_control(B65, seed=s), method))["tau_vs_l2r"])
+        for s in control_seeds]
+    es = [abs(discovery_metrics(rollout_by_method(
+        entry_shuffled_control(B65, seed=s), method))["tau_vs_l2r"])
+        for s in control_seeds]
+    cp_mean = float(np.mean(cp))
+    return {"tau_clean": abs(tau_clean), "tau_content_permuted_mean": cp_mean,
+            "tau_entry_shuffled_mean": float(np.mean(es)),
+            "content_dependent": bool(abs(tau_clean) - cp_mean > 0.4)}
