@@ -744,7 +744,7 @@ git commit -m "feat: random-token stress control (OOD, stress-only)"
 
 **Interfaces:**
 - Consumes: `position_prior_decomp.relayout_chunks`, `clean_perm_from_layout`, `make_layouts`; `canonical_reanalysis.canonical_scan`-style readout.
-- Produces: `relayout_diagnostic(ckpt_path, layer, carrier_heads, K=4, M=8, device="cpu") -> dict` — anchor τ_physical vs relayout-mean τ_physical + drop, on the carrier heads.
+- Produces: `relayout_diagnostic(ckpt_path, layer, carrier_heads, K=4, M=8, device="cpu") -> dict` — anchor τ_physical vs relayout-mean τ_physical + drop, on the carrier heads. `K` is the total layout count passed to `make_layouts`: one training-layout anchor plus `K-1` relayouts (`K >= 2`). `drop = anchor_tau - relayout_mean_tau`, so positive means the relayout weakens the signal.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -767,7 +767,7 @@ def test_relayout_reports_anchor_and_drop():
 Run: `cd block_lo_arm_order_network && python -m pytest tests/test_pss_relayout.py -q`
 Expected: FAIL
 
-- [ ] **Step 3: Implement** — load model + training perm; build the carrier's best per-head physical τ at the training layout (anchor) and under K relayouts (via `relayout_chunks`, shared random reveals); report anchor / relayout-mean / drop. Full code in the module, reusing `carrier_b65_per_text`'s extraction with relayouted chunks.
+- [ ] **Step 3: Implement** — load model + training perm; build the carrier's best per-head physical τ at the training layout (anchor) and under `K-1` relayouts (via `relayout_chunks`, shared random reveals); report anchor / relayout-mean / drop. Full code in the module, reusing `carrier_b65_per_text`'s extraction with relayouted chunks.
 
 - [ ] **Step 4: Run test to verify it passes**
 
