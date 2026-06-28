@@ -504,24 +504,28 @@ git commit -m "feat: slot-only mean-table predictor held-out R2 (text-level spli
 - Test: `block_lo_arm_order_network/tests/test_pss_gate.py`
 
 **Interfaces:**
-- Produces: `carrier_valid_filter(B_list, tau_list, thr=0.9) -> (B_valid, idx)` — keep texts where `|tau|>=thr`; returns the filtered B list + kept indices.
+- Produces: `carrier_valid_filter(B_list, tau_list, thr=0.9) -> (B_valid, idx)` — validates equal input lengths, a finite numeric `thr` in `[0,1]`, and finite numeric tau values in `[-1,1]`; otherwise raises `ValueError`. Keeps texts where `|tau|>=thr` (including exact positive/negative boundaries), preserving object identity and input order; returns the filtered B list + kept indices.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # tests/test_pss_gate.py
 import pathlib, sys
-import numpy as np
+import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from analyses.physical_signal_source import carrier_valid_filter
 
 def test_gate_keeps_only_valid():
-    B = [np.zeros((65, 65)) for _ in range(4)]
-    taus = [1.0, 0.2, 0.95, -0.99]
+    B = [object() for _ in range(5)]
+    taus = [1.0, 0.2, 0.9, -0.9, -0.89]
     Bv, idx = carrier_valid_filter(B, taus, thr=0.9)
-    assert idx == [0, 2, 3]                                # |tau|>=0.9 (incl anti)
-    assert len(Bv) == 3
+    assert idx == [0, 2, 3]  # exact positive/negative boundary is included
+    assert all(got is B[i] for got, i in zip(Bv, idx))
+
+# Also test both input-length mismatch directions; invalid thr values
+# (NaN/inf/outside [0,1]/bool/non-numeric); and invalid tau values
+# (NaN/inf/outside [-1,1]/bool/non-numeric). Each must raise a clear ValueError.
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -534,6 +538,15 @@ Expected: FAIL
 ```python
 # append to analyses/physical_signal_source.py
 def carrier_valid_filter(B_list, tau_list, thr=0.9):
+    if len(B_list) != len(tau_list):
+        raise ValueError("B_list and tau_list must have the same length")
+    if (isinstance(thr, bool) or not isinstance(thr, numbers.Real)
+            or not np.isfinite(thr) or not 0 <= thr <= 1):
+        raise ValueError("thr must be a finite number in [0, 1]")
+    for i, tau in enumerate(tau_list):
+        if (isinstance(tau, bool) or not isinstance(tau, numbers.Real)
+                or not np.isfinite(tau) or not -1 <= tau <= 1):
+            raise ValueError(f"tau_list[{i}] must be a finite number in [-1, 1]")
     idx = [i for i, t in enumerate(tau_list) if abs(t) >= thr]
     return [B_list[i] for i in idx], idx
 ```
