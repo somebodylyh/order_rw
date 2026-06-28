@@ -134,6 +134,11 @@ def slot_only_r2(B_list, mask, n_train=None, normalize=True):
     return float(r2_per.mean())
 
 
+def carrier_valid_filter(B_list, tau_list, thr=0.9):
+    idx = [i for i, t in enumerate(tau_list) if abs(t) >= thr]
+    return [B_list[i] for i in idx], idx
+
+
 def synthetic_ascending_B(n=65):
     # Chain: None->1->2->...->64 in the upper triangle (B[u,v]=1 for v=u+1).
     # L-term propagates the chain and CDL rolls out [0,1,...,63], tau=+1.0.
