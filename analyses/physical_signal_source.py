@@ -24,6 +24,11 @@ def carrier_b65_per_text(ckpt_path, layer, head, M=24, n_reveals=8, fixed_reveal
     halves) so callers can estimate the within-text sampling-noise floor.
     When return_halves=False (default), returns (B_list, tau_list) unchanged.
     """
+    if n_reveals < 1:
+        raise ValueError("n_reveals must be at least 1")
+    if return_halves and n_reveals < 2:
+        raise ValueError("n_reveals must be at least 2 when return_halves=True")
+
     model, chunks, clean_perm, dev, _ = _load_model_and_chunks(
         ckpt_path, M, seed=0, device=device, split="train")
     inv = clean_perm.inv_perm_model_to_phys.cpu().numpy()
