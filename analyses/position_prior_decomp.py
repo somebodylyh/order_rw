@@ -221,3 +221,31 @@ def run_part1(seed, root, out_dir, n_batches=4, bs_mean=16, device="cpu"):
     }
     _json.dump(summary, open(out / "part1.json", "w"), indent=2, default=float)
     return summary
+
+
+# ── Task 6: layout generator (training anchor + fixed random) ────────────────
+
+from clean_training_protocol import build_clean_block_permutation  # noqa: E402
+
+
+def _perm_dict(layout_id, clean_perm, is_train, rng_seed):
+    return {"layout_id": int(layout_id),
+            "perm": clean_perm.block_perm_phys_to_model.tolist(),
+            "inv_perm": clean_perm.inv_perm_model_to_phys.tolist(),
+            "is_training_layout": bool(is_train), "rng_seed": rng_seed}
+
+
+def make_layouts(training_clean_perm, K=8, seed_base=1000):
+    layouts = [_perm_dict(0, training_clean_perm, True, None)]
+    for i in range(1, K):
+        cp = build_clean_block_permutation(64, seed=seed_base + i)
+        layouts.append(_perm_dict(i, cp, False, seed_base + i))
+    return layouts
+
+
+def save_layouts(layouts, path):
+    _json.dump(layouts, open(path, "w"), indent=2)
+
+
+def load_layouts(path):
+    return _json.load(open(path))
