@@ -166,7 +166,33 @@ def slot_only_r2(B_list, mask, n_train=None, normalize=True):
 
 
 def random_token_chunk(chunk, vocab_size, rng):
-    return torch.from_numpy(rng.integers(0, vocab_size, size=tuple(chunk.shape))).to(chunk.dtype)
+    """Return an independent, uniformly randomized token tensor.
+
+    ``rng`` is deliberately an explicit NumPy Generator so callers control
+    reproducibility and normal generator-state advancement.
+    """
+    if not isinstance(chunk, torch.Tensor):
+        raise TypeError("chunk must be a torch.Tensor")
+    if chunk.numel() == 0:
+        raise ValueError("chunk must be nonempty")
+    try:
+        dtype_info = torch.iinfo(chunk.dtype)
+    except TypeError as exc:
+        raise TypeError("chunk must have an integral, non-bool token dtype") from exc
+
+    if isinstance(vocab_size, bool) or not isinstance(vocab_size, numbers.Integral):
+        raise TypeError("vocab_size must be a non-bool integer")
+    vocab_size = int(vocab_size)
+    if vocab_size <= 0:
+        raise ValueError("vocab_size must be positive")
+    if vocab_size - 1 > dtype_info.max:
+        raise ValueError(
+            f"token range [0, {vocab_size}) is not representable by {chunk.dtype}")
+    if not isinstance(rng, np.random.Generator):
+        raise TypeError("rng must be a numpy.random.Generator")
+
+    values = rng.integers(0, vocab_size, size=tuple(chunk.shape))
+    return torch.as_tensor(np.asarray(values), dtype=chunk.dtype, device=chunk.device)
 
 
 def _validate_block_chunk(chunk, block_len):

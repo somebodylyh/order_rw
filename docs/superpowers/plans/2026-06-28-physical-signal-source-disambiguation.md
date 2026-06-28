@@ -644,7 +644,15 @@ git commit -m "feat: block-swap / cross-sample content perturbation helpers"
 - Test: `block_lo_arm_order_network/tests/test_pss_randtoken.py`
 
 **Interfaces:**
-- Produces: `random_token_chunk(chunk, vocab_size, rng) -> Tensor` — replace all tokens with random ids (severe OOD; stress only).
+- Produces: `random_token_chunk(chunk, vocab_size, rng) -> Tensor` — uniformly sample
+  every token from `[0, vocab_size)` (severe OOD; stress only), preserving the
+  input tensor's shape, device, and integral token dtype without mutating it.
+  `chunk` must be a nonempty `torch.Tensor` with a non-bool integral dtype;
+  `vocab_size` must be a positive, non-bool integer whose complete output range
+  is representable by `chunk.dtype` (validated with `torch.iinfo`); `rng` must be
+  an explicit `np.random.Generator`. Calls consume the generator normally: equal
+  initial seeds reproduce outputs, while repeated calls advance state. Sampling
+  does not force individual positions to differ from their input values.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -656,11 +664,31 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from analyses.physical_signal_source import random_token_chunk
 
-def test_random_token_in_range_and_changed():
-    c = torch.arange(256)
-    out = random_token_chunk(c, vocab_size=50, rng=np.random.default_rng(0))
-    assert out.shape == c.shape and int(out.max()) < 50
-    assert not torch.equal(out, c)
+def test_random_token_preserves_tensor_contract_and_bounds():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    c = torch.arange(1024, dtype=torch.int32, device=device).reshape(32, 32)
+    before = c.clone()
+    out = random_token_chunk(c, vocab_size=7, rng=np.random.default_rng(0))
+    assert (out.shape, out.dtype, out.device) == (c.shape, c.dtype, c.device)
+    assert int(out.min()) == 0 and int(out.max()) == 6
+    assert torch.equal(c, before)
+
+def test_random_token_reproducibility_and_advancement():
+    c = torch.zeros(128, dtype=torch.long)
+    rng = np.random.default_rng(123)
+    first = random_token_chunk(c, 50, rng)
+    second = random_token_chunk(c, 50, rng)
+    replay = np.random.default_rng(123)
+    assert torch.equal(first, random_token_chunk(c, 50, replay))
+    assert torch.equal(second, random_token_chunk(c, 50, replay))
+
+def test_random_token_does_not_force_changes():
+    c = torch.zeros(6, dtype=torch.uint8)
+    assert torch.equal(random_token_chunk(c, 1, np.random.default_rng(0)), c)
+
+# The test module also rejects: non-tensors, empty/bool/floating/complex chunks,
+# non-integral/bool/non-positive vocab sizes, vocab ranges above torch.iinfo.max,
+# and RNG values other than np.random.Generator.
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -673,7 +701,25 @@ Expected: FAIL
 ```python
 # append to analyses/physical_signal_source.py
 def random_token_chunk(chunk, vocab_size, rng):
-    return torch.from_numpy(rng.integers(0, vocab_size, size=tuple(chunk.shape))).to(chunk.dtype)
+    if not isinstance(chunk, torch.Tensor):
+        raise TypeError("chunk must be a torch.Tensor")
+    if chunk.numel() == 0:
+        raise ValueError("chunk must be nonempty")
+    try:
+        dtype_info = torch.iinfo(chunk.dtype)
+    except TypeError as exc:
+        raise TypeError("chunk must have an integral, non-bool token dtype") from exc
+    if isinstance(vocab_size, bool) or not isinstance(vocab_size, numbers.Integral):
+        raise TypeError("vocab_size must be a non-bool integer")
+    vocab_size = int(vocab_size)
+    if vocab_size <= 0:
+        raise ValueError("vocab_size must be positive")
+    if vocab_size - 1 > dtype_info.max:
+        raise ValueError("token range is not representable by chunk.dtype")
+    if not isinstance(rng, np.random.Generator):
+        raise TypeError("rng must be a numpy.random.Generator")
+    values = rng.integers(0, vocab_size, size=tuple(chunk.shape))
+    return torch.as_tensor(np.asarray(values), dtype=chunk.dtype, device=chunk.device)
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
