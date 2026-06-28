@@ -1,0 +1,315 @@
+{
+  "seed": 2,
+  "by_step": {
+    "0": {
+      "best_head": [
+        0,
+        7
+      ],
+      "best_method": "C-D+L",
+      "best_tau": 0.15674603174603177,
+      "n_strong": 0,
+      "strong_pass_heads": [],
+      "destroyed_floor": 0.059915467923280424
+    },
+    "1000": {
+      "best_head": [
+        0,
+        3
+      ],
+      "best_method": "C-D+L",
+      "best_tau": 0.15906084656084654,
+      "n_strong": 0,
+      "strong_pass_heads": [],
+      "destroyed_floor": 0.06210214120370369
+    },
+    "2000": {
+      "best_head": [
+        0,
+        5
+      ],
+      "best_method": "C-D+L",
+      "best_tau": 1.0,
+      "n_strong": 2,
+      "strong_pass_heads": [
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          5
+        ]
+      ],
+      "destroyed_floor": 0.06257922729276895
+    },
+    "3000": {
+      "best_head": [
+        0,
+        2
+      ],
+      "best_method": "C-D+L",
+      "best_tau": 1.0,
+      "n_strong": 4,
+      "strong_pass_heads": [
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          0,
+          5
+        ],
+        [
+          3,
+          0
+        ]
+      ],
+      "destroyed_floor": 0.06457265487213402
+    },
+    "4000": {
+      "best_head": [
+        0,
+        2
+      ],
+      "best_method": "C-D+L",
+      "best_tau": 1.0,
+      "n_strong": 4,
+      "strong_pass_heads": [
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          0,
+          5
+        ]
+      ],
+      "destroyed_floor": 0.06423886684303351
+    },
+    "5000": {
+      "best_head": [
+        0,
+        2
+      ],
+      "best_method": "C-D+L",
+      "best_tau": 1.0,
+      "n_strong": 6,
+      "strong_pass_heads": [
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          0,
+          5
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          3,
+          7
+        ]
+      ],
+      "destroyed_floor": 0.06442040068342153
+    },
+    "6000": {
+      "best_head": [
+        0,
+        2
+      ],
+      "best_method": "C-D+L",
+      "best_tau": 1.0,
+      "n_strong": 6,
+      "strong_pass_heads": [
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          0,
+          5
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          3,
+          7
+        ]
+      ],
+      "destroyed_floor": 0.0656143215388007
+    },
+    "7000": {
+      "best_head": [
+        0,
+        0
+      ],
+      "best_method": "C-D+L",
+      "best_tau": 1.0,
+      "n_strong": 5,
+      "strong_pass_heads": [
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          0,
+          5
+        ],
+        [
+          3,
+          7
+        ]
+      ],
+      "destroyed_floor": 0.0650414737654321
+    },
+    "8000": {
+      "best_head": [
+        0,
+        0
+      ],
+      "best_method": "C-D+L",
+      "best_tau": 1.0,
+      "n_strong": 6,
+      "strong_pass_heads": [
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          0,
+          5
+        ],
+        [
+          2,
+          7
+        ],
+        [
+          3,
+          0
+        ]
+      ],
+      "destroyed_floor": 0.0660183807319224
+    },
+    "9000": {
+      "best_head": [
+        0,
+        2
+      ],
+      "best_method": "C-D+L",
+      "best_tau": 1.0,
+      "n_strong": 7,
+      "strong_pass_heads": [
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          0,
+          5
+        ],
+        [
+          2,
+          4
+        ],
+        [
+          2,
+          7
+        ],
+        [
+          3,
+          7
+        ]
+      ],
+      "destroyed_floor": 0.06707795965608465
+    },
+    "10000": {
+      "best_head": [
+        0,
+        0
+      ],
+      "best_method": "C-D+L",
+      "best_tau": 1.0,
+      "n_strong": 5,
+      "strong_pass_heads": [
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          0,
+          5
+        ],
+        [
+          3,
+          7
+        ]
+      ],
+      "destroyed_floor": 0.0654307208994709
+    }
+  }
+}
