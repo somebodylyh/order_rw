@@ -27,8 +27,11 @@ Protocol (from `01_protocol_definition.md`):
   *equivalent*, `05_extraction_frame_comparison.md`: gate distribution identical, Δ=0.000
   — permutation-equivariance. The search tool uses the oracle-remapped path.)
 - **Random reveal** orders per sample (seeded `seed+i`).
-- **Methods**: `("C-D+L","L","C-D","C+L","C","none_edge",…)`; **`L` is the primary
-  strong-pass method** in the existing sweep (not C-D+L). Report L + C-D+L + none_edge.
+- **Methods**: `("C-D+L","L","C-D","C+L","C","none_edge",…)`; **`C-D+L` is the primary
+  method** (the project's teacher; the strong-pass heads also pass under C-D+L per
+  `02_existing_result_summary.md`). Report C-D+L primary, with L + none_edge secondary.
+  (The sweep TSV's `best_method="L"` is tie-break selection when τ=1.0 for several
+  methods; the headline readout is C-D+L.)
 - **Gate**: `classify_gate_status` → `strong_pass` (τ=1.0, first_block=0, phys0_rank=0,
   prefix@4=4, prefix@8=8) / `weak_pass` / `fail`.
 - **Destroyed controls** (the null + the content-dependence test): `entry_shuffled_control`
@@ -36,8 +39,8 @@ Protocol (from `01_protocol_definition.md`):
 
 Authoritative `clean_base` sweep (`strict_65node_ckpt_sweep.tsv`) shows the **real
 emergence**: best_tau **0.19 @step0 → 0.14 @1000 → 1.0 @5000+**, strong heads **L0H1–H4
-(method L)**, destroyed floor ≈0.05. This is the metric the redo runs on
-`runs/handoff_overnight`.
+(strong-pass under C-D+L and L; primary = C-D+L)**, destroyed floor ≈0.05. This is the
+metric the redo runs on `runs/handoff_overnight`.
 
 ## Why this corrects ③/A/⑤
 
@@ -45,7 +48,7 @@ emergence**: best_tau **0.19 @step0 → 0.14 @1000 → 1.0 @5000+**, strong head
 `arange` in the model frame under identity reveal — skipping the posthoc-inv physical
 scoring and using identity instead of random reveal** → step-0 τ≈0.77 (tautology) and an
 L1 "carrier". The canonical tool restores: random reveal + posthoc-inv physical scoring +
-method L + gate/destroyed controls → order **absent at init, emerges to τ=1.0 in L0**.
+method C-D+L + gate/destroyed controls → order **absent at init, emerges to τ=1.0 in L0**.
 
 ## Components (C0–C4, one spec per user choice)
 
@@ -53,7 +56,7 @@ method L + gate/destroyed controls → order **absent at init, emerges to τ=1.0
 
 Run `search_none_separated_65_heads.py` (or the existing sweep driver that produced
 `strict_65node_ckpt_sweep.tsv`) on **3 seeds × 11 ckpts** (`step0,1000,…,10000`),
-**M=8, batch_size=8, methods=L/C-D+L/none_edge, control_seeds=5**, random reveal. Per
+**M=8, batch_size=8, methods=C-D+L/L/none_edge, control_seeds=5**, random reveal. Per
 seed, per step record: **gate distribution** (#strong/#weak/#fail), **best_head /
 best_method / best_tau**, and **destroyed mean |τ|**.
 
@@ -120,7 +123,7 @@ bound** with the canonical numbers.
 
 ## Risks
 
-- **Protocol fidelity** — pin method `L` primary, 65-node None-separated, posthoc-inv
+- **Protocol fidelity** — pin method `C-D+L` primary, 65-node None-separated, posthoc-inv
   scoring, random reveal, destroyed controls; anchor against the clean_base sweep numbers
   (0.19→1.0, L0 strong heads, floor 0.05). Do not silently alter the extraction math.
 - **Coarse timing** — 11 ckpts = 1000-step resolution; crossing may sit inside an
