@@ -134,6 +134,10 @@ def slot_only_r2(B_list, mask, n_train=None, normalize=True):
     return float(r2_per.mean())
 
 
+def random_token_chunk(chunk, vocab_size, rng):
+    return torch.from_numpy(rng.integers(0, vocab_size, size=tuple(chunk.shape))).to(chunk.dtype)
+
+
 def block_swap_chunk(chunk, swaps, block_len=4):
     out = chunk.clone()
     for a, b in swaps:
