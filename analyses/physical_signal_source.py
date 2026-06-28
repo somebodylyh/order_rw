@@ -117,6 +117,23 @@ def content_variance(B_list, halfA_list, halfB_list, mask, normalize=True):
     return float(max(0.0, cv - floor))
 
 
+def slot_only_r2(B_list, mask, n_train=None, normalize=True):
+    X = _stack(B_list, mask, normalize)                     # (M, n_valid)
+    M = len(X)
+    n_train = n_train if n_train is not None else M // 2
+    B_hat = X[:n_train].mean(axis=0)                        # content-free slot-pair table
+    test = X[n_train:]
+    if len(test) == 0:
+        return float("nan")
+    # Per-edge R²: for each valid edge j, how well does B_hat[j] predict the test values?
+    # Averaged over edges, this isolates between-text variance (not between-edge variance).
+    ss_res_per = ((test - B_hat) ** 2).mean(axis=0)         # (n_valid,)
+    test_mean = test.mean(axis=0)                            # (n_valid,)
+    ss_tot_per = ((test - test_mean) ** 2).mean(axis=0) + 1e-12  # (n_valid,)
+    r2_per = 1.0 - ss_res_per / ss_tot_per
+    return float(r2_per.mean())
+
+
 def synthetic_ascending_B(n=65):
     # Chain: None->1->2->...->64 in the upper triangle (B[u,v]=1 for v=u+1).
     # L-term propagates the chain and CDL rolls out [0,1,...,63], tau=+1.0.
