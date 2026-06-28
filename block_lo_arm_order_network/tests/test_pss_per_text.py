@@ -1,8 +1,30 @@
+import inspect
 import pathlib, sys
 import numpy as np
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from analyses.physical_signal_source import carrier_b65_per_text
+
+
+def test_per_text_b65_public_signature():
+    params = list(inspect.signature(carrier_b65_per_text).parameters.values())
+    assert [param.name for param in params] == [
+        "ckpt_path",
+        "layer",
+        "head",
+        "M",
+        "n_reveals",
+        "fixed_reveal_seed",
+        "device",
+        "return_halves",
+    ]
+    assert [param.default for param in params[3:]] == [
+        24,
+        8,
+        0,
+        "cpu",
+        False,
+    ]
 
 def test_per_text_b65_shapes_and_validity():
     B_list, tau_list = carrier_b65_per_text(

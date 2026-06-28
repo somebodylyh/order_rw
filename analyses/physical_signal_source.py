@@ -15,7 +15,7 @@ from per_head_order_scan import _attn_to_A_block_loss_aligned_with_none_vec
 from none_separated_block_graph import build_none_separated_B, rollout_by_method, discovery_metrics
 
 @torch.no_grad()
-def carrier_b65_per_text(ckpt_path, layer, head, M=24, fixed_reveal_seed=0, n_reveals=8,
+def carrier_b65_per_text(ckpt_path, layer, head, M=24, n_reveals=8, fixed_reveal_seed=0,
                          device="cpu", return_halves=False):
     """Per-text carrier B65 at fixed layout + shared reveal orders.
 
