@@ -13,8 +13,10 @@ running any further order experiment.
 > i.e. recover `physical order` — the original-text block order before the layout was
 > permuted — **NOT** `model slot order` (the input slot index 0→1→2→…).
 
-Because the data layout is shuffled, the model only ever sees model slots; recovering the
-*physical* order requires using **content**. That is the paper's claim.
+Because the data layout is shuffled, the model only ever sees model slots. Recovering the
+*physical* order could in principle use **content** (the strong claim, C) or just a learned
+**fixed-layout slot→physical map** (the weaker claim, B). Distinguishing these is P2; do not
+assume "content" yet.
 
 ## The two readouts (and why one is confounded)
 
@@ -94,8 +96,9 @@ seed2 step10000, per-layer best |τ|:
   "slot-scaffold", "handoff fails") are **retracted as physical-order claims** and demoted to
   an **appendix methodology warning**: *identity-reveal model-frame τ mistakes a slot-order
   scaffold for order recovery.*
-- The main claim — **AOGPT attention spontaneously recovers the original physical order of
-  permuted text blocks** — **holds** under the canonical readout.
+- The main phenomenon — **AOGPT attention develops a real, emergent global physical-order-aligned
+  signal in L0** — **holds** under the canonical readout. Its *source* (content C vs fixed-layout
+  map B) is the open P2 question.
 
 ## A measurement-error caution (for collaborators)
 
