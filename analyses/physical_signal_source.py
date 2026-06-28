@@ -2,6 +2,7 @@
 C content-dependent). Measures content-dependence of the carrier's attention/B,
 NOT the order output (tautological under fixed layout). See spec
 docs/superpowers/specs/2026-06-28-physical-signal-source-disambiguation-design.md."""
+import numbers
 import pathlib, sys
 import numpy as np, torch
 
@@ -186,6 +187,16 @@ def cross_sample_replace(chunk, donor, blocks, block_len=4):
 
 
 def carrier_valid_filter(B_list, tau_list, thr=0.9):
+    if len(B_list) != len(tau_list):
+        raise ValueError("B_list and tau_list must have the same length")
+    if (isinstance(thr, bool) or not isinstance(thr, numbers.Real)
+            or not np.isfinite(thr) or not 0 <= thr <= 1):
+        raise ValueError("thr must be a finite number in [0, 1]")
+    for i, tau in enumerate(tau_list):
+        if (isinstance(tau, bool) or not isinstance(tau, numbers.Real)
+                or not np.isfinite(tau) or not -1 <= tau <= 1):
+            raise ValueError(
+                f"tau_list[{i}] must be a finite number in [-1, 1]")
     idx = [i for i, t in enumerate(tau_list) if abs(t) >= thr]
     return [B_list[i] for i in idx], idx
 
