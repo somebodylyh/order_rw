@@ -249,3 +249,21 @@ def save_layouts(layouts, path):
 
 def load_layouts(path):
     return _json.load(open(path))
+
+
+# ── Task 7: relayout chunks across layouts ───────────────────────────────────
+
+from clean_training_protocol import (  # noqa: E402
+    CleanPermutation, model_to_phys_idx_clean, phys_to_model_idx_clean)
+
+
+def clean_perm_from_layout(layout_dict):
+    return CleanPermutation(
+        block_perm_phys_to_model=torch.tensor(layout_dict["perm"], dtype=torch.long),
+        inv_perm_model_to_phys=torch.tensor(layout_dict["inv_perm"], dtype=torch.long))
+
+
+def relayout_chunks(chunks_model, training_clean_perm, layout_clean_perm):
+    """Model-frame chunks (trained layout) -> physical -> model-frame under layout."""
+    idx_phys = model_to_phys_idx_clean(chunks_model, training_clean_perm)
+    return phys_to_model_idx_clean(idx_phys, layout_clean_perm)
