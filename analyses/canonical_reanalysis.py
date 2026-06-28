@@ -165,3 +165,37 @@ def sweep_seed(seed, root="runs/handoff_overnight", steps=DEFAULT_STEPS, K=3, ou
     summary = {"seed": seed, "by_step": by_step}
     _json.dump(summary, open(out / "sweep.json", "w"), indent=2, default=float)
     return summary
+
+
+# ── Task 4: C2 carrier ablation under canonical readout ──────────────────────
+
+def _n_strong_cdl(rows):
+    return sum(1 for r in rows if r["method"] == "C-D+L" and r["gate_status"] == "strong_pass")
+
+
+def _best_tau_cdl(rows):
+    cdl = [r for r in rows if r["method"] == "C-D+L"]
+    return max((r["abs_tau"] for r in cdl), default=0.0)
+
+
+def ablation_effect(seed, ckpt_step, carrier_layer, carrier_heads, null_heads,
+                    root="runs/handoff_overnight", K=3, M=8, batch_size=8):
+    """Mean-ablate the carrier head set vs a null head set; report C-D+L strong-pass
+    count + best_tau collapse under the canonical readout (mean over K sampling seeds)."""
+    ckpt = f"{root}/seed{seed}/ckpt_step{ckpt_step}.pt"
+    sb, sc, sn, tb, tc = [], [], [], [], []
+    for s in range(K):
+        clean = canonical_scan(ckpt, M=M, batch_size=batch_size, sampling_seed=s)
+        carr = canonical_scan(ckpt, M=M, batch_size=batch_size, sampling_seed=s,
+                              ablate=(carrier_layer, carrier_heads))
+        null = canonical_scan(ckpt, M=M, batch_size=batch_size, sampling_seed=s,
+                              ablate=(carrier_layer, null_heads))
+        sb.append(_n_strong_cdl(clean)); sc.append(_n_strong_cdl(carr)); sn.append(_n_strong_cdl(null))
+        tb.append(_best_tau_cdl(clean)); tc.append(_best_tau_cdl(carr))
+    return {"seed": seed, "ckpt_step": ckpt_step,
+            "carrier_heads": list(carrier_heads), "null_heads": list(null_heads),
+            "strong_before": float(np.mean(sb)),
+            "strong_after_carrier": float(np.mean(sc)),
+            "strong_after_null": float(np.mean(sn)),
+            "best_tau_before": float(np.mean(tb)),
+            "best_tau_after_carrier": float(np.mean(tc))}
