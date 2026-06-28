@@ -1,5 +1,20 @@
 # Pillar ⑤-core+ — Position-Prior Decomposition & Content-Binding (Results)
 
+> **🔴 CORRECTION (2026-06-28, after review): the "artifact" headline below is
+> OVER-CLAIMED.** This entire analysis used **identity `probe_orders`** (reveal order =
+> model-slot order). Under identity reveal + a causal mask, the C-D+L readout recovers
+> ascending order *near-tautologically*, so the step-0 τ≈0.77 and the floor τ=1.0 are
+> artifacts **of the identity-probe protocol**, not statements about the *learned* order
+> signal. Decisive check: seed2 L0H2 step-0 τ = **0.72 under identity probe but −0.03
+> under random probe**. Under random reveal (the protocol of
+> `analyses/figures/head_signal_emergence.png`), the order signal **genuinely emerges**
+> (τ ≈ 0 → 1.0 at ~step 1800), consistent with Spec A's "emergence at ~2k". So: the order
+> signal is **not** an artifact; only the identity-probe step-0 baseline is. The
+> frame-sanity result (slot-indexed, not content-indexed) still holds, but **Part 2's
+> slot-scaffold / τ_content≈0 must be re-run under a non-tautological (random-probe)
+> protocol** before it can be trusted. **Read the sections below as identity-probe
+> measurements, not as the line-level conclusion.**
+
 **Date:** 2026-06-28 · **Branch:** `attn-order-alternating` · **Compute:** no new training (CPU)
 **Code:** `analyses/position_prior_decomp.py`, `analyses/plot_position_prior.py`
 **Outputs:** `runs/position_prior/seed{2,42,123}/{part1.json,part2.json,*.csv,*.png}`
