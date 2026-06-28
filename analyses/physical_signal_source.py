@@ -136,6 +136,9 @@ def within_text_noise_floor(halfA_list, halfB_list, mask, normalize=True):
     return float(0.25 * (XA - XB).var(axis=0, ddof=0).mean())
 
 def content_variance(B_list, halfA_list, halfB_list, mask, normalize=True):
+    if not (len(B_list) == len(halfA_list) == len(halfB_list)):
+        raise ValueError(
+            "B_list, halfA_list, and halfB_list must have equal length")
     cv = cross_text_variance(B_list, mask, normalize)
     floor = within_text_noise_floor(halfA_list, halfB_list, mask, normalize)
     return float(max(0.0, cv - floor))
