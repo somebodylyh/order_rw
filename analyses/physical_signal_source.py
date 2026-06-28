@@ -72,7 +72,7 @@ def valid_edge_mask(n=65):
     return m
 
 def row_normalize_l1(B, mask, eps=1e-9):
-    B = np.asarray(B, dtype=np.float64) * mask
+    B = np.where(mask, np.asarray(B, dtype=np.float64), 0.0)
     mass = np.abs(B).sum(axis=1, keepdims=True) + eps
     return B / mass
 
