@@ -405,3 +405,91 @@ def synthetic_ascending_B(n=65):
     for i in range(1, n - 1):
         B[i, i + 1] = 1.0       # block_i -> block_{i+1} (upper triangle)
     return B
+
+
+# ── Task 10: per-seed source verdict (B / B+ / C / mixed) ─────────────────────
+
+import csv as _csv  # noqa: E402
+import json as _json  # noqa: E402
+
+# frozen P1 carriers (canonical physical-order carrier heads, layer 0)
+P2_CARRIERS = {2: (0, [2, 3, 4, 5]), 42: (0, [2]), 123: (0, [1, 2, 3, 4])}
+
+
+def classify_source(content_variance, noise_floor, r2, r2_threshold=0.8):
+    """Verdict from the between-text content variance relative to the within-text
+    sampling-noise floor, plus the content-free slot-only predictor's R².
+
+    ratio = content_variance / noise_floor ; ~0 => cross-text variance is just
+    sampling noise => B. r2 is the (raw) held-out R² of the content-free slot-pair
+    mean table (high => a fixed table explains the carrier => B).
+    """
+    ratio = content_variance / (noise_floor + 1e-9)
+    if r2 >= 0.92 and ratio <= 0.5:
+        return "B"
+    if r2 < r2_threshold and ratio >= 2.0:
+        return "C"
+    if r2 >= r2_threshold and ratio > 0.5:
+        return "B+"
+    return "mixed"
+
+
+def run_seed(seed, root="runs/handoff_overnight", out_dir=None, M=24, K_relayout=4,
+             n_reveals=32, device="cpu"):
+    """Full E1 (+E3 supporting) per carrier head + verdict, per seed.
+
+    Uses n_reveals=32 so each per-text B65 is converged; content_variance subtracts
+    the within-text reveal-split sampling-noise floor; the slot-only predictor R² is
+    reported raw and row-normalized, each against a size-matched content-randomized
+    null. Verdict classifies on content_variance/floor + the raw R².
+    """
+    out = pathlib.Path(out_dir or f"runs/physical_signal_source/seed{seed}")
+    out.mkdir(parents=True, exist_ok=True)
+    layer, heads = P2_CARRIERS[seed]
+    mask = valid_edge_mask(65)
+    # synthetic anchors + randomized null for R2 (raw + normalized)
+    vi = cross_text_variance(synthetic_content_invariant(M), mask)
+    vr = cross_text_variance(synthetic_content_randomized(M), mask)
+    null_raw = slot_only_r2(synthetic_content_randomized(M), mask, normalize=False)
+    null_norm = slot_only_r2(synthetic_content_randomized(M), mask, normalize=True)
+    ckpt = f"{root}/seed{seed}/ckpt_step10000.pt"
+    thr = 0.9 if len(heads) > 1 else 0.6
+    rows = []
+    for h in heads:
+        B_list, tau_list, hA, hB = carrier_b65_per_text(
+            ckpt, layer, h, M=M, n_reveals=n_reveals, return_halves=True)
+        Bv, idx = carrier_valid_filter(B_list, tau_list, thr=thr)
+        if len(Bv) >= max(4, M // 4):
+            use, useA, useB = Bv, [hA[i] for i in idx], [hB[i] for i in idx]
+        else:
+            use, useA, useB = B_list, hA, hB          # fall back if gate too strict
+        floor = within_text_noise_floor(useA, useB, mask)
+        cvar = content_variance(use, useA, useB, mask)
+        var = cross_text_variance(use, mask)
+        r2_raw = slot_only_r2(use, mask, normalize=False)
+        r2_norm = slot_only_r2(use, mask, normalize=True)
+        sim = pairwise_similarity(use, mask)
+        verdict = classify_source(cvar, floor, r2_raw)
+        rows.append({"seed": seed, "layer": layer, "head": h, "n_valid": len(Bv),
+                     "cross_variance": round(var, 6), "noise_floor": round(floor, 6),
+                     "content_variance": round(cvar, 6),
+                     "content_floor_ratio": round(cvar / (floor + 1e-9), 3),
+                     "r2_raw": round(r2_raw, 4), "r2_norm": round(r2_norm, 4),
+                     "r2_raw_null": round(null_raw, 4), "r2_norm_null": round(null_norm, 4),
+                     "r2_raw_excess": round((r2_raw - null_raw) / (1 - null_raw + 1e-9), 3),
+                     "pairwise_sim": round(sim, 4), "verdict": verdict})
+    relay = relayout_diagnostic(ckpt, layer, heads, K=K_relayout, M=8)
+    with open(out / "source.csv", "w", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+    # seed verdict = modal per-head verdict
+    verdicts = [r["verdict"] for r in rows]
+    seed_verdict = max(set(verdicts), key=verdicts.count)
+    summary = {"seed": seed, "carrier": {"layer": layer, "heads": heads},
+               "anchors": {"var_invariant": vi, "var_randomized": vr,
+                           "r2_raw_null": null_raw, "r2_norm_null": null_norm},
+               "per_head": rows, "relayout": relay, "seed_verdict": seed_verdict}
+    _json.dump(summary, open(out / "source.json", "w"), indent=2, default=float)
+    return summary
