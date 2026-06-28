@@ -119,3 +119,34 @@ def pe_ablation(model, which):
     finally:
         for h in handles:
             h.remove()
+
+
+# ── Task 4: Part-1 step-0 4-arm tau table ────────────────────────────────────
+
+from analyses.path_patch_handoff import (  # noqa: E402
+    load_model_and_chunks_seed, make_probe_batch, run_clean)
+
+
+def tau_table_under(model, chunks, which, n_batches=4, bs_mean=16, device="cpu"):
+    dev = torch.device(device)
+    accum = []
+    for i in range(n_batches):
+        pc, po = make_probe_batch(chunks, bs_mean, np.random.default_rng(i))
+        with pe_ablation(model, which):
+            _, tau = run_clean(model, pc, po, dev)
+        accum.append(tau)
+    return np.mean(accum, axis=0)
+
+
+# Report arm name -> pe_ablation token. (Bug guard: pe_ablation only knows
+# none/wpe/wtpe/both; passing the report names directly registers NO hooks and
+# makes every arm equal to full.)
+_ARM_TO_ABL = {"full": "none", "zero_wpe": "wpe", "zero_wtpe": "wtpe", "zero_both": "both"}
+
+
+def part1_arms(seed, root, n_batches=4, bs_mean=16, device="cpu"):
+    ckpt = f"{root}/seed{seed}/ckpt_step0.pt"
+    model, chunks, _ = load_model_and_chunks_seed(
+        ckpt, max(64, bs_mean * n_batches), torch.device(device))
+    return {arm: tau_table_under(model, chunks, _ARM_TO_ABL[arm], n_batches, bs_mean, device)
+            for arm in ("full", "zero_wpe", "zero_wtpe", "zero_both")}
