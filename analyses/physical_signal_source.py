@@ -134,6 +134,23 @@ def slot_only_r2(B_list, mask, n_train=None, normalize=True):
     return float(r2_per.mean())
 
 
+def block_swap_chunk(chunk, swaps, block_len=4):
+    out = chunk.clone()
+    for a, b in swaps:
+        sa, sb = a * block_len, b * block_len
+        tmp = out[sa:sa+block_len].clone()
+        out[sa:sa+block_len] = out[sb:sb+block_len]
+        out[sb:sb+block_len] = tmp
+    return out
+
+def cross_sample_replace(chunk, donor, blocks, block_len=4):
+    out = chunk.clone()
+    for b in blocks:
+        s = b * block_len
+        out[s:s+block_len] = donor[s:s+block_len]
+    return out
+
+
 def carrier_valid_filter(B_list, tau_list, thr=0.9):
     idx = [i for i, t in enumerate(tau_list) if abs(t) >= thr]
     return [B_list[i] for i in idx], idx
