@@ -1,0 +1,4 @@
+step,anchor_tau_pos,anchor_tau_content,relayout_mean_pos,relayout_mean_content,relayout_drop,anchor_valid,verdict
+0,0.76,-0.0156,0.7579,0.0193,-0.0022,False,invalid
+2000,0.9886,-0.0089,0.9758,0.0166,-0.0128,True,slot-scaffold
+10000,0.9599,-0.0131,0.9736,0.0144,0.0136,True,slot-scaffold

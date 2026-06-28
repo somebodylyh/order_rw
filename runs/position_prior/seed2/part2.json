@@ -1,0 +1,220 @@
+{
+  "seed": 2,
+  "winning_layer": 1,
+  "carrier_heads": [
+    0,
+    3,
+    5,
+    7
+  ],
+  "tier": "strong",
+  "by_step": {
+    "0": {
+      "seed": 2,
+      "ckpt_step": 0,
+      "winning_layer": 1,
+      "carrier_heads": [
+        0,
+        3,
+        5,
+        7
+      ],
+      "tier": "strong",
+      "anchor_tau_pos": 0.7600446428571429,
+      "anchor_tau_content": -0.015625,
+      "relayout_mean_pos": 0.7578656462585034,
+      "relayout_mean_content": 0.01927437641723356,
+      "relayout_drop": -0.0021789965986395154,
+      "anchor_valid": false,
+      "verdict": "invalid",
+      "per_layout": [
+        {
+          "layout_id": 0,
+          "is_training": true,
+          "tau_pos": 0.7600446428571429,
+          "tau_content": -0.015625
+        },
+        {
+          "layout_id": 1,
+          "is_training": false,
+          "tau_pos": 0.7504960317460316,
+          "tau_content": 0.009548611111111112
+        },
+        {
+          "layout_id": 2,
+          "is_training": false,
+          "tau_pos": 0.7599826388888888,
+          "tau_content": 0.005518353174603176
+        },
+        {
+          "layout_id": 3,
+          "is_training": false,
+          "tau_pos": 0.7542162698412699,
+          "tau_content": 0.034970238095238096
+        },
+        {
+          "layout_id": 4,
+          "is_training": false,
+          "tau_pos": 0.7584325396825397,
+          "tau_content": 0.049479166666666664
+        },
+        {
+          "layout_id": 5,
+          "is_training": false,
+          "tau_pos": 0.7712053571428572,
+          "tau_content": 0.056671626984126984
+        },
+        {
+          "layout_id": 6,
+          "is_training": false,
+          "tau_pos": 0.7511160714285714,
+          "tau_content": -0.04848710317460317
+        },
+        {
+          "layout_id": 7,
+          "is_training": false,
+          "tau_pos": 0.7596106150793651,
+          "tau_content": 0.027219742063492064
+        }
+      ]
+    },
+    "2000": {
+      "seed": 2,
+      "ckpt_step": 2000,
+      "winning_layer": 1,
+      "carrier_heads": [
+        0,
+        3,
+        5,
+        7
+      ],
+      "tier": "strong",
+      "anchor_tau_pos": 0.9885912698412699,
+      "anchor_tau_content": -0.008928571428571428,
+      "relayout_mean_pos": 0.9757830215419501,
+      "relayout_mean_content": 0.016617063492063495,
+      "relayout_drop": -0.012808248299319813,
+      "anchor_valid": true,
+      "verdict": "slot-scaffold",
+      "per_layout": [
+        {
+          "layout_id": 0,
+          "is_training": true,
+          "tau_pos": 0.9885912698412699,
+          "tau_content": -0.008928571428571428
+        },
+        {
+          "layout_id": 1,
+          "is_training": false,
+          "tau_pos": 0.9598214285714286,
+          "tau_content": 0.00706845238095238
+        },
+        {
+          "layout_id": 2,
+          "is_training": false,
+          "tau_pos": 0.9769345238095238,
+          "tau_content": 0.015128968253968252
+        },
+        {
+          "layout_id": 3,
+          "is_training": false,
+          "tau_pos": 0.988343253968254,
+          "tau_content": 0.013640873015873016
+        },
+        {
+          "layout_id": 4,
+          "is_training": false,
+          "tau_pos": 0.9779265873015872,
+          "tau_content": 0.06882440476190477
+        },
+        {
+          "layout_id": 5,
+          "is_training": false,
+          "tau_pos": 0.9822668650793651,
+          "tau_content": 0.046875
+        },
+        {
+          "layout_id": 6,
+          "is_training": false,
+          "tau_pos": 0.9769345238095238,
+          "tau_content": -0.05828373015873016
+        },
+        {
+          "layout_id": 7,
+          "is_training": false,
+          "tau_pos": 0.9682539682539681,
+          "tau_content": 0.023065476190476192
+        }
+      ]
+    },
+    "10000": {
+      "seed": 2,
+      "ckpt_step": 10000,
+      "winning_layer": 1,
+      "carrier_heads": [
+        0,
+        3,
+        5,
+        7
+      ],
+      "tier": "strong",
+      "anchor_tau_pos": 0.9599454365079365,
+      "anchor_tau_content": -0.013144841269841268,
+      "relayout_mean_pos": 0.973577451814059,
+      "relayout_mean_content": 0.014358347505668934,
+      "relayout_drop": 0.013632015306122458,
+      "anchor_valid": true,
+      "verdict": "slot-scaffold",
+      "per_layout": [
+        {
+          "layout_id": 0,
+          "is_training": true,
+          "tau_pos": 0.9599454365079365,
+          "tau_content": -0.013144841269841268
+        },
+        {
+          "layout_id": 1,
+          "is_training": false,
+          "tau_pos": 0.9789186507936508,
+          "tau_content": 0.011160714285714284
+        },
+        {
+          "layout_id": 2,
+          "is_training": false,
+          "tau_pos": 0.9677579365079365,
+          "tau_content": 0.013888888888888888
+        },
+        {
+          "layout_id": 3,
+          "is_training": false,
+          "tau_pos": 0.9758184523809523,
+          "tau_content": 0.017485119047619044
+        },
+        {
+          "layout_id": 4,
+          "is_training": false,
+          "tau_pos": 0.9598214285714286,
+          "tau_content": 0.06808035714285715
+        },
+        {
+          "layout_id": 5,
+          "is_training": false,
+          "tau_pos": 0.9871031746031746,
+          "tau_content": 0.04761904761904762
+        },
+        {
+          "layout_id": 6,
+          "is_training": false,
+          "tau_pos": 0.9838789682539683,
+          "tau_content": -0.06101190476190475
+        },
+        {
+          "layout_id": 7,
+          "is_training": false,
+          "tau_pos": 0.9617435515873016,
+          "tau_content": 0.003286210317460318
+        }
+      ]
+    }
+  }
+}

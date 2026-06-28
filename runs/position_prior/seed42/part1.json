@@ -1,0 +1,30 @@
+{
+  "seed": 42,
+  "winning_layer": 0,
+  "carrier_heads": [
+    0,
+    3,
+    5,
+    6,
+    7
+  ],
+  "tier": "weak",
+  "arms_carrier_max": {
+    "full": 0.7956349206349206,
+    "zero_wpe": 0.8846726190476188,
+    "zero_wtpe": 0.7971230158730158,
+    "zero_both": 0.8970734126984126
+  },
+  "delta_wpe": -0.08903769841269826,
+  "delta_wtpe": -0.0014880952380952328,
+  "delta_both": -0.10143849206349198,
+  "floor": {
+    "uniform_causal": 1.0,
+    "random_B": 0.005952380952380952
+  },
+  "frame_sanity": {
+    "tau_model_slot": 0.7748015873015872,
+    "tau_physical": -0.009126984126984128,
+    "tau_perm_baseline": -0.012896825396825396
+  }
+}

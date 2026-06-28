@@ -1,0 +1,220 @@
+{
+  "seed": 123,
+  "winning_layer": 1,
+  "carrier_heads": [
+    0,
+    5,
+    6,
+    7
+  ],
+  "tier": "strong",
+  "by_step": {
+    "0": {
+      "seed": 123,
+      "ckpt_step": 0,
+      "winning_layer": 1,
+      "carrier_heads": [
+        0,
+        5,
+        6,
+        7
+      ],
+      "tier": "strong",
+      "anchor_tau_pos": 0.7665550595238095,
+      "anchor_tau_content": -0.018663194444444444,
+      "relayout_mean_pos": 0.760514101473923,
+      "relayout_mean_content": 0.01253365929705215,
+      "relayout_drop": -0.00604095804988658,
+      "anchor_valid": false,
+      "verdict": "invalid",
+      "per_layout": [
+        {
+          "layout_id": 0,
+          "is_training": true,
+          "tau_pos": 0.7665550595238095,
+          "tau_content": -0.018663194444444444
+        },
+        {
+          "layout_id": 1,
+          "is_training": false,
+          "tau_pos": 0.771515376984127,
+          "tau_content": -0.028583829365079368
+        },
+        {
+          "layout_id": 2,
+          "is_training": false,
+          "tau_pos": 0.7603546626984128,
+          "tau_content": 0.0003100198412698419
+        },
+        {
+          "layout_id": 3,
+          "is_training": false,
+          "tau_pos": 0.7588045634920635,
+          "tau_content": 0.030257936507936505
+        },
+        {
+          "layout_id": 4,
+          "is_training": false,
+          "tau_pos": 0.7624007936507937,
+          "tau_content": 0.07353670634920634
+        },
+        {
+          "layout_id": 5,
+          "is_training": false,
+          "tau_pos": 0.7547743055555556,
+          "tau_content": 0.03751240079365079
+        },
+        {
+          "layout_id": 6,
+          "is_training": false,
+          "tau_pos": 0.7681051587301587,
+          "tau_content": -0.05319940476190477
+        },
+        {
+          "layout_id": 7,
+          "is_training": false,
+          "tau_pos": 0.7476438492063492,
+          "tau_content": 0.027901785714285712
+        }
+      ]
+    },
+    "2000": {
+      "seed": 123,
+      "ckpt_step": 2000,
+      "winning_layer": 1,
+      "carrier_heads": [
+        0,
+        5,
+        6,
+        7
+      ],
+      "tier": "strong",
+      "anchor_tau_pos": 0.6643725198412698,
+      "anchor_tau_content": 0.007998511904761904,
+      "relayout_mean_pos": 0.6350003543083901,
+      "relayout_mean_content": 0.022790887188208618,
+      "relayout_drop": -0.02937216553287969,
+      "anchor_valid": false,
+      "verdict": "invalid",
+      "per_layout": [
+        {
+          "layout_id": 0,
+          "is_training": true,
+          "tau_pos": 0.6643725198412698,
+          "tau_content": 0.007998511904761904
+        },
+        {
+          "layout_id": 1,
+          "is_training": false,
+          "tau_pos": 0.6240079365079365,
+          "tau_content": 0.004960317460317461
+        },
+        {
+          "layout_id": 2,
+          "is_training": false,
+          "tau_pos": 0.6375868055555556,
+          "tau_content": -0.004526289682539682
+        },
+        {
+          "layout_id": 3,
+          "is_training": false,
+          "tau_pos": 0.6361607142857144,
+          "tau_content": 0.03807043650793651
+        },
+        {
+          "layout_id": 4,
+          "is_training": false,
+          "tau_pos": 0.6314484126984127,
+          "tau_content": 0.07180059523809523
+        },
+        {
+          "layout_id": 5,
+          "is_training": false,
+          "tau_pos": 0.6224578373015873,
+          "tau_content": 0.06901041666666667
+        },
+        {
+          "layout_id": 6,
+          "is_training": false,
+          "tau_pos": 0.6253100198412699,
+          "tau_content": 0.02027529761904762
+        },
+        {
+          "layout_id": 7,
+          "is_training": false,
+          "tau_pos": 0.668030753968254,
+          "tau_content": -0.04005456349206349
+        }
+      ]
+    },
+    "10000": {
+      "seed": 123,
+      "ckpt_step": 10000,
+      "winning_layer": 1,
+      "carrier_heads": [
+        0,
+        5,
+        6,
+        7
+      ],
+      "tier": "strong",
+      "anchor_tau_pos": 0.9734002976190477,
+      "anchor_tau_content": -0.009362599206349206,
+      "relayout_mean_pos": 0.9704949688208616,
+      "relayout_mean_content": 0.014872094671201819,
+      "relayout_drop": -0.0029053287981860576,
+      "anchor_valid": true,
+      "verdict": "slot-scaffold",
+      "per_layout": [
+        {
+          "layout_id": 0,
+          "is_training": true,
+          "tau_pos": 0.9734002976190477,
+          "tau_content": -0.009362599206349206
+        },
+        {
+          "layout_id": 1,
+          "is_training": false,
+          "tau_pos": 0.953062996031746,
+          "tau_content": -0.0005580357142857149
+        },
+        {
+          "layout_id": 2,
+          "is_training": false,
+          "tau_pos": 0.9721602182539683,
+          "tau_content": 0.017175099206349204
+        },
+        {
+          "layout_id": 3,
+          "is_training": false,
+          "tau_pos": 0.9689360119047619,
+          "tau_content": 0.01878720238095238
+        },
+        {
+          "layout_id": 4,
+          "is_training": false,
+          "tau_pos": 0.9663938492063492,
+          "tau_content": 0.06001984126984128
+        },
+        {
+          "layout_id": 5,
+          "is_training": false,
+          "tau_pos": 0.9673239087301587,
+          "tau_content": 0.04768105158730159
+        },
+        {
+          "layout_id": 6,
+          "is_training": false,
+          "tau_pos": 0.9911954365079365,
+          "tau_content": -0.06101190476190475
+        },
+        {
+          "layout_id": 7,
+          "is_training": false,
+          "tau_pos": 0.9743923611111112,
+          "tau_content": 0.02201140873015873
+        }
+      ]
+    }
+  }
+}

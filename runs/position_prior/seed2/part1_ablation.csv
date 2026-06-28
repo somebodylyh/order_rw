@@ -1,0 +1,7 @@
+arm,carrier_max_tau,carrier_mean_tau
+full,0.7716,0.76
+zero_wpe,0.8604,0.8437
+zero_wtpe,0.7726,0.7547
+zero_both,0.8765,0.847
+uniform_causal_floor,1.0,
+random_B_null,0.006,
