@@ -572,7 +572,8 @@ git commit -m "feat: carrier-validity gate (per-text tau filter)"
 - Test: `block_lo_arm_order_network/tests/test_pss_blockswap.py`
 
 **Interfaces:**
-- Produces: `block_swap_chunk(chunk, swaps, block_len=4) -> Tensor` — swap content of given model-block index pairs within a `(256,)` chunk (fixed eval labels); `cross_sample_replace(chunk, donor, blocks, block_len=4) -> Tensor`.
+- Produces: `block_swap_chunk(chunk, swaps, block_len=4) -> Tensor` — swap content of disjoint model-block index pairs within a nonempty 1-D tensor (production chunks are `(256,)`, but generic lengths are supported when divisible by `block_len`); `cross_sample_replace(chunk, donor, blocks, block_len=4) -> Tensor` — replace unique selected blocks with the corresponding donor slices.
+- Contract: `chunk` and `donor` are tensors; `chunk` is 1-D and nonempty; `block_len` is a positive integral non-bool value and divides the chunk length. All block indices are integral non-bool values in range. Swap pairs reject self-pairs and endpoint reuse so the operation has disjoint simultaneous-swap semantics. The donor must match the chunk's shape, dtype, and device. Both helpers clone their output and leave all inputs unchanged; empty selections return an independent unchanged clone.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -601,21 +602,25 @@ Expected: FAIL
 
 ```python
 # append to analyses/physical_signal_source.py
+def _validate_block_chunk(chunk, block_len):
+    # Shared validation: tensor, nonempty 1-D, positive integral non-bool
+    # block_len, and chunk length divisible by block_len. Returns n_blocks.
+    ...
+
+def _validate_block_index(index, n_blocks, name):
+    # Reject bool/non-integral/out-of-range values before slicing.
+    ...
+
 def block_swap_chunk(chunk, swaps, block_len=4):
-    out = chunk.clone()
-    for a, b in swaps:
-        sa, sb = a * block_len, b * block_len
-        tmp = out[sa:sa+block_len].clone()
-        out[sa:sa+block_len] = out[sb:sb+block_len]
-        out[sb:sb+block_len] = tmp
-    return out
+    # Validate all pairs first; reject self-pairs and any endpoint reuse.
+    # Clone and copy every selected block from the original chunk so the
+    # swaps have disjoint simultaneous semantics and never mutate the input.
+    ...
 
 def cross_sample_replace(chunk, donor, blocks, block_len=4):
-    out = chunk.clone()
-    for b in blocks:
-        s = b * block_len
-        out[s:s+block_len] = donor[s:s+block_len]
-    return out
+    # Require matching donor shape/dtype/device and unique valid blocks.
+    # Clone chunk, then copy only selected donor slices.
+    ...
 ```
 
 - [ ] **Step 4: Run test to verify it passes**

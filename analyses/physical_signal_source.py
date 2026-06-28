@@ -169,20 +169,79 @@ def random_token_chunk(chunk, vocab_size, rng):
     return torch.from_numpy(rng.integers(0, vocab_size, size=tuple(chunk.shape))).to(chunk.dtype)
 
 
+def _validate_block_chunk(chunk, block_len):
+    if not isinstance(chunk, torch.Tensor):
+        raise TypeError("chunk must be a torch.Tensor")
+    if chunk.ndim != 1 or chunk.numel() == 0:
+        raise ValueError("chunk must be one-dimensional and nonempty")
+    if (isinstance(block_len, bool)
+            or not isinstance(block_len, numbers.Integral)):
+        raise TypeError("block_len must be a non-bool integer")
+    block_len = int(block_len)
+    if block_len <= 0:
+        raise ValueError("block_len must be positive")
+    if chunk.numel() % block_len:
+        raise ValueError("chunk length must be divisible by block_len")
+    return block_len, chunk.numel() // block_len
+
+
+def _validate_block_index(index, n_blocks, name):
+    if isinstance(index, bool) or not isinstance(index, numbers.Integral):
+        raise TypeError(f"{name} must be a non-bool integer")
+    index = int(index)
+    if not 0 <= index < n_blocks:
+        raise ValueError(f"{name} must be in [0, {n_blocks})")
+    return index
+
+
 def block_swap_chunk(chunk, swaps, block_len=4):
+    block_len, n_blocks = _validate_block_chunk(chunk, block_len)
+    validated = []
+    used = set()
+    for pair_index, pair in enumerate(swaps):
+        if not isinstance(pair, (tuple, list)) or len(pair) != 2:
+            raise TypeError(f"swaps[{pair_index}] must be a length-2 pair")
+        a = _validate_block_index(pair[0], n_blocks, f"swaps[{pair_index}][0]")
+        b = _validate_block_index(pair[1], n_blocks, f"swaps[{pair_index}][1]")
+        if a == b:
+            raise ValueError("swap endpoints must be different")
+        if a in used or b in used:
+            raise ValueError("swap endpoints must be disjoint; endpoint reused")
+        used.update((a, b))
+        validated.append((a, b))
+
     out = chunk.clone()
-    for a, b in swaps:
+    for a, b in validated:
         sa, sb = a * block_len, b * block_len
-        tmp = out[sa:sa+block_len].clone()
-        out[sa:sa+block_len] = out[sb:sb+block_len]
-        out[sb:sb+block_len] = tmp
+        out[sa:sa+block_len] = chunk[sb:sb+block_len]
+        out[sb:sb+block_len] = chunk[sa:sa+block_len]
     return out
 
+
 def cross_sample_replace(chunk, donor, blocks, block_len=4):
+    block_len, n_blocks = _validate_block_chunk(chunk, block_len)
+    if not isinstance(donor, torch.Tensor):
+        raise TypeError("donor must be a torch.Tensor")
+    if donor.shape != chunk.shape:
+        raise ValueError("donor must have the same shape as chunk")
+    if donor.dtype != chunk.dtype:
+        raise ValueError("donor must have the same dtype as chunk")
+    if donor.device != chunk.device:
+        raise ValueError("donor must be on the same device as chunk")
+
+    validated = []
+    used = set()
+    for position, block in enumerate(blocks):
+        block = _validate_block_index(block, n_blocks, f"blocks[{position}]")
+        if block in used:
+            raise ValueError("blocks must be unique; duplicate block")
+        used.add(block)
+        validated.append(block)
+
     out = chunk.clone()
-    for b in blocks:
-        s = b * block_len
-        out[s:s+block_len] = donor[s:s+block_len]
+    for block in validated:
+        start = block * block_len
+        out[start:start+block_len] = donor[start:start+block_len]
     return out
 
 
