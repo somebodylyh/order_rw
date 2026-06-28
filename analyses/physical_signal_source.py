@@ -48,3 +48,25 @@ def row_normalize_l1(B, mask, eps=1e-9):
     B = np.asarray(B, dtype=np.float64) * mask
     mass = np.abs(B).sum(axis=1, keepdims=True) + eps
     return B / mass
+
+
+def _random_valid_B(rng, n=65):
+    m = valid_edge_mask(n)
+    B = np.zeros((n, n)); B[m] = rng.random(int(m.sum()))
+    return B
+
+def synthetic_content_invariant(M, seed=0):
+    B = _random_valid_B(np.random.default_rng(seed))
+    return [B.copy() for _ in range(M)]
+
+def synthetic_content_randomized(M, seed=0):
+    return [_random_valid_B(np.random.default_rng(seed + i)) for i in range(M)]
+
+def synthetic_ascending_B(n=65):
+    # Chain: None->1->2->...->64 in the upper triangle (B[u,v]=1 for v=u+1).
+    # L-term propagates the chain and CDL rolls out [0,1,...,63], tau=+1.0.
+    B = np.zeros((n, n))
+    B[0, 1] = 1.0               # None -> block1
+    for i in range(1, n - 1):
+        B[i, i + 1] = 1.0       # block_i -> block_{i+1} (upper triangle)
+    return B
