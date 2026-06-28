@@ -145,13 +145,19 @@ def content_variance(B_list, halfA_list, halfB_list, mask, normalize=True):
 
 
 def slot_only_r2(B_list, mask, n_train=None, normalize=True):
+    M = len(B_list)
+    if M < 2:
+        raise ValueError("slot_only_r2 requires at least 2 matrices")
+    if n_train is None:
+        n_train = M // 2
+    elif isinstance(n_train, bool) or not isinstance(n_train, (int, np.integer)):
+        raise ValueError("n_train must be an integer")
+    n_train = int(n_train)
+    if not 1 <= n_train < M:
+        raise ValueError(f"n_train must satisfy 1 <= n_train < {M}")
     X = _stack(B_list, mask, normalize)                     # (M, n_valid)
-    M = len(X)
-    n_train = n_train if n_train is not None else M // 2
     B_hat = X[:n_train].mean(axis=0)                        # content-free slot-pair table
     test = X[n_train:]
-    if len(test) == 0:
-        return float("nan")
     # Global held-out R² over all held-out text × valid-edge entries.
     ss_res = ((test - B_hat) ** 2).sum()
     ss_tot = ((test - test.mean()) ** 2).sum() + 1e-12
