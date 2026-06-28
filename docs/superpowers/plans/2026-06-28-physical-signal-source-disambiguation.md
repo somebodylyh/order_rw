@@ -15,9 +15,9 @@
 - **Carrier config (frozen, from P1):** seed2 L0{2,3,4,5}, seed42 L0{2}, seed123 L0{1,2,3,4}.
 - **Valid-edge support only:** metrics computed on None→content (`B[0,1:]`) + content→content causal lower-triangle (`B[i,j], i>j≥1`); exclude into-None (`B[:,0]`), diagonal, and the structurally-zero content upper-triangle.
 - **Row normalization:** `B_norm[i,:] = B[i,:] / (Σ_{valid j}|B[i,j]| + ε)`, ε=1e-9; **report raw AND row-normalized**.
-- **Slot-only predictor:** `B_hat[i,j]=mean_{train texts}B[i,j]`; **train/held-out split over TEXT samples, not edges**; predictor sees no held-out-text activations.
+- **Slot-only predictor:** `B_hat[i,j]=mean_{train texts}B[i,j]`; **train/held-out split over TEXT samples, not edges**; predictor sees no held-out-text activations. Report global total-entry held-out R² for both raw and normalized B, together with a size-matched randomized-null mean/std over deterministic seeds `0..15` and null-adjusted excess `(r2-null_mean)/(1-null_mean)`. Normalized R² alone is not strong B evidence: row normalization gives the randomized synthetic null about 0.70.
 - **Carrier-validity gate:** a (text,head) enters variance/R² only if its per-text τ_physical ≥ 0.9 (strong); seed42's single weak head reported separately, soft threshold, never hard-excluded; **report all-sample AND valid-only**.
-- **Calibration:** synthetic content-invariant B (variance≈0, R²≈1) + content-randomized B (variance high, R² low) anchor "low/high"; no hard B/C call near the boundary.
+- **Calibration:** synthetic content-invariant B (variance≈0, raw/normalized R²≈1) + content-randomized B (variance high; raw R²≈-0.05, normalized total-entry R²≈0.70) anchor the metrics. R² evidence must clearly exceed its matched null in **both** raw and normalized views; disagreement or a near-null result is `mixed`, not a hard B/C call.
 - **E1 = the only verdict driver; E3 relayout supporting** (survival→C; collapse→only consistent-with-B). Random-token = stress-only.
 - **Tests run from `block_lo_arm_order_network/`**; insert repo ROOT (`parents[2]`) for `analyses.*`.
 
@@ -411,13 +411,15 @@ git commit -m "feat: cross-text variance + pairwise similarity (calibrated vs sy
 - Test: `block_lo_arm_order_network/tests/test_pss_predictor.py`
 
 **Interfaces:**
-- Produces: `slot_only_r2(B_list, mask, n_train=None, normalize=True) -> float` — fit `B_hat=mean_{train texts}` on the first `n_train` texts (default half), evaluate one global R² over all held-out text×valid-edge entries. Text-level split. With row normalization, the randomized synthetic baseline calibrates near 0.70 because between-edge structure contributes to the global denominator; therefore the low anchor is `<0.8`, not `<0.5`.
+- Produces: `slot_only_r2(B_list, mask, n_train=None, normalize=True) -> float` — require at least two matrices; require integer, non-bool `n_train` satisfying `1 <= n_train < M` (default `M//2`); fit `B_hat=mean_{train texts}` and evaluate one global R² over all held-out text×valid-edge entries. With row normalization, the randomized synthetic baseline calibrates near 0.70 because between-edge structure contributes to the global denominator; this normalized total-entry R² is not by itself strong B evidence.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_pss_predictor.py
 import pathlib, sys
+import numpy as np
+import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from analyses.physical_signal_source import (
@@ -425,11 +427,32 @@ from analyses.physical_signal_source import (
 
 def test_predictor_high_on_invariant_low_on_random():
     m = valid_edge_mask(65)
-    invariant_r2 = slot_only_r2(synthetic_content_invariant(8), m)
-    randomized_r2 = slot_only_r2(synthetic_content_randomized(40), m)
-    assert invariant_r2 > 0.95                    # fixed table explains all
-    assert 0.6 < randomized_r2 < 0.8              # global held-out R² calibrates near 0.70
-    assert invariant_r2 > randomized_r2
+    invariant = synthetic_content_invariant(8)
+    randomized = synthetic_content_randomized(40)
+    invariant_raw = slot_only_r2(invariant, m, normalize=False)
+    invariant_norm = slot_only_r2(invariant, m, normalize=True)
+    randomized_raw = slot_only_r2(randomized, m, normalize=False)
+    randomized_norm = slot_only_r2(randomized, m, normalize=True)
+    assert invariant_raw > 0.95 and invariant_norm > 0.95
+    assert randomized_raw < 0.1
+    # Total-entry normalized R² calibrates near 0.70; this is not by itself
+    # strong evidence for a fixed map because the matched random null is high.
+    assert 0.6 < randomized_norm < 0.8
+
+@pytest.mark.parametrize("n_train", [0, -1, 4, 5, 1.5, True])
+def test_predictor_rejects_invalid_split(n_train):
+    m = valid_edge_mask(65)
+    with pytest.raises(ValueError, match="n_train"):
+        slot_only_r2(synthetic_content_invariant(4), m, n_train=n_train)
+
+def test_predictor_requires_at_least_two_matrices():
+    m = valid_edge_mask(65)
+    with pytest.raises(ValueError, match="at least 2"):
+        slot_only_r2(synthetic_content_invariant(1), m)
+
+def test_predictor_accepts_valid_explicit_split():
+    m = valid_edge_mask(65)
+    assert np.isfinite(slot_only_r2(synthetic_content_randomized(6), m, n_train=2))
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -442,13 +465,19 @@ Expected: FAIL
 ```python
 # append to analyses/physical_signal_source.py
 def slot_only_r2(B_list, mask, n_train=None, normalize=True):
+    M = len(B_list)
+    if M < 2:
+        raise ValueError("slot_only_r2 requires at least 2 matrices")
+    if n_train is None:
+        n_train = M // 2
+    elif isinstance(n_train, bool) or not isinstance(n_train, (int, np.integer)):
+        raise ValueError("n_train must be an integer")
+    n_train = int(n_train)
+    if not 1 <= n_train < M:
+        raise ValueError(f"n_train must satisfy 1 <= n_train < {M}")
     X = _stack(B_list, mask, normalize)                     # (M, n_valid)
-    M = len(X)
-    n_train = n_train if n_train is not None else M // 2
     B_hat = X[:n_train].mean(axis=0)                        # content-free slot-pair table
     test = X[n_train:]
-    if len(test) == 0:
-        return float("nan")
     ss_res = ((test - B_hat) ** 2).sum()
     ss_tot = ((test - test.mean()) ** 2).sum() + 1e-12
     return float(1.0 - ss_res / ss_tot)
@@ -697,7 +726,9 @@ git commit -m "feat: E3 relayout supporting diagnostic (anchor vs relayout drop)
 - Test: `block_lo_arm_order_network/tests/test_pss_verdict.py`
 
 **Interfaces:**
-- Produces: `classify_source(content_variance, noise_floor, r2, r2_threshold=0.8) -> str` — `"B"|"B+"|"C"|"mixed"` from the **content-variance-vs-noise-floor ratio** + R²; `run_seed(seed, root, out_dir, M=24, K_relayout=4, n_reveals=32) -> dict` — full E1(+E3) per carrier head (using `carrier_b65_per_text(..., n_reveals=32, return_halves=True)` + `content_variance` over the within-text floor) + verdict, writes `source.json` + `source.csv`.
+- Produces: `matched_r2_null(M, mask, seeds=range(16)) -> dict` with deterministic raw/normalized randomized-null `mean` and population `std`; each draw uses `synthetic_content_randomized(M, seed=s)` and the same default text split as the real sample. `null_adjusted_excess(r2, null_mean) -> (r2-null_mean)/(1-null_mean)`.
+- Produces: `classify_source(content_variance, noise_floor, r2_raw_excess, r2_norm_excess, r2_raw_z, r2_norm_z) -> str`. Clear fixed-map evidence requires **both** excesses `>=0.15` and both matched-null z-scores `>=2`; clear absence requires both excesses `<=0.05` and both z-scores `<=1`. Then: map evidence + content ratio `<=0.5` → `B`; map evidence + ratio `>0.5` → `B+`; map absence + ratio `>=2` → `C`; every disagreement/near-null/boundary case → `mixed`. Absolute R² (including normalized R² `>=0.8`) never decides the class alone.
+- Produces: `run_seed(seed, root, out_dir, M=24, K_relayout=4, n_reveals=32) -> dict` — full E1(+E3) per carrier head. Every row reports `r2_slot_only_raw`, `r2_slot_only_norm`, both matched-null means/stds, both null-adjusted excesses, and both z-scores; nulls are matched to `len(use)` after validity gating. Writes `source.json` + `source.csv`.
 - Consumes/extends: modifies `carrier_b65_per_text` (Task 1) to add `return_halves=False` → when True also returns `(halfA_list, halfB_list)` per-text B65 from two disjoint reveal halves.
 
 - [ ] **Step 1: Write the failing tests**
@@ -710,12 +741,17 @@ sys.path.insert(0, str(ROOT))
 from analyses.physical_signal_source import classify_source
 
 def test_classify_source_rules():
-    # content_variance ~ noise floor (almost all variance is sampling noise) + high R2 -> B
-    assert classify_source(content_variance=0.001, noise_floor=0.05, r2=0.95) == "B"
-    # content_variance >> floor + low R2 -> C
-    assert classify_source(content_variance=0.2, noise_floor=0.02, r2=0.3) == "C"
-    # high R2 but content_variance clearly above floor -> B+
-    assert classify_source(content_variance=0.06, noise_floor=0.02, r2=0.85) == "B+"
+    strong_map = dict(r2_raw_excess=0.3, r2_norm_excess=0.3,
+                      r2_raw_z=3.0, r2_norm_z=3.0)
+    absent_map = dict(r2_raw_excess=0.0, r2_norm_excess=0.0,
+                      r2_raw_z=0.0, r2_norm_z=0.0)
+    assert classify_source(0.001, 0.05, **strong_map) == "B"
+    assert classify_source(0.2, 0.02, **absent_map) == "C"
+    assert classify_source(0.06, 0.02, **strong_map) == "B+"
+    # A high normalized absolute R² cannot rescue raw/null disagreement.
+    disagree = dict(r2_raw_excess=0.02, r2_norm_excess=0.5,
+                    r2_raw_z=0.5, r2_norm_z=5.0)
+    assert classify_source(0.001, 0.05, **disagree) == "mixed"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -729,16 +765,30 @@ Expected: FAIL
 # append to analyses/physical_signal_source.py
 import csv as _csv, json as _json
 
-def classify_source(content_variance, noise_floor, r2, r2_threshold=0.8):
-    # content_variance is between-text variance ABOVE the within-text sampling floor.
-    # Reference it to the real noise floor: content_ratio = content_var / (floor + eps).
-    # ratio ~0 => cross-text variance is just sampling noise => B.
+def null_adjusted_excess(r2, null_mean):
+    return float((r2 - null_mean) / (1.0 - null_mean + 1e-12))
+
+def matched_r2_null(M, mask, seeds=range(16)):
+    vals = {"raw": [], "norm": []}
+    for seed in seeds:
+        Bs = synthetic_content_randomized(M, seed=seed)
+        vals["raw"].append(slot_only_r2(Bs, mask, normalize=False))
+        vals["norm"].append(slot_only_r2(Bs, mask, normalize=True))
+    return {k: {"mean": float(np.mean(v)), "std": float(np.std(v, ddof=0))}
+            for k, v in vals.items()}
+
+def classify_source(content_variance, noise_floor, r2_raw_excess, r2_norm_excess,
+                    r2_raw_z, r2_norm_z):
     ratio = content_variance / (noise_floor + 1e-9)
-    if r2 >= 0.92 and ratio <= 0.5:
+    map_evidence = (r2_raw_excess >= 0.15 and r2_norm_excess >= 0.15 and
+                    r2_raw_z >= 2.0 and r2_norm_z >= 2.0)
+    map_absent = (r2_raw_excess <= 0.05 and r2_norm_excess <= 0.05 and
+                  r2_raw_z <= 1.0 and r2_norm_z <= 1.0)
+    if map_evidence and ratio <= 0.5:
         return "B"
-    if r2 < r2_threshold and ratio >= 2.0:
+    if map_absent and ratio >= 2.0:
         return "C"
-    if r2 >= r2_threshold and ratio > 0.5:
+    if map_evidence and ratio > 0.5:
         return "B+"
     return "mixed"
 
@@ -751,7 +801,8 @@ def run_seed(seed, root="runs/handoff_overnight", out_dir=None, M=24, K_relayout
         carrier_b65_per_text, carrier_valid_filter, valid_edge_mask,
         cross_text_variance, pairwise_similarity, slot_only_r2,
         content_variance, within_text_noise_floor,
-        synthetic_content_invariant, synthetic_content_randomized, relayout_diagnostic)
+        synthetic_content_invariant, synthetic_content_randomized, relayout_diagnostic,
+        matched_r2_null, null_adjusted_excess)
     CARRIERS = {2: (0, [2,3,4,5]), 42: (0, [2]), 123: (0, [1,2,3,4])}
     layer, heads = CARRIERS[seed]
     out = pathlib.Path(out_dir or f"runs/physical_signal_source/seed{seed}")
@@ -770,12 +821,25 @@ def run_seed(seed, root="runs/handoff_overnight", out_dir=None, M=24, K_relayout
         hBv = [hB[i] for i in idx] if len(Bv) == len(idx) and use is Bv else hB
         floor = within_text_noise_floor(hAv, hBv, mask)
         cvar = content_variance(use, hAv, hBv, mask)            # between-text minus sampling floor
-        var = cross_text_variance(use, mask); r2 = slot_only_r2(use, mask)
+        var = cross_text_variance(use, mask)
+        r2_raw = slot_only_r2(use, mask, normalize=False)
+        r2_norm = slot_only_r2(use, mask, normalize=True)
+        null = matched_r2_null(len(use), mask, seeds=range(16))
+        raw_excess = null_adjusted_excess(r2_raw, null["raw"]["mean"])
+        norm_excess = null_adjusted_excess(r2_norm, null["norm"]["mean"])
+        raw_z = (r2_raw - null["raw"]["mean"]) / (null["raw"]["std"] + 1e-12)
+        norm_z = (r2_norm - null["norm"]["mean"]) / (null["norm"]["std"] + 1e-12)
         sim = pairwise_similarity(use, mask)
-        verdict = classify_source(cvar, floor, r2)             # classify: content vs noise floor
+        verdict = classify_source(cvar, floor, raw_excess, norm_excess, raw_z, norm_z)
         rows.append({"seed": seed, "layer": layer, "head": h, "n_valid": len(Bv),
                      "variance": var, "noise_floor": floor, "content_variance": cvar,
-                     "r2_slot_only": r2, "pairwise_sim": sim,
+                     "r2_slot_only_raw": r2_raw, "r2_slot_only_norm": r2_norm,
+                     "r2_null_raw_mean": null["raw"]["mean"],
+                     "r2_null_raw_std": null["raw"]["std"],
+                     "r2_null_norm_mean": null["norm"]["mean"],
+                     "r2_null_norm_std": null["norm"]["std"],
+                     "r2_raw_excess": raw_excess, "r2_norm_excess": norm_excess,
+                     "r2_raw_z": raw_z, "r2_norm_z": norm_z, "pairwise_sim": sim,
                      "var_invariant": vi, "var_randomized": vr, "verdict": verdict})
     relay = relayout_diagnostic(ckpt, layer, heads, K=K_relayout, M=8)
     with open(out / "source.csv", "w", newline="") as f:
@@ -810,7 +874,7 @@ git commit -m "feat: per-seed source verdict (B/B+/C/mixed) + run_seed driver"
 - Test: `block_lo_arm_order_network/tests/test_pss_plot.py`
 
 **Interfaces:**
-- Produces: `plot_source(source_json, out_dir)` → `source_metrics.png` (per-head variance vs synthetic anchors + R² bars + verdict labels).
+- Produces: `plot_source(source_json, out_dir)` → `source_metrics.png` (per-head variance vs synthetic anchors + paired raw/normalized R² bars with their matched-null means + verdict labels).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -823,7 +887,9 @@ from analyses.plot_physical_signal_source import plot_source
 
 def test_plot_source_writes_png(tmp_path):
     j = {"seed": 2, "carrier": {"layer": 0, "heads": [2]},
-         "per_head": [{"head": 2, "variance": 0.01, "r2_slot_only": 0.9,
+         "per_head": [{"head": 2, "variance": 0.01,
+                       "r2_slot_only_raw": 0.4, "r2_slot_only_norm": 0.9,
+                       "r2_null_raw_mean": -0.05, "r2_null_norm_mean": 0.7,
                        "var_invariant": 0.001, "var_randomized": 0.2, "verdict": "B"}],
          "relayout": {"anchor_tau": 1.0, "relayout_mean_tau": 0.1, "drop": -0.9},
          "seed_verdict": "B"}
@@ -837,7 +903,7 @@ def test_plot_source_writes_png(tmp_path):
 Run: `cd block_lo_arm_order_network && python -m pytest tests/test_pss_plot.py -q`
 Expected: FAIL
 
-- [ ] **Step 3: Implement** — matplotlib Agg; per-head bar of variance with the two synthetic-anchor lines + R² bars + verdict text. Full code in the module.
+- [ ] **Step 3: Implement** — matplotlib Agg; per-head bar of variance with the two synthetic-anchor lines + paired raw/normalized R² bars and matched-null reference lines + verdict text. Full code in the module.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -866,7 +932,7 @@ Expected: `source.json/csv/png` per seed.
 
 - [ ] **Step 2: Write `analyses/physical_signal_source_README.md`**
 
-Per seed: per-head variance (vs synthetic anchors), slot-only R², pairwise sim, carrier-valid fraction, relayout drop, and the **B/B+/C/mixed verdict** (seed42 single-head reported separately). The line-level statement: is the L0 physical-order signal a fixed-layout map (B), content-dependent (C), or B+. Then the **pre-registered P3′ fork**: B → positional/QK causal intervention; C → content-feature causal intervention; B+ → separate base map from modulation; never output-ablation→same-head-readout.
+Per seed: per-head variance (vs synthetic anchors), raw + normalized slot-only R² with matched-null mean/std, null-adjusted excess and z-score, pairwise sim, carrier-valid fraction, relayout drop, and the **B/B+/C/mixed verdict** (seed42 single-head reported separately). The line-level statement: is the L0 physical-order signal a fixed-layout map (B), content-dependent (C), or B+. Then the **pre-registered P3′ fork**: B → positional/QK causal intervention; C → content-feature causal intervention; B+ → separate base map from modulation; never output-ablation→same-head-readout.
 
 - [ ] **Step 3: Commit**
 
