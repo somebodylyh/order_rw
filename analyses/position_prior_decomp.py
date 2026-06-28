@@ -150,3 +150,74 @@ def part1_arms(seed, root, n_batches=4, bs_mean=16, device="cpu"):
         ckpt, max(64, bs_mean * n_batches), torch.device(device))
     return {arm: tau_table_under(model, chunks, _ARM_TO_ABL[arm], n_batches, bs_mean, device)
             for arm in ("full", "zero_wpe", "zero_wtpe", "zero_both")}
+
+
+# ── Task 5: Part-1 summary (ablation table + floor + frame sanity) ───────────
+
+import csv as _csv  # noqa: E402
+import json as _json  # noqa: E402
+
+
+def _training_inv_perm(ckpt_path):
+    """Length-64 inv_perm_model_to_phys from the ckpt clean_protocol."""
+    ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    return np.asarray(ck["clean_protocol"]["inv_perm_model_to_phys"], dtype=int)
+
+
+def _winner_for_seed(seed, root):
+    from analyses.emergence_characterization import load_tau_trajectory, winner
+    traj = load_tau_trajectory(seed, root)
+    return winner(traj, seed)
+
+
+def run_part1(seed, root, out_dir, n_batches=4, bs_mean=16, device="cpu"):
+    from analyses.emergence_characterization import extract_carrier_B
+    out = pathlib.Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    ckpt0 = f"{root}/seed{seed}/ckpt_step0.pt"
+
+    arms = part1_arms(seed, root, n_batches, bs_mean, device)
+    floor = floor_taus()
+
+    w = _winner_for_seed(seed, root)
+    L = w["winning_layer"]
+    heads = w["winner_heads"]
+    inv = _training_inv_perm(ckpt0)
+    perm_baseline = tau_vs_arange(inv[np.arange(64)])
+
+    B0 = extract_carrier_B(seed, 0, L, root=root, bs_mean=bs_mean,
+                           n_batches=n_batches, device=device)  # (8,65,65)
+    ms, ph = [], []
+    for h in heads:
+        fr = tau_two_frames(B0[h], inv)
+        ms.append(fr["tau_model_slot"])
+        ph.append(fr["tau_physical"])
+    frame_sanity = {"tau_model_slot": float(np.mean(ms)),
+                    "tau_physical": float(np.mean(ph)),
+                    "tau_perm_baseline": float(perm_baseline)}
+
+    # carrier-head max/mean tau per arm (winning layer)
+    def carrier_stat(tab):
+        vals = [tab[L, h] for h in heads]
+        return float(np.max(vals)), float(np.mean(vals))
+
+    with open(out / "part1_ablation.csv", "w", newline="") as f:
+        wr = _csv.writer(f)
+        wr.writerow(["arm", "carrier_max_tau", "carrier_mean_tau"])
+        for arm in ("full", "zero_wpe", "zero_wtpe", "zero_both"):
+            mx, mn = carrier_stat(arms[arm])
+            wr.writerow([arm, round(mx, 4), round(mn, 4)])
+        wr.writerow(["uniform_causal_floor", round(floor["uniform_causal"], 4), ""])
+        wr.writerow(["random_B_null", round(floor["random_B"], 4), ""])
+
+    fmax = {arm: carrier_stat(arms[arm])[0] for arm in arms}
+    summary = {
+        "seed": seed, "winning_layer": L, "carrier_heads": heads, "tier": w["tier"],
+        "arms_carrier_max": fmax,
+        "delta_wpe": fmax["full"] - fmax["zero_wpe"],
+        "delta_wtpe": fmax["full"] - fmax["zero_wtpe"],
+        "delta_both": fmax["full"] - fmax["zero_both"],
+        "floor": floor, "frame_sanity": frame_sanity,
+    }
+    _json.dump(summary, open(out / "part1.json", "w"), indent=2, default=float)
+    return summary
