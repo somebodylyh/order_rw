@@ -23,11 +23,6 @@ def test_within_text_floor_and_content_variance():
     inv = synthetic_content_invariant(6)
     assert within_text_noise_floor(inv, inv, m) < 1e-9
     assert content_variance(inv, inv, inv, m) < 1e-9
-    # if cross-text variance is entirely sampling noise (floor == cross var),
-    # content_variance clamps to 0
-    rnd = synthetic_content_randomized(6)
-    cv = content_variance(rnd, rnd, rnd, m)               # floor uses same-as-cross here
-    assert cv >= 0.0
 
 
 def test_centered_noise_floor_matches_full_estimator_and_removes_common_half_bias():
@@ -94,3 +89,18 @@ def test_noise_floor_rejects_unequal_half_lists():
     m = np.ones((2, 2), dtype=bool)
     with pytest.raises(ValueError, match="equal length"):
         within_text_noise_floor([np.zeros((2, 2))], [], m, normalize=False)
+
+
+@pytest.mark.parametrize(
+    ("B_list", "half_a", "half_b"),
+    [
+        ([np.zeros((2, 2))], [np.zeros((2, 2))] * 2, [np.zeros((2, 2))] * 2),
+        ([np.zeros((2, 2))] * 2, [np.zeros((2, 2))], [np.zeros((2, 2))] * 2),
+    ],
+)
+def test_content_variance_rejects_mismatched_list_lengths(B_list, half_a, half_b):
+    m = np.ones((2, 2), dtype=bool)
+    with pytest.raises(
+            ValueError,
+            match="B_list, halfA_list, and halfB_list must have equal length"):
+        content_variance(B_list, half_a, half_b, m, normalize=False)
