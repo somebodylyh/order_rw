@@ -107,6 +107,12 @@ canonical τ 本身就是该 head QK attention map 的函数；该实验只用�
      heads`, then read the cluster / aggregate physical τ under leave-one-out, leave-two-out, … of
      the carrier set. This tests the **contribution of multi-head redundancy to the aggregate
      physical signal** and is *not* a self-readout tautology.
+     - **Patch 4 — scoring discipline:** the **primary** leave-k-out score applies the *same
+       canonical rollout / metric* to the post-removal `B_cluster` — **do NOT retrain a readout per
+       subset** (per-subset adaptation would contaminate the redundancy curve). A retrained readout
+       is allowed only as an explicitly-labeled **secondary** diagnostic: *primary* = no-retrain
+       canonical rollout on `B_cluster`; *secondary* = a single fixed trained readout applied to the
+       leave-k-out `B_cluster` (never refit per subset).
 - **Interpretation:**
   - multi-head seeds (2, 123): if aggregate τ degrades **gradually** under leave-k-out → redundant
     parallel carriers; if head-local patch h→h′ is null → parallel independent copies.
@@ -126,11 +132,20 @@ is causally implemented through the **positional / slot-geometry** input to the 
   position-path machinery from ⑤ (`test_pp_pe_ablation.py` — wpe/wtpe zeroing) and the per-head
   QK-recompute-from-residual (`analyses/path_patch_handoff._l1_qkv_from_residual`, generalized
   from L1 to arbitrary layer; see §7 Task 1).
-- **Readout:** canonical physical τ of the carrier, and the slot-only R² recomputed on the
-  intervened B65 (does the held-out fixed-map predictability drop?).
+  - **Feasibility fallback (Patch 1):** If an exact additive position/content split is not
+    available at the L0 QK input (e.g. the residual has already mixed through MLP / LayerNorm /
+    conditioning), P3′-B falls back to **controlled input-level interventions**: zero/shuffle
+    wpe/wtpe *before* the forward pass, then recapture L0 Q/K and B65. The exact residual split is
+    *preferred but not required* for the verdict.
+- **Readout (Patch 2 — joint criterion):** canonical physical τ of the carrier **and** the
+  slot-only R² recomputed on the intervened B65. The verdict is based on the **joint collapse of
+  τ_physical and slot-only fixed-map R²**. R² is the indicator closer to the P2 decomposition (it
+  measures the fixed-map base directly); τ is only the final order-level expression. **A τ drop
+  without an R² drop, or an R² drop without a τ drop, must be reported as a mixed / departure
+  case — not folded into "B+ confirmed".**
 - **Expected (B+ signature):** the **bulk** of physical τ collapses when the position path is
-  removed — the fixed map lives there. The slot-only fixed-map component should lose most of its
-  predictive structure.
+  removed — the fixed map lives there — *and* the slot-only fixed-map R² loses most of its
+  predictive structure (both together).
 - **Selectivity:** the same intervention on a **null head** (control 1) and on the **L1 slot
   scaffold** (P3′-D) should not reproduce the carrier's collapse pattern.
 
@@ -146,11 +161,16 @@ causally **content-driven** — not measurement noise.
   (the P2 corruptions in `analyses/physical_signal_source.py`: `block_swap_chunk`,
   `cross_sample_replace`, `random_token_chunk`) — then recompute the carrier's Q/K from the
   corrupted residual.
-- **Readout:** the change in the carrier's B65 **residual component** (the cross-text variance above
-  the within-text reveal-split sampling-noise floor from P2), and the carrier τ change.
-- **Expected (B+ signature):** a **small, head-specific** change — measurably **above** the
-  within-text sampling-noise floor, but **much smaller** than the position-path collapse of P3′-B.
-  This is the causal counterpart of P2's content-variance / noise-floor ratio.
+- **Readout (Patch 3 — residual is primary, τ is secondary):** the **primary** metric is the change
+  in the carrier's B65 **residual component** (cross-text variance above the within-text reveal-split
+  sampling-noise floor from P2), reported as **Δresidual / noise floor**, with **affected-slot
+  localization** and **head-specific B65 residual change**. **Red line:** *For P3′-C, τ_physical is
+  a secondary validity metric. A small or zero Δτ does NOT refute content modulation if the residual
+  component moves above the within-text sampling floor.* (Under B+ the content residual is the small
+  component, so τ may well stay high — that is expected, not a negative.)
+- **Expected (B+ signature):** a **small, head-specific** change in the residual — measurably
+  **above** the within-text sampling-noise floor, but **much smaller** than the position-path
+  collapse of P3′-B. This is the causal counterpart of P2's content-variance / noise-floor ratio.
 - **Negative control:** content-invariant synthetic replacement (P2's `synthetic_content_invariant`)
   must move the residual ≈ 0; content-randomized must bound the upper end.
 
@@ -169,6 +189,12 @@ output path; and the base-map intervention is **selective** to the L0 carrier.
   scaffold vs null heads**. Expect the carrier's physical-τ collapse to be specific to L0; the L1
   scaffold's *model-frame* behavior is a different (confounded) phenomenon and must not be scored on
   the canonical metric as if it were the carrier.
+  - **Patch 5 — report the L1 scaffold control on BOTH metrics, to avoid a false "L1 is null"
+    narrative:** (1) **canonical physical τ**, expected *not* to behave like the L0 carrier; (2)
+    **model-frame identity τ**, *only* to verify the scaffold manipulation actually affects the
+    confounded scaffold channel. The second metric is **diagnostic only — never part of the P3′
+    verdict.** Without (2), an "L1 shows no canonical response" result could be misread as "L1 is
+    null" when the manipulation simply did not engage the scaffold channel.
 
 ---
 
@@ -190,11 +216,12 @@ output path; and the base-map intervention is **selective** to the L0 carrier.
 ## 8. Expected B+ signature (the verdict shape)
 
 P3′ **confirms B+** iff, consistently across seeds:
-- **Position-path ablation (P3′-B) collapses the bulk** of physical τ and the slot-only fixed-map
-  R² → the base map is causally positional / QK-geometric.
+- **Position-path ablation (P3′-B) jointly collapses** physical τ **and** the slot-only fixed-map
+  R² → the base map is causally positional / QK-geometric. (A τ-only or R²-only drop is a
+  mixed/departure case per Patch 2, not a B+ confirmation.)
 - **Content corruption at fixed slots (P3′-C) moves a small, head-specific residual** above the
   sampling-noise floor but far below the P3′-B collapse → the "+" is causally content-driven yet
-  secondary.
+  secondary. (Δτ is secondary here: a small/zero Δτ does not refute it — Patch 3.)
 - **Cross-layout non-generalization persists** (consistent with B, inherited from P2's relayout
   collapse 1.0→0.13; not re-litigated, cited as boundary).
 - Interventions are **selective** to the L0 carrier (null heads / L1 scaffold do not reproduce it).
@@ -244,8 +271,12 @@ A decisive strengthening of the content side remains **multi-layout training + r
    (and `l1_attn_from_residual`) over `layer`; unit-test bit-identical to current L1 path and a new
    L0 path; export `qkv_from_residual(model, layer, x_resid, cond)`.
 2. **Residual position/content split** — function returning (position-component, content-component)
-   of a carrier head's input residual, reusing the pe-ablation decomposition; test that
-   position-zeroed + content-zeroed ≈ original (additive sanity).
+   of a carrier head's input residual, reusing the pe-ablation decomposition. **Patch 6 —
+   best-effort sanity:** test **exact additive reconstruction** (`position-zeroed + content-zeroed
+   ≈ original`) *only when the model representation provides an exact split*; otherwise test that the
+   intervention is **localized and preserves tensor shapes / norm ranges**, and document it as an
+   **input-level perturbation** (Patch 1 fallback: wpe/wtpe zero/shuffle before forward), **not**
+   exact component subtraction. Do not block the task on the strong additive assumption.
 3. **A0 self-QK patch calibration** — `selfqk_calibration(ckpt, layer, head)` → τ_self before/after;
    test collapse-toward-floor on a synthetic head.
 4. **A1 head-local h→h′** — `head_local_crosshead(ckpt, layer, carriers)` → matrix of patch-h /
