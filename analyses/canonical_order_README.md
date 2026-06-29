@@ -87,7 +87,7 @@ seed2 step10000, per-layer best |τ|:
 | mechanism | name | layer | readout | at init? | content-bound? | paper role |
 |-----------|------|-------|---------|----------|----------------|------------|
 | reveal/slot following | **slot-order scaffold** | L1 | model-frame / identity | yes | no | confound / control |
-| original-order reconstruction | **physical-order carrier** | L0 | canonical / random | no (emerges ~2k) | **unresolved (B vs C)** | **main claim** |
+| original-order reconstruction | **L0 global physical-order carrier** | L0 | canonical / random | no (emerges ~2k) | **B+ (P2): fixed-layout map + content modulation** | **main claim** |
 
 ## Status of the prior pillars
 

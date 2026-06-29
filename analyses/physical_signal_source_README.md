@@ -43,12 +43,19 @@ Three independent lines of evidence, consistent across seeds:
    recovery that generalized would survive; the collapse is consistent with a fixed-layout
    map (the model only ever saw one layout).
 
-## Interpretation (the corrected, sober claim)
+## Interpretation (the locked, sober claim)
 
-> **The L0 "physical-order recovery" is primarily the model inverting its own fixed input
-> permutation — a learned slot→physical position map — with a smaller content-dependent
-> modulation on top (B+). It is NOT primarily content-driven semantic order recovery (C),
-> and NOT a pure position scaffold (B).**
+> **There is a real, training-emergent *global physical-order-aligned signal* in attention
+> (canonical readout: L0 heads recover the original block order, τ≈1 after training, absent at
+> init). Under the fixed-layout protocol this signal is *dominated by a learned slot→physical
+> global map with measurable content modulation* (B+) — NOT pure content-driven recovery (C),
+> NOT a slot-order scaffold (B).**
+
+**Naming lock:** call it the **L0 global physical-order carrier** (or *global physical-order
+signal*). Do **not** call it "content-bound" (disproven) or a bare "order carrier" (re-confuses
+the slot-scaffold vs physical-order distinction). This framing also pre-empts the reviewer
+question "isn't this just a learned permutation lookup?" — we quantify exactly that (the B base)
+and the content residual on top.
 
 This finalizes the earlier corrections: the canonical readout (P1) established the signal is
 real and emergent (not an init artifact, not the L1 slot scaffold); P2 now shows its *source*
