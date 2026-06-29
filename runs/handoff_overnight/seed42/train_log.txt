@@ -1,0 +1,1128 @@
+Run kind: baseline
+graph_rw_active: False  alpha_active: False
+alpha_schedule: constant 0.0 (run_kind=baseline short-circuits alpha_for_step). Any rw_* CLI flags are ignored at training time.
+shuffle_granularity: 64 (groups of 4 tokens)
+Output dir: runs/handoff_overnight/seed42
+Device: cuda:0
+[data-source=continuous] memmap streams train=/home/admin/ych/nanogpt-learned-order/data/wikitext103/train.bin val=/home/admin/ych/nanogpt-learned-order/data/wikitext103/val.bin
+[continuous] train stream tokens=118496151 eval windows=2000 (block=256)
+[attn_trajectory] enabled — 16 fixed samples, heatmap every 5000 steps, output=runs/handoff_overnight/seed42/attention_trajectory
+[Eval @ 0] alpha=0.0000
+[Eval @ 0] train_obj=10.9011 | ori_l2r=10.9014 | model_order=10.9017 | unstructured=10.9011 | rw=10.9013
+[attn_traj] fixed 16 attention samples, indices_hash=0xfd22fda5
+[attn_traj] heatmaps saved @ step 0 (extraction 0.3s)
+Saved checkpoint: runs/handoff_overnight/seed42/ckpt_step0.pt
+step     0->    1/10000 | loss=10.9012 | alpha=0.000 | lr=1.00e-03 | 2.98s/step | ETA 8.3h | total 30s
+step    10->   11/10000 | loss=8.0532 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 41m | total 32s
+step    20->   21/10000 | loss=7.5416 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 41m | total 35s
+step    30->   31/10000 | loss=7.5407 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 37s
+step    40->   41/10000 | loss=7.5043 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 39s
+step    50->   51/10000 | loss=7.2870 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 42s
+step    60->   61/10000 | loss=7.1674 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 44s
+step    70->   71/10000 | loss=6.8945 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 47s
+step    80->   81/10000 | loss=6.6908 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 49s
+step    90->   91/10000 | loss=6.6431 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 52s
+step   100->  101/10000 | loss=6.5487 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 54s
+step   110->  111/10000 | loss=6.4791 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 57s
+step   120->  121/10000 | loss=6.3508 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 59s
+step   130->  131/10000 | loss=6.3643 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 61s
+step   140->  141/10000 | loss=6.2664 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 64s
+step   150->  151/10000 | loss=6.2737 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 66s
+step   160->  161/10000 | loss=6.1906 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 69s
+step   170->  171/10000 | loss=6.1909 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 71s
+step   180->  181/10000 | loss=6.1712 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 74s
+step   190->  191/10000 | loss=6.1302 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 76s
+[Eval @ 200] alpha=0.0000
+[Eval @ 200] train_obj=6.0377 | ori_l2r=5.9842 | model_order=6.0390 | unstructured=6.0377 | rw=6.0311
+step   200->  201/10000 | loss=6.1128 | alpha=0.000 | lr=1.00e-03 | 2.76s/step | ETA 7.5h | total 104s
+step   210->  211/10000 | loss=6.0332 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 106s
+step   220->  221/10000 | loss=6.0120 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 109s
+step   230->  231/10000 | loss=6.0242 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 111s
+step   240->  241/10000 | loss=5.9736 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 113s
+step   250->  251/10000 | loss=5.9685 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 116s
+step   260->  261/10000 | loss=5.8681 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 118s
+step   270->  271/10000 | loss=5.9518 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 40m | total 121s
+step   280->  281/10000 | loss=5.9581 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 123s
+step   290->  291/10000 | loss=5.9142 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 126s
+step   300->  301/10000 | loss=5.8361 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 128s
+step   310->  311/10000 | loss=5.8336 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 131s
+step   320->  321/10000 | loss=5.8673 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 133s
+step   330->  331/10000 | loss=5.8420 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 135s
+step   340->  341/10000 | loss=5.7415 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 138s
+step   350->  351/10000 | loss=5.7657 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 140s
+step   360->  361/10000 | loss=5.7804 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 143s
+step   370->  371/10000 | loss=5.7360 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 145s
+step   380->  381/10000 | loss=5.7442 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 148s
+step   390->  391/10000 | loss=5.7635 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 150s
+[Eval @ 400] alpha=0.0000
+[Eval @ 400] train_obj=5.6819 | ori_l2r=5.6158 | model_order=5.6827 | unstructured=5.6819 | rw=5.6743
+step   400->  401/10000 | loss=5.7251 | alpha=0.000 | lr=1.00e-03 | 2.77s/step | ETA 7.4h | total 178s
+step   410->  411/10000 | loss=5.6984 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 180s
+step   420->  421/10000 | loss=5.7738 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 183s
+step   430->  431/10000 | loss=5.7025 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 185s
+step   440->  441/10000 | loss=5.6605 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 188s
+step   450->  451/10000 | loss=5.7129 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 190s
+step   460->  461/10000 | loss=5.6839 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 192s
+step   470->  471/10000 | loss=5.7006 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 195s
+step   480->  481/10000 | loss=5.6801 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 197s
+step   490->  491/10000 | loss=5.6966 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 200s
+step   500->  501/10000 | loss=5.6900 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 202s
+step   510->  511/10000 | loss=5.6362 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 205s
+step   520->  521/10000 | loss=5.6734 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 207s
+step   530->  531/10000 | loss=5.5332 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 209s
+step   540->  541/10000 | loss=5.5817 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 212s
+step   550->  551/10000 | loss=5.6666 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 39m | total 214s
+step   560->  561/10000 | loss=5.5561 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 217s
+step   570->  571/10000 | loss=5.5351 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 219s
+step   580->  581/10000 | loss=5.5840 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 222s
+step   590->  591/10000 | loss=5.6036 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 224s
+[Eval @ 600] alpha=0.0000
+[Eval @ 600] train_obj=5.5339 | ori_l2r=5.4623 | model_order=5.5353 | unstructured=5.5339 | rw=5.5250
+step   600->  601/10000 | loss=5.5376 | alpha=0.000 | lr=1.00e-03 | 2.78s/step | ETA 7.3h | total 252s
+step   610->  611/10000 | loss=5.5472 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 254s
+step   620->  621/10000 | loss=5.5513 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 257s
+step   630->  631/10000 | loss=5.5679 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 259s
+step   640->  641/10000 | loss=5.5730 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 262s
+step   650->  651/10000 | loss=5.5824 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 264s
+step   660->  661/10000 | loss=5.5118 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 267s
+step   670->  671/10000 | loss=5.5166 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 269s
+step   680->  681/10000 | loss=5.5348 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 271s
+step   690->  691/10000 | loss=5.5246 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 274s
+step   700->  701/10000 | loss=5.4770 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 276s
+step   710->  711/10000 | loss=5.4813 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 279s
+step   720->  721/10000 | loss=5.4859 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 281s
+step   730->  731/10000 | loss=5.4342 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 284s
+step   740->  741/10000 | loss=5.5029 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 286s
+step   750->  751/10000 | loss=5.4771 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 38m | total 288s
+step   760->  761/10000 | loss=5.4692 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 38m | total 291s
+step   770->  771/10000 | loss=5.4324 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 293s
+step   780->  781/10000 | loss=5.4238 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 296s
+step   790->  791/10000 | loss=5.4803 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 298s
+[Eval @ 800] alpha=0.0000
+[Eval @ 800] train_obj=5.4405 | ori_l2r=5.3656 | model_order=5.4420 | unstructured=5.4405 | rw=5.4277
+step   800->  801/10000 | loss=5.4318 | alpha=0.000 | lr=9.99e-04 | 2.77s/step | ETA 7.1h | total 326s
+step   810->  811/10000 | loss=5.4595 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 328s
+step   820->  821/10000 | loss=5.4610 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 331s
+step   830->  831/10000 | loss=5.4230 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 333s
+step   840->  841/10000 | loss=5.4543 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 336s
+step   850->  851/10000 | loss=5.4043 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 338s
+step   860->  861/10000 | loss=5.4572 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 341s
+step   870->  871/10000 | loss=5.3580 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 343s
+step   880->  881/10000 | loss=5.4554 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 346s
+step   890->  891/10000 | loss=5.4318 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 348s
+step   900->  901/10000 | loss=5.4289 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 350s
+step   910->  911/10000 | loss=5.3997 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 353s
+step   920->  921/10000 | loss=5.3258 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 355s
+step   930->  931/10000 | loss=5.4076 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 358s
+step   940->  941/10000 | loss=5.4517 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 360s
+step   950->  951/10000 | loss=5.4228 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 363s
+step   960->  961/10000 | loss=5.3156 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 365s
+step   970->  971/10000 | loss=5.3291 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 367s
+step   980->  981/10000 | loss=5.4300 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 370s
+step   990->  991/10000 | loss=5.4544 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 372s
+[Eval @ 1000] alpha=0.0000
+[Eval @ 1000] train_obj=5.3653 | ori_l2r=5.2811 | model_order=5.3664 | unstructured=5.3653 | rw=5.3485
+Saved checkpoint: runs/handoff_overnight/seed42/ckpt_step1000.pt
+step  1000-> 1001/10000 | loss=5.4101 | alpha=0.000 | lr=9.99e-04 | 2.83s/step | ETA 7.1h | total 401s
+step  1010-> 1011/10000 | loss=5.3288 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 37m | total 403s
+step  1020-> 1021/10000 | loss=5.3339 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 405s
+step  1030-> 1031/10000 | loss=5.3315 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 408s
+step  1040-> 1041/10000 | loss=5.3163 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 410s
+step  1050-> 1051/10000 | loss=5.3882 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 413s
+step  1060-> 1061/10000 | loss=5.3319 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 415s
+step  1070-> 1071/10000 | loss=5.3561 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 418s
+step  1080-> 1081/10000 | loss=5.3134 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 420s
+step  1090-> 1091/10000 | loss=5.3570 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 423s
+step  1100-> 1101/10000 | loss=5.3399 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 425s
+step  1110-> 1111/10000 | loss=5.3844 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 427s
+step  1120-> 1121/10000 | loss=5.3558 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 430s
+step  1130-> 1131/10000 | loss=5.3755 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 432s
+step  1140-> 1141/10000 | loss=5.3361 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 435s
+step  1150-> 1151/10000 | loss=5.2945 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 437s
+step  1160-> 1161/10000 | loss=5.2919 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 440s
+step  1170-> 1171/10000 | loss=5.2757 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 442s
+step  1180-> 1181/10000 | loss=5.3036 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 444s
+step  1190-> 1191/10000 | loss=5.2248 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 447s
+[Eval @ 1200] alpha=0.0000
+[Eval @ 1200] train_obj=5.2904 | ori_l2r=5.2026 | model_order=5.2911 | unstructured=5.2904 | rw=5.2724
+step  1200-> 1201/10000 | loss=5.2330 | alpha=0.000 | lr=9.99e-04 | 2.77s/step | ETA 6.8h | total 475s
+step  1210-> 1211/10000 | loss=5.3228 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 477s
+step  1220-> 1221/10000 | loss=5.2611 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 480s
+step  1230-> 1231/10000 | loss=5.2798 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 482s
+step  1240-> 1241/10000 | loss=5.3004 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 484s
+step  1250-> 1251/10000 | loss=5.3569 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 487s
+step  1260-> 1261/10000 | loss=5.1981 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 36m | total 489s
+step  1270-> 1271/10000 | loss=5.2565 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 35m | total 492s
+step  1280-> 1281/10000 | loss=5.1818 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 35m | total 494s
+step  1290-> 1291/10000 | loss=5.2181 | alpha=0.000 | lr=9.99e-04 | 0.24s/step | ETA 35m | total 497s
+step  1300-> 1301/10000 | loss=5.2969 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 499s
+step  1310-> 1311/10000 | loss=5.2646 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 501s
+step  1320-> 1321/10000 | loss=5.2279 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 504s
+step  1330-> 1331/10000 | loss=5.2075 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 506s
+step  1340-> 1341/10000 | loss=5.2489 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 509s
+step  1350-> 1351/10000 | loss=5.2006 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 511s
+step  1360-> 1361/10000 | loss=5.2056 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 514s
+step  1370-> 1371/10000 | loss=5.1894 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 516s
+step  1380-> 1381/10000 | loss=5.2621 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 519s
+step  1390-> 1391/10000 | loss=5.2491 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 521s
+[Eval @ 1400] alpha=0.0000
+[Eval @ 1400] train_obj=5.1893 | ori_l2r=5.1202 | model_order=5.1894 | unstructured=5.1893 | rw=5.1883
+step  1400-> 1401/10000 | loss=5.3146 | alpha=0.000 | lr=9.98e-04 | 2.77s/step | ETA 6.6h | total 549s
+step  1410-> 1411/10000 | loss=5.1900 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 551s
+step  1420-> 1421/10000 | loss=5.1675 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 554s
+step  1430-> 1431/10000 | loss=5.1717 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 556s
+step  1440-> 1441/10000 | loss=5.1464 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 558s
+step  1450-> 1451/10000 | loss=5.1724 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 561s
+step  1460-> 1461/10000 | loss=5.1588 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 563s
+step  1470-> 1471/10000 | loss=5.2072 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 566s
+step  1480-> 1481/10000 | loss=5.2206 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 568s
+step  1490-> 1491/10000 | loss=5.2006 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 571s
+step  1500-> 1501/10000 | loss=5.1952 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 35m | total 573s
+step  1510-> 1511/10000 | loss=5.0855 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 575s
+step  1520-> 1521/10000 | loss=5.0704 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 578s
+step  1530-> 1531/10000 | loss=5.1281 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 580s
+step  1540-> 1541/10000 | loss=5.0929 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 583s
+step  1550-> 1551/10000 | loss=5.1053 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 585s
+step  1560-> 1561/10000 | loss=5.0974 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 588s
+step  1570-> 1571/10000 | loss=5.0559 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 590s
+step  1580-> 1581/10000 | loss=4.9803 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 593s
+step  1590-> 1591/10000 | loss=5.0773 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 595s
+[Eval @ 1600] alpha=0.0000
+[Eval @ 1600] train_obj=5.0487 | ori_l2r=4.9423 | model_order=5.0460 | unstructured=5.0487 | rw=5.0674
+step  1600-> 1601/10000 | loss=5.0937 | alpha=0.000 | lr=9.98e-04 | 2.78s/step | ETA 6.5h | total 623s
+step  1610-> 1611/10000 | loss=5.0574 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 625s
+step  1620-> 1621/10000 | loss=5.0231 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 628s
+step  1630-> 1631/10000 | loss=4.9853 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 630s
+step  1640-> 1641/10000 | loss=4.8529 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 633s
+step  1650-> 1651/10000 | loss=4.9178 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 635s
+step  1660-> 1661/10000 | loss=4.8985 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 637s
+step  1670-> 1671/10000 | loss=4.9054 | alpha=0.000 | lr=9.98e-04 | 0.24s/step | ETA 34m | total 640s
+step  1680-> 1681/10000 | loss=4.9898 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 34m | total 642s
+step  1690-> 1691/10000 | loss=4.8378 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 34m | total 645s
+step  1700-> 1701/10000 | loss=4.8230 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 34m | total 647s
+step  1710-> 1711/10000 | loss=4.9136 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 34m | total 650s
+step  1720-> 1721/10000 | loss=4.8861 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 34m | total 652s
+step  1730-> 1731/10000 | loss=4.8249 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 34m | total 654s
+step  1740-> 1741/10000 | loss=4.9269 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 34m | total 657s
+step  1750-> 1751/10000 | loss=4.8318 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 34m | total 659s
+step  1760-> 1761/10000 | loss=4.7831 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 662s
+step  1770-> 1771/10000 | loss=4.7131 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 664s
+step  1780-> 1781/10000 | loss=4.7617 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 667s
+step  1790-> 1791/10000 | loss=4.8898 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 669s
+[Eval @ 1800] alpha=0.0000
+[Eval @ 1800] train_obj=4.7870 | ori_l2r=4.5724 | model_order=4.7802 | unstructured=4.7870 | rw=4.8001
+step  1800-> 1801/10000 | loss=4.7904 | alpha=0.000 | lr=9.97e-04 | 2.78s/step | ETA 6.3h | total 697s
+step  1810-> 1811/10000 | loss=4.7393 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 699s
+step  1820-> 1821/10000 | loss=4.8232 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 702s
+step  1830-> 1831/10000 | loss=4.7790 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 704s
+step  1840-> 1841/10000 | loss=4.7414 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 707s
+step  1850-> 1851/10000 | loss=4.7040 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 709s
+step  1860-> 1861/10000 | loss=4.7533 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 711s
+step  1870-> 1871/10000 | loss=4.7186 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 714s
+step  1880-> 1881/10000 | loss=4.7751 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 716s
+step  1890-> 1891/10000 | loss=4.7828 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 719s
+step  1900-> 1901/10000 | loss=4.7259 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 721s
+step  1910-> 1911/10000 | loss=4.7083 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 724s
+step  1920-> 1921/10000 | loss=4.6283 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 726s
+step  1930-> 1931/10000 | loss=4.6541 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 729s
+step  1940-> 1941/10000 | loss=4.7245 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 731s
+step  1950-> 1951/10000 | loss=4.6653 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 733s
+step  1960-> 1961/10000 | loss=4.6536 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 736s
+step  1970-> 1971/10000 | loss=4.7235 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 738s
+step  1980-> 1981/10000 | loss=4.6677 | alpha=0.000 | lr=9.97e-04 | 0.24s/step | ETA 33m | total 741s
+step  1990-> 1991/10000 | loss=4.6773 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 33m | total 743s
+[Eval @ 2000] alpha=0.0000
+[Eval @ 2000] train_obj=4.6510 | ori_l2r=4.4578 | model_order=4.6460 | unstructured=4.6510 | rw=4.6475
+Saved checkpoint: runs/handoff_overnight/seed42/ckpt_step2000.pt
+step  2000-> 2001/10000 | loss=4.7140 | alpha=0.000 | lr=9.96e-04 | 2.85s/step | ETA 6.3h | total 772s
+step  2010-> 2011/10000 | loss=4.6131 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 33m | total 774s
+step  2020-> 2021/10000 | loss=4.6599 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 33m | total 777s
+step  2030-> 2031/10000 | loss=4.6336 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 779s
+step  2040-> 2041/10000 | loss=4.7075 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 781s
+step  2050-> 2051/10000 | loss=4.6077 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 784s
+step  2060-> 2061/10000 | loss=4.6381 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 786s
+step  2070-> 2071/10000 | loss=4.5404 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 789s
+step  2080-> 2081/10000 | loss=4.6238 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 791s
+step  2090-> 2091/10000 | loss=4.5980 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 794s
+step  2100-> 2101/10000 | loss=4.5775 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 796s
+step  2110-> 2111/10000 | loss=4.6592 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 799s
+step  2120-> 2121/10000 | loss=4.5857 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 801s
+step  2130-> 2131/10000 | loss=4.5488 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 803s
+step  2140-> 2141/10000 | loss=4.5877 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 806s
+step  2150-> 2151/10000 | loss=4.5080 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 808s
+step  2160-> 2161/10000 | loss=4.5765 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 811s
+step  2170-> 2171/10000 | loss=4.5805 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 813s
+step  2180-> 2181/10000 | loss=4.5618 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 816s
+step  2190-> 2191/10000 | loss=4.5699 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 818s
+[Eval @ 2200] alpha=0.0000
+[Eval @ 2200] train_obj=4.5503 | ori_l2r=4.3901 | model_order=4.5459 | unstructured=4.5503 | rw=4.5441
+step  2200-> 2201/10000 | loss=4.6297 | alpha=0.000 | lr=9.96e-04 | 2.80s/step | ETA 6.1h | total 846s
+step  2210-> 2211/10000 | loss=4.5768 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 849s
+step  2220-> 2221/10000 | loss=4.4328 | alpha=0.000 | lr=9.96e-04 | 0.25s/step | ETA 32m | total 851s
+step  2230-> 2231/10000 | loss=4.5364 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 853s
+step  2240-> 2241/10000 | loss=4.4470 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 856s
+step  2250-> 2251/10000 | loss=4.4679 | alpha=0.000 | lr=9.96e-04 | 0.24s/step | ETA 32m | total 858s
+step  2260-> 2261/10000 | loss=4.5253 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 32m | total 861s
+step  2270-> 2271/10000 | loss=4.5062 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 863s
+step  2280-> 2281/10000 | loss=4.3839 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 866s
+step  2290-> 2291/10000 | loss=4.5353 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 868s
+step  2300-> 2301/10000 | loss=4.5348 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 871s
+step  2310-> 2311/10000 | loss=4.4436 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 873s
+step  2320-> 2321/10000 | loss=4.5027 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 875s
+step  2330-> 2331/10000 | loss=4.4984 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 878s
+step  2340-> 2341/10000 | loss=4.5700 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 880s
+step  2350-> 2351/10000 | loss=4.5517 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 883s
+step  2360-> 2361/10000 | loss=4.4890 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 885s
+step  2370-> 2371/10000 | loss=4.3849 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 888s
+step  2380-> 2381/10000 | loss=4.4291 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 890s
+step  2390-> 2391/10000 | loss=4.4544 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 893s
+[Eval @ 2400] alpha=0.0000
+[Eval @ 2400] train_obj=4.4629 | ori_l2r=4.3090 | model_order=4.4602 | unstructured=4.4629 | rw=4.4510
+step  2400-> 2401/10000 | loss=4.4391 | alpha=0.000 | lr=9.95e-04 | 2.80s/step | ETA 5.9h | total 921s
+step  2410-> 2411/10000 | loss=4.4619 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 923s
+step  2420-> 2421/10000 | loss=4.3658 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 925s
+step  2430-> 2431/10000 | loss=4.4517 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 928s
+step  2440-> 2441/10000 | loss=4.4741 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 930s
+step  2450-> 2451/10000 | loss=4.4586 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 933s
+step  2460-> 2461/10000 | loss=4.4665 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 935s
+step  2470-> 2471/10000 | loss=4.4513 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 938s
+step  2480-> 2481/10000 | loss=4.4212 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 940s
+step  2490-> 2491/10000 | loss=4.3306 | alpha=0.000 | lr=9.95e-04 | 0.24s/step | ETA 31m | total 943s
+step  2500-> 2501/10000 | loss=4.4121 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 31m | total 945s
+step  2510-> 2511/10000 | loss=4.4415 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 31m | total 947s
+step  2520-> 2521/10000 | loss=4.3631 | alpha=0.000 | lr=9.94e-04 | 0.25s/step | ETA 31m | total 950s
+step  2530-> 2531/10000 | loss=4.4867 | alpha=0.000 | lr=9.94e-04 | 0.25s/step | ETA 31m | total 952s
+step  2540-> 2541/10000 | loss=4.4781 | alpha=0.000 | lr=9.94e-04 | 0.25s/step | ETA 30m | total 955s
+step  2550-> 2551/10000 | loss=4.4450 | alpha=0.000 | lr=9.94e-04 | 0.25s/step | ETA 31m | total 957s
+step  2560-> 2561/10000 | loss=4.3963 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 30m | total 960s
+step  2570-> 2571/10000 | loss=4.3994 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 30m | total 962s
+step  2580-> 2581/10000 | loss=4.3936 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 30m | total 965s
+step  2590-> 2591/10000 | loss=4.4510 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 30m | total 967s
+[Eval @ 2600] alpha=0.0000
+[Eval @ 2600] train_obj=4.3988 | ori_l2r=4.2472 | model_order=4.3964 | unstructured=4.3988 | rw=4.3804
+step  2600-> 2601/10000 | loss=4.3747 | alpha=0.000 | lr=9.94e-04 | 2.81s/step | ETA 5.8h | total 995s
+step  2610-> 2611/10000 | loss=4.4689 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 30m | total 998s
+step  2620-> 2621/10000 | loss=4.3162 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 30m | total 1000s
+step  2630-> 2631/10000 | loss=4.2895 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 30m | total 1002s
+step  2640-> 2641/10000 | loss=4.3920 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 30m | total 1005s
+step  2650-> 2651/10000 | loss=4.4119 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 30m | total 1007s
+step  2660-> 2661/10000 | loss=4.3070 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 30m | total 1010s
+step  2670-> 2671/10000 | loss=4.4086 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 30m | total 1012s
+step  2680-> 2681/10000 | loss=4.4033 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 30m | total 1015s
+step  2690-> 2691/10000 | loss=4.3950 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 30m | total 1017s
+step  2700-> 2701/10000 | loss=4.3613 | alpha=0.000 | lr=9.94e-04 | 0.24s/step | ETA 30m | total 1020s
+step  2710-> 2711/10000 | loss=4.3578 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 30m | total 1022s
+step  2720-> 2721/10000 | loss=4.3348 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 30m | total 1024s
+step  2730-> 2731/10000 | loss=4.3726 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 30m | total 1027s
+step  2740-> 2741/10000 | loss=4.3531 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 30m | total 1029s
+step  2750-> 2751/10000 | loss=4.4422 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 29m | total 1032s
+step  2760-> 2761/10000 | loss=4.2862 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 29m | total 1034s
+step  2770-> 2771/10000 | loss=4.3787 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 29m | total 1037s
+step  2780-> 2781/10000 | loss=4.3581 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 29m | total 1039s
+step  2790-> 2791/10000 | loss=4.2175 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 29m | total 1042s
+[Eval @ 2800] alpha=0.0000
+[Eval @ 2800] train_obj=4.3454 | ori_l2r=4.1946 | model_order=4.3432 | unstructured=4.3454 | rw=4.3239
+step  2800-> 2801/10000 | loss=4.3288 | alpha=0.000 | lr=9.93e-04 | 2.81s/step | ETA 5.6h | total 1070s
+step  2810-> 2811/10000 | loss=4.3574 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 29m | total 1072s
+step  2820-> 2821/10000 | loss=4.4127 | alpha=0.000 | lr=9.93e-04 | 0.25s/step | ETA 29m | total 1075s
+step  2830-> 2831/10000 | loss=4.3446 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 29m | total 1077s
+step  2840-> 2841/10000 | loss=4.2975 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 29m | total 1079s
+step  2850-> 2851/10000 | loss=4.3525 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 29m | total 1082s
+step  2860-> 2861/10000 | loss=4.3625 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 29m | total 1084s
+step  2870-> 2871/10000 | loss=4.3780 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 29m | total 1087s
+step  2880-> 2881/10000 | loss=4.4456 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 29m | total 1089s
+step  2890-> 2891/10000 | loss=4.3912 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 29m | total 1092s
+step  2900-> 2901/10000 | loss=4.2590 | alpha=0.000 | lr=9.93e-04 | 0.24s/step | ETA 29m | total 1094s
+step  2910-> 2911/10000 | loss=4.2820 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 29m | total 1096s
+step  2920-> 2921/10000 | loss=4.2578 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 29m | total 1099s
+step  2930-> 2931/10000 | loss=4.3178 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 29m | total 1101s
+step  2940-> 2941/10000 | loss=4.2809 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 29m | total 1104s
+step  2950-> 2951/10000 | loss=4.3546 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 29m | total 1106s
+step  2960-> 2961/10000 | loss=4.3087 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 29m | total 1109s
+step  2970-> 2971/10000 | loss=4.3822 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 29m | total 1111s
+step  2980-> 2981/10000 | loss=4.2985 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 29m | total 1114s
+step  2990-> 2991/10000 | loss=4.3753 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 29m | total 1116s
+[Eval @ 3000] alpha=0.0000
+[Eval @ 3000] train_obj=4.3050 | ori_l2r=4.1550 | model_order=4.3027 | unstructured=4.3050 | rw=4.2855
+Saved checkpoint: runs/handoff_overnight/seed42/ckpt_step3000.pt
+step  3000-> 3001/10000 | loss=4.3189 | alpha=0.000 | lr=9.92e-04 | 2.84s/step | ETA 5.5h | total 1144s
+step  3010-> 3011/10000 | loss=4.2423 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 29m | total 1147s
+step  3020-> 3021/10000 | loss=4.3135 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 28m | total 1149s
+step  3030-> 3031/10000 | loss=4.2658 | alpha=0.000 | lr=9.92e-04 | 0.25s/step | ETA 28m | total 1152s
+step  3040-> 3041/10000 | loss=4.3173 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 28m | total 1154s
+step  3050-> 3051/10000 | loss=4.2539 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 28m | total 1157s
+step  3060-> 3061/10000 | loss=4.2076 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 28m | total 1159s
+step  3070-> 3071/10000 | loss=4.3414 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 28m | total 1162s
+step  3080-> 3081/10000 | loss=4.2378 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 28m | total 1164s
+step  3090-> 3091/10000 | loss=4.2596 | alpha=0.000 | lr=9.92e-04 | 0.24s/step | ETA 28m | total 1166s
+step  3100-> 3101/10000 | loss=4.2707 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 28m | total 1169s
+step  3110-> 3111/10000 | loss=4.2670 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 28m | total 1171s
+step  3120-> 3121/10000 | loss=4.2805 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 28m | total 1174s
+step  3130-> 3131/10000 | loss=4.3400 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 28m | total 1176s
+step  3140-> 3141/10000 | loss=4.2443 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 28m | total 1179s
+step  3150-> 3151/10000 | loss=4.2513 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 28m | total 1181s
+step  3160-> 3161/10000 | loss=4.3072 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 28m | total 1184s
+step  3170-> 3171/10000 | loss=4.2460 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 28m | total 1186s
+step  3180-> 3181/10000 | loss=4.3395 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 28m | total 1188s
+step  3190-> 3191/10000 | loss=4.2709 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 28m | total 1191s
+[Eval @ 3200] alpha=0.0000
+[Eval @ 3200] train_obj=4.2754 | ori_l2r=4.1316 | model_order=4.2736 | unstructured=4.2754 | rw=4.2551
+step  3200-> 3201/10000 | loss=4.2655 | alpha=0.000 | lr=9.91e-04 | 2.82s/step | ETA 5.3h | total 1219s
+step  3210-> 3211/10000 | loss=4.3178 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 28m | total 1222s
+step  3220-> 3221/10000 | loss=4.2883 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 28m | total 1224s
+step  3230-> 3231/10000 | loss=4.2960 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 28m | total 1226s
+step  3240-> 3241/10000 | loss=4.3393 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 28m | total 1229s
+step  3250-> 3251/10000 | loss=4.2722 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 28m | total 1231s
+step  3260-> 3261/10000 | loss=4.2934 | alpha=0.000 | lr=9.91e-04 | 0.24s/step | ETA 27m | total 1234s
+step  3270-> 3271/10000 | loss=4.3379 | alpha=0.000 | lr=9.91e-04 | 0.25s/step | ETA 27m | total 1236s
+step  3280-> 3281/10000 | loss=4.2889 | alpha=0.000 | lr=9.90e-04 | 0.24s/step | ETA 27m | total 1239s
+step  3290-> 3291/10000 | loss=4.2001 | alpha=0.000 | lr=9.90e-04 | 0.24s/step | ETA 27m | total 1241s
+step  3300-> 3301/10000 | loss=4.2340 | alpha=0.000 | lr=9.90e-04 | 0.24s/step | ETA 27m | total 1244s
+step  3310-> 3311/10000 | loss=4.2993 | alpha=0.000 | lr=9.90e-04 | 0.24s/step | ETA 27m | total 1246s
+step  3320-> 3321/10000 | loss=4.2931 | alpha=0.000 | lr=9.90e-04 | 0.24s/step | ETA 27m | total 1248s
+step  3330-> 3331/10000 | loss=4.2325 | alpha=0.000 | lr=9.90e-04 | 0.25s/step | ETA 27m | total 1251s
+step  3340-> 3341/10000 | loss=4.2810 | alpha=0.000 | lr=9.90e-04 | 0.24s/step | ETA 27m | total 1253s
+step  3350-> 3351/10000 | loss=4.2681 | alpha=0.000 | lr=9.90e-04 | 0.24s/step | ETA 27m | total 1256s
+step  3360-> 3361/10000 | loss=4.2212 | alpha=0.000 | lr=9.90e-04 | 0.24s/step | ETA 27m | total 1258s
+step  3370-> 3371/10000 | loss=4.2619 | alpha=0.000 | lr=9.90e-04 | 0.24s/step | ETA 27m | total 1261s
+step  3380-> 3381/10000 | loss=4.1858 | alpha=0.000 | lr=9.90e-04 | 0.24s/step | ETA 27m | total 1263s
+step  3390-> 3391/10000 | loss=4.2544 | alpha=0.000 | lr=9.90e-04 | 0.24s/step | ETA 27m | total 1266s
+[Eval @ 3400] alpha=0.0000
+[Eval @ 3400] train_obj=4.2500 | ori_l2r=4.0982 | model_order=4.2494 | unstructured=4.2500 | rw=4.2268
+step  3400-> 3401/10000 | loss=4.1851 | alpha=0.000 | lr=9.90e-04 | 2.83s/step | ETA 5.2h | total 1294s
+step  3410-> 3411/10000 | loss=4.2749 | alpha=0.000 | lr=9.90e-04 | 0.24s/step | ETA 27m | total 1296s
+step  3420-> 3421/10000 | loss=4.2108 | alpha=0.000 | lr=9.90e-04 | 0.24s/step | ETA 27m | total 1299s
+step  3430-> 3431/10000 | loss=4.2676 | alpha=0.000 | lr=9.90e-04 | 0.24s/step | ETA 27m | total 1301s
+step  3440-> 3441/10000 | loss=4.2165 | alpha=0.000 | lr=9.90e-04 | 0.24s/step | ETA 27m | total 1304s
+step  3450-> 3451/10000 | loss=4.2155 | alpha=0.000 | lr=9.89e-04 | 0.24s/step | ETA 27m | total 1306s
+step  3460-> 3461/10000 | loss=4.2513 | alpha=0.000 | lr=9.89e-04 | 0.25s/step | ETA 27m | total 1309s
+step  3470-> 3471/10000 | loss=4.2411 | alpha=0.000 | lr=9.89e-04 | 0.25s/step | ETA 27m | total 1311s
+step  3480-> 3481/10000 | loss=4.2068 | alpha=0.000 | lr=9.89e-04 | 0.25s/step | ETA 27m | total 1313s
+step  3490-> 3491/10000 | loss=4.2424 | alpha=0.000 | lr=9.89e-04 | 0.25s/step | ETA 27m | total 1316s
+step  3500-> 3501/10000 | loss=4.3636 | alpha=0.000 | lr=9.89e-04 | 0.25s/step | ETA 27m | total 1318s
+step  3510-> 3511/10000 | loss=4.2237 | alpha=0.000 | lr=9.89e-04 | 0.25s/step | ETA 27m | total 1321s
+step  3520-> 3521/10000 | loss=4.2304 | alpha=0.000 | lr=9.89e-04 | 0.25s/step | ETA 26m | total 1323s
+step  3530-> 3531/10000 | loss=4.1674 | alpha=0.000 | lr=9.89e-04 | 0.24s/step | ETA 26m | total 1326s
+step  3540-> 3541/10000 | loss=4.2659 | alpha=0.000 | lr=9.89e-04 | 0.24s/step | ETA 26m | total 1328s
+step  3550-> 3551/10000 | loss=4.2379 | alpha=0.000 | lr=9.89e-04 | 0.24s/step | ETA 26m | total 1331s
+step  3560-> 3561/10000 | loss=4.2870 | alpha=0.000 | lr=9.89e-04 | 0.25s/step | ETA 26m | total 1333s
+step  3570-> 3571/10000 | loss=4.2052 | alpha=0.000 | lr=9.89e-04 | 0.24s/step | ETA 26m | total 1336s
+step  3580-> 3581/10000 | loss=4.2573 | alpha=0.000 | lr=9.89e-04 | 0.24s/step | ETA 26m | total 1338s
+step  3590-> 3591/10000 | loss=4.1771 | alpha=0.000 | lr=9.89e-04 | 0.24s/step | ETA 26m | total 1340s
+[Eval @ 3600] alpha=0.0000
+[Eval @ 3600] train_obj=4.2294 | ori_l2r=4.0686 | model_order=4.2282 | unstructured=4.2294 | rw=4.2054
+step  3600-> 3601/10000 | loss=4.2317 | alpha=0.000 | lr=9.89e-04 | 2.80s/step | ETA 5.0h | total 1368s
+step  3610-> 3611/10000 | loss=4.0962 | alpha=0.000 | lr=9.88e-04 | 0.25s/step | ETA 26m | total 1371s
+step  3620-> 3621/10000 | loss=4.1855 | alpha=0.000 | lr=9.88e-04 | 0.24s/step | ETA 26m | total 1373s
+step  3630-> 3631/10000 | loss=4.2383 | alpha=0.000 | lr=9.88e-04 | 0.24s/step | ETA 26m | total 1376s
+step  3640-> 3641/10000 | loss=4.2585 | alpha=0.000 | lr=9.88e-04 | 0.24s/step | ETA 26m | total 1378s
+step  3650-> 3651/10000 | loss=4.1572 | alpha=0.000 | lr=9.88e-04 | 0.24s/step | ETA 26m | total 1381s
+step  3660-> 3661/10000 | loss=4.2179 | alpha=0.000 | lr=9.88e-04 | 0.24s/step | ETA 26m | total 1383s
+step  3670-> 3671/10000 | loss=4.2501 | alpha=0.000 | lr=9.88e-04 | 0.24s/step | ETA 26m | total 1386s
+step  3680-> 3681/10000 | loss=4.1926 | alpha=0.000 | lr=9.88e-04 | 0.24s/step | ETA 26m | total 1388s
+step  3690-> 3691/10000 | loss=4.2377 | alpha=0.000 | lr=9.88e-04 | 0.24s/step | ETA 26m | total 1390s
+step  3700-> 3701/10000 | loss=4.1676 | alpha=0.000 | lr=9.88e-04 | 0.24s/step | ETA 26m | total 1393s
+step  3710-> 3711/10000 | loss=4.1484 | alpha=0.000 | lr=9.88e-04 | 0.24s/step | ETA 26m | total 1395s
+step  3720-> 3721/10000 | loss=4.2506 | alpha=0.000 | lr=9.88e-04 | 0.24s/step | ETA 26m | total 1398s
+step  3730-> 3731/10000 | loss=4.2006 | alpha=0.000 | lr=9.88e-04 | 0.24s/step | ETA 26m | total 1400s
+step  3740-> 3741/10000 | loss=4.2592 | alpha=0.000 | lr=9.88e-04 | 0.24s/step | ETA 25m | total 1403s
+step  3750-> 3751/10000 | loss=4.1910 | alpha=0.000 | lr=9.88e-04 | 0.24s/step | ETA 25m | total 1405s
+step  3760-> 3761/10000 | loss=4.2279 | alpha=0.000 | lr=9.88e-04 | 0.24s/step | ETA 25m | total 1408s
+step  3770-> 3771/10000 | loss=4.2740 | alpha=0.000 | lr=9.87e-04 | 0.24s/step | ETA 25m | total 1410s
+step  3780-> 3781/10000 | loss=4.2345 | alpha=0.000 | lr=9.87e-04 | 0.24s/step | ETA 25m | total 1412s
+step  3790-> 3791/10000 | loss=4.2258 | alpha=0.000 | lr=9.87e-04 | 0.24s/step | ETA 25m | total 1415s
+[Eval @ 3800] alpha=0.0000
+[Eval @ 3800] train_obj=4.2108 | ori_l2r=4.0516 | model_order=4.2097 | unstructured=4.2108 | rw=4.1867
+step  3800-> 3801/10000 | loss=4.1425 | alpha=0.000 | lr=9.87e-04 | 2.79s/step | ETA 4.8h | total 1443s
+step  3810-> 3811/10000 | loss=4.1303 | alpha=0.000 | lr=9.87e-04 | 0.24s/step | ETA 25m | total 1445s
+step  3820-> 3821/10000 | loss=4.2411 | alpha=0.000 | lr=9.87e-04 | 0.24s/step | ETA 25m | total 1448s
+step  3830-> 3831/10000 | loss=4.1964 | alpha=0.000 | lr=9.87e-04 | 0.24s/step | ETA 25m | total 1450s
+step  3840-> 3841/10000 | loss=4.2299 | alpha=0.000 | lr=9.87e-04 | 0.24s/step | ETA 25m | total 1453s
+step  3850-> 3851/10000 | loss=4.1074 | alpha=0.000 | lr=9.87e-04 | 0.24s/step | ETA 25m | total 1455s
+step  3860-> 3861/10000 | loss=4.1243 | alpha=0.000 | lr=9.87e-04 | 0.24s/step | ETA 25m | total 1457s
+step  3870-> 3871/10000 | loss=4.2596 | alpha=0.000 | lr=9.87e-04 | 0.24s/step | ETA 25m | total 1460s
+step  3880-> 3881/10000 | loss=4.1568 | alpha=0.000 | lr=9.87e-04 | 0.24s/step | ETA 25m | total 1462s
+step  3890-> 3891/10000 | loss=4.1900 | alpha=0.000 | lr=9.87e-04 | 0.24s/step | ETA 25m | total 1465s
+step  3900-> 3901/10000 | loss=4.2253 | alpha=0.000 | lr=9.87e-04 | 0.24s/step | ETA 25m | total 1467s
+step  3910-> 3911/10000 | loss=4.1115 | alpha=0.000 | lr=9.86e-04 | 0.24s/step | ETA 25m | total 1470s
+step  3920-> 3921/10000 | loss=4.1621 | alpha=0.000 | lr=9.86e-04 | 0.25s/step | ETA 25m | total 1472s
+step  3930-> 3931/10000 | loss=4.2032 | alpha=0.000 | lr=9.86e-04 | 0.24s/step | ETA 25m | total 1475s
+step  3940-> 3941/10000 | loss=4.2098 | alpha=0.000 | lr=9.86e-04 | 0.24s/step | ETA 25m | total 1477s
+step  3950-> 3951/10000 | loss=4.1904 | alpha=0.000 | lr=9.86e-04 | 0.24s/step | ETA 25m | total 1479s
+step  3960-> 3961/10000 | loss=4.2492 | alpha=0.000 | lr=9.86e-04 | 0.24s/step | ETA 25m | total 1482s
+step  3970-> 3971/10000 | loss=4.1938 | alpha=0.000 | lr=9.86e-04 | 0.24s/step | ETA 25m | total 1484s
+step  3980-> 3981/10000 | loss=4.1886 | alpha=0.000 | lr=9.86e-04 | 0.24s/step | ETA 25m | total 1487s
+step  3990-> 3991/10000 | loss=4.2323 | alpha=0.000 | lr=9.86e-04 | 0.24s/step | ETA 24m | total 1489s
+[Eval @ 4000] alpha=0.0000
+[Eval @ 4000] train_obj=4.1951 | ori_l2r=4.0232 | model_order=4.1919 | unstructured=4.1951 | rw=4.1688
+Saved checkpoint: runs/handoff_overnight/seed42/ckpt_step4000.pt
+step  4000-> 4001/10000 | loss=4.2609 | alpha=0.000 | lr=9.86e-04 | 2.88s/step | ETA 4.8h | total 1518s
+step  4010-> 4011/10000 | loss=4.2048 | alpha=0.000 | lr=9.86e-04 | 0.24s/step | ETA 24m | total 1520s
+step  4020-> 4021/10000 | loss=4.1767 | alpha=0.000 | lr=9.86e-04 | 0.25s/step | ETA 24m | total 1523s
+step  4030-> 4031/10000 | loss=4.1946 | alpha=0.000 | lr=9.86e-04 | 0.24s/step | ETA 24m | total 1525s
+step  4040-> 4041/10000 | loss=4.2261 | alpha=0.000 | lr=9.86e-04 | 0.25s/step | ETA 24m | total 1528s
+step  4050-> 4051/10000 | loss=4.0863 | alpha=0.000 | lr=9.86e-04 | 0.25s/step | ETA 24m | total 1530s
+step  4060-> 4061/10000 | loss=4.2250 | alpha=0.000 | lr=9.85e-04 | 0.24s/step | ETA 24m | total 1533s
+step  4070-> 4071/10000 | loss=4.1733 | alpha=0.000 | lr=9.85e-04 | 0.24s/step | ETA 24m | total 1535s
+step  4080-> 4081/10000 | loss=4.2292 | alpha=0.000 | lr=9.85e-04 | 0.25s/step | ETA 24m | total 1538s
+step  4090-> 4091/10000 | loss=4.2486 | alpha=0.000 | lr=9.85e-04 | 0.25s/step | ETA 24m | total 1540s
+step  4100-> 4101/10000 | loss=4.0846 | alpha=0.000 | lr=9.85e-04 | 0.25s/step | ETA 24m | total 1543s
+step  4110-> 4111/10000 | loss=4.1347 | alpha=0.000 | lr=9.85e-04 | 0.25s/step | ETA 24m | total 1545s
+step  4120-> 4121/10000 | loss=4.1730 | alpha=0.000 | lr=9.85e-04 | 0.24s/step | ETA 24m | total 1547s
+step  4130-> 4131/10000 | loss=4.0161 | alpha=0.000 | lr=9.85e-04 | 0.24s/step | ETA 24m | total 1550s
+step  4140-> 4141/10000 | loss=4.1164 | alpha=0.000 | lr=9.85e-04 | 0.24s/step | ETA 24m | total 1552s
+step  4150-> 4151/10000 | loss=4.1460 | alpha=0.000 | lr=9.85e-04 | 0.24s/step | ETA 24m | total 1555s
+step  4160-> 4161/10000 | loss=4.1349 | alpha=0.000 | lr=9.85e-04 | 0.24s/step | ETA 24m | total 1557s
+step  4170-> 4171/10000 | loss=4.1748 | alpha=0.000 | lr=9.85e-04 | 0.24s/step | ETA 24m | total 1560s
+step  4180-> 4181/10000 | loss=4.1411 | alpha=0.000 | lr=9.85e-04 | 0.24s/step | ETA 24m | total 1562s
+step  4190-> 4191/10000 | loss=4.1214 | alpha=0.000 | lr=9.84e-04 | 0.24s/step | ETA 24m | total 1565s
+[Eval @ 4200] alpha=0.0000
+[Eval @ 4200] train_obj=4.1755 | ori_l2r=4.0045 | model_order=4.1718 | unstructured=4.1755 | rw=4.1502
+step  4200-> 4201/10000 | loss=4.1469 | alpha=0.000 | lr=9.84e-04 | 2.81s/step | ETA 4.5h | total 1593s
+step  4210-> 4211/10000 | loss=4.1369 | alpha=0.000 | lr=9.84e-04 | 0.24s/step | ETA 24m | total 1595s
+step  4220-> 4221/10000 | loss=4.1303 | alpha=0.000 | lr=9.84e-04 | 0.24s/step | ETA 24m | total 1598s
+step  4230-> 4231/10000 | loss=4.0985 | alpha=0.000 | lr=9.84e-04 | 0.24s/step | ETA 24m | total 1600s
+step  4240-> 4241/10000 | loss=4.1506 | alpha=0.000 | lr=9.84e-04 | 0.25s/step | ETA 24m | total 1602s
+step  4250-> 4251/10000 | loss=4.1754 | alpha=0.000 | lr=9.84e-04 | 0.25s/step | ETA 23m | total 1605s
+step  4260-> 4261/10000 | loss=4.1732 | alpha=0.000 | lr=9.84e-04 | 0.24s/step | ETA 23m | total 1607s
+step  4270-> 4271/10000 | loss=4.1583 | alpha=0.000 | lr=9.84e-04 | 0.25s/step | ETA 23m | total 1610s
+step  4280-> 4281/10000 | loss=4.1808 | alpha=0.000 | lr=9.84e-04 | 0.24s/step | ETA 23m | total 1612s
+step  4290-> 4291/10000 | loss=4.1728 | alpha=0.000 | lr=9.84e-04 | 0.25s/step | ETA 23m | total 1615s
+step  4300-> 4301/10000 | loss=4.1935 | alpha=0.000 | lr=9.84e-04 | 0.24s/step | ETA 23m | total 1617s
+step  4310-> 4311/10000 | loss=4.0840 | alpha=0.000 | lr=9.84e-04 | 0.25s/step | ETA 23m | total 1620s
+step  4320-> 4321/10000 | loss=4.1695 | alpha=0.000 | lr=9.84e-04 | 0.24s/step | ETA 23m | total 1622s
+step  4330-> 4331/10000 | loss=4.0657 | alpha=0.000 | lr=9.83e-04 | 0.25s/step | ETA 23m | total 1625s
+step  4340-> 4341/10000 | loss=4.0954 | alpha=0.000 | lr=9.83e-04 | 0.24s/step | ETA 23m | total 1627s
+step  4350-> 4351/10000 | loss=4.0831 | alpha=0.000 | lr=9.83e-04 | 0.25s/step | ETA 23m | total 1629s
+step  4360-> 4361/10000 | loss=4.1581 | alpha=0.000 | lr=9.83e-04 | 0.25s/step | ETA 23m | total 1632s
+step  4370-> 4371/10000 | loss=4.1337 | alpha=0.000 | lr=9.83e-04 | 0.25s/step | ETA 23m | total 1634s
+step  4380-> 4381/10000 | loss=4.2149 | alpha=0.000 | lr=9.83e-04 | 0.24s/step | ETA 23m | total 1637s
+step  4390-> 4391/10000 | loss=4.0897 | alpha=0.000 | lr=9.83e-04 | 0.25s/step | ETA 23m | total 1639s
+[Eval @ 4400] alpha=0.0000
+[Eval @ 4400] train_obj=4.1628 | ori_l2r=3.9860 | model_order=4.1597 | unstructured=4.1628 | rw=4.1373
+step  4400-> 4401/10000 | loss=4.1395 | alpha=0.000 | lr=9.83e-04 | 2.85s/step | ETA 4.4h | total 1668s
+step  4410-> 4411/10000 | loss=4.1107 | alpha=0.000 | lr=9.83e-04 | 0.24s/step | ETA 23m | total 1670s
+step  4420-> 4421/10000 | loss=4.1814 | alpha=0.000 | lr=9.83e-04 | 0.25s/step | ETA 23m | total 1673s
+step  4430-> 4431/10000 | loss=4.1075 | alpha=0.000 | lr=9.83e-04 | 0.25s/step | ETA 23m | total 1675s
+step  4440-> 4441/10000 | loss=4.1054 | alpha=0.000 | lr=9.83e-04 | 0.25s/step | ETA 23m | total 1678s
+step  4450-> 4451/10000 | loss=4.2833 | alpha=0.000 | lr=9.83e-04 | 0.24s/step | ETA 23m | total 1680s
+step  4460-> 4461/10000 | loss=4.2006 | alpha=0.000 | lr=9.82e-04 | 0.25s/step | ETA 23m | total 1682s
+step  4470-> 4471/10000 | loss=4.1055 | alpha=0.000 | lr=9.82e-04 | 0.24s/step | ETA 23m | total 1685s
+step  4480-> 4481/10000 | loss=4.1159 | alpha=0.000 | lr=9.82e-04 | 0.24s/step | ETA 22m | total 1687s
+step  4490-> 4491/10000 | loss=4.1380 | alpha=0.000 | lr=9.82e-04 | 0.24s/step | ETA 22m | total 1690s
+step  4500-> 4501/10000 | loss=4.1336 | alpha=0.000 | lr=9.82e-04 | 0.24s/step | ETA 22m | total 1692s
+step  4510-> 4511/10000 | loss=4.1963 | alpha=0.000 | lr=9.82e-04 | 0.24s/step | ETA 22m | total 1695s
+step  4520-> 4521/10000 | loss=4.1103 | alpha=0.000 | lr=9.82e-04 | 0.24s/step | ETA 22m | total 1697s
+step  4530-> 4531/10000 | loss=4.1890 | alpha=0.000 | lr=9.82e-04 | 0.24s/step | ETA 22m | total 1700s
+step  4540-> 4541/10000 | loss=4.1483 | alpha=0.000 | lr=9.82e-04 | 0.24s/step | ETA 22m | total 1702s
+step  4550-> 4551/10000 | loss=4.1602 | alpha=0.000 | lr=9.82e-04 | 0.24s/step | ETA 22m | total 1704s
+step  4560-> 4561/10000 | loss=4.0709 | alpha=0.000 | lr=9.82e-04 | 0.24s/step | ETA 22m | total 1707s
+step  4570-> 4571/10000 | loss=4.1512 | alpha=0.000 | lr=9.82e-04 | 0.24s/step | ETA 22m | total 1709s
+step  4580-> 4581/10000 | loss=4.1500 | alpha=0.000 | lr=9.81e-04 | 0.24s/step | ETA 22m | total 1712s
+step  4590-> 4591/10000 | loss=4.1502 | alpha=0.000 | lr=9.81e-04 | 0.24s/step | ETA 22m | total 1714s
+[Eval @ 4600] alpha=0.0000
+[Eval @ 4600] train_obj=4.1402 | ori_l2r=3.9550 | model_order=4.1375 | unstructured=4.1402 | rw=4.1157
+step  4600-> 4601/10000 | loss=4.1721 | alpha=0.000 | lr=9.81e-04 | 2.81s/step | ETA 4.2h | total 1742s
+step  4610-> 4611/10000 | loss=4.0757 | alpha=0.000 | lr=9.81e-04 | 0.24s/step | ETA 22m | total 1745s
+step  4620-> 4621/10000 | loss=4.1061 | alpha=0.000 | lr=9.81e-04 | 0.25s/step | ETA 22m | total 1747s
+step  4630-> 4631/10000 | loss=4.0476 | alpha=0.000 | lr=9.81e-04 | 0.24s/step | ETA 22m | total 1750s
+step  4640-> 4641/10000 | loss=4.1612 | alpha=0.000 | lr=9.81e-04 | 0.24s/step | ETA 22m | total 1752s
+step  4650-> 4651/10000 | loss=4.0716 | alpha=0.000 | lr=9.81e-04 | 0.24s/step | ETA 22m | total 1755s
+step  4660-> 4661/10000 | loss=4.1244 | alpha=0.000 | lr=9.81e-04 | 0.24s/step | ETA 22m | total 1757s
+step  4670-> 4671/10000 | loss=4.0848 | alpha=0.000 | lr=9.81e-04 | 0.24s/step | ETA 22m | total 1759s
+step  4680-> 4681/10000 | loss=4.0751 | alpha=0.000 | lr=9.81e-04 | 0.24s/step | ETA 22m | total 1762s
+step  4690-> 4691/10000 | loss=4.1525 | alpha=0.000 | lr=9.81e-04 | 0.24s/step | ETA 22m | total 1764s
+step  4700-> 4701/10000 | loss=4.2021 | alpha=0.000 | lr=9.81e-04 | 0.24s/step | ETA 22m | total 1767s
+step  4710-> 4711/10000 | loss=4.0966 | alpha=0.000 | lr=9.80e-04 | 0.24s/step | ETA 22m | total 1769s
+step  4720-> 4721/10000 | loss=4.1377 | alpha=0.000 | lr=9.80e-04 | 0.24s/step | ETA 21m | total 1772s
+step  4730-> 4731/10000 | loss=4.1135 | alpha=0.000 | lr=9.80e-04 | 0.24s/step | ETA 21m | total 1774s
+step  4740-> 4741/10000 | loss=4.0278 | alpha=0.000 | lr=9.80e-04 | 0.24s/step | ETA 21m | total 1777s
+step  4750-> 4751/10000 | loss=4.2297 | alpha=0.000 | lr=9.80e-04 | 0.24s/step | ETA 21m | total 1779s
+step  4760-> 4761/10000 | loss=4.1344 | alpha=0.000 | lr=9.80e-04 | 0.24s/step | ETA 21m | total 1781s
+step  4770-> 4771/10000 | loss=4.1237 | alpha=0.000 | lr=9.80e-04 | 0.25s/step | ETA 21m | total 1784s
+step  4780-> 4781/10000 | loss=4.1453 | alpha=0.000 | lr=9.80e-04 | 0.24s/step | ETA 21m | total 1786s
+step  4790-> 4791/10000 | loss=4.0933 | alpha=0.000 | lr=9.80e-04 | 0.24s/step | ETA 21m | total 1789s
+[Eval @ 4800] alpha=0.0000
+[Eval @ 4800] train_obj=4.1272 | ori_l2r=3.9432 | model_order=4.1249 | unstructured=4.1272 | rw=4.1016
+step  4800-> 4801/10000 | loss=4.1708 | alpha=0.000 | lr=9.80e-04 | 2.80s/step | ETA 4.0h | total 1817s
+step  4810-> 4811/10000 | loss=4.1888 | alpha=0.000 | lr=9.80e-04 | 0.24s/step | ETA 21m | total 1819s
+step  4820-> 4821/10000 | loss=4.1029 | alpha=0.000 | lr=9.80e-04 | 0.25s/step | ETA 21m | total 1822s
+step  4830-> 4831/10000 | loss=4.1008 | alpha=0.000 | lr=9.79e-04 | 0.24s/step | ETA 21m | total 1824s
+step  4840-> 4841/10000 | loss=4.0722 | alpha=0.000 | lr=9.79e-04 | 0.24s/step | ETA 21m | total 1827s
+step  4850-> 4851/10000 | loss=4.0486 | alpha=0.000 | lr=9.79e-04 | 0.24s/step | ETA 21m | total 1829s
+step  4860-> 4861/10000 | loss=4.1127 | alpha=0.000 | lr=9.79e-04 | 0.25s/step | ETA 21m | total 1831s
+step  4870-> 4871/10000 | loss=4.1951 | alpha=0.000 | lr=9.79e-04 | 0.24s/step | ETA 21m | total 1834s
+step  4880-> 4881/10000 | loss=4.1679 | alpha=0.000 | lr=9.79e-04 | 0.24s/step | ETA 21m | total 1836s
+step  4890-> 4891/10000 | loss=4.0757 | alpha=0.000 | lr=9.79e-04 | 0.25s/step | ETA 21m | total 1839s
+step  4900-> 4901/10000 | loss=4.1277 | alpha=0.000 | lr=9.79e-04 | 0.25s/step | ETA 21m | total 1841s
+step  4910-> 4911/10000 | loss=4.1137 | alpha=0.000 | lr=9.79e-04 | 0.24s/step | ETA 21m | total 1844s
+step  4920-> 4921/10000 | loss=4.1045 | alpha=0.000 | lr=9.79e-04 | 0.24s/step | ETA 21m | total 1846s
+step  4930-> 4931/10000 | loss=4.0698 | alpha=0.000 | lr=9.79e-04 | 0.24s/step | ETA 21m | total 1849s
+step  4940-> 4941/10000 | loss=4.0591 | alpha=0.000 | lr=9.78e-04 | 0.25s/step | ETA 21m | total 1851s
+step  4950-> 4951/10000 | loss=4.1298 | alpha=0.000 | lr=9.78e-04 | 0.24s/step | ETA 21m | total 1854s
+step  4960-> 4961/10000 | loss=4.0716 | alpha=0.000 | lr=9.78e-04 | 0.25s/step | ETA 21m | total 1856s
+step  4970-> 4971/10000 | loss=4.1107 | alpha=0.000 | lr=9.78e-04 | 0.24s/step | ETA 21m | total 1858s
+step  4980-> 4981/10000 | loss=4.0593 | alpha=0.000 | lr=9.78e-04 | 0.25s/step | ETA 21m | total 1861s
+step  4990-> 4991/10000 | loss=4.1813 | alpha=0.000 | lr=9.78e-04 | 0.24s/step | ETA 20m | total 1863s
+[Eval @ 5000] alpha=0.0000
+[Eval @ 5000] train_obj=4.1172 | ori_l2r=3.9298 | model_order=4.1150 | unstructured=4.1172 | rw=4.0931
+[attn_traj] heatmaps saved @ step 5000 (extraction 0.1s)
+Saved checkpoint: runs/handoff_overnight/seed42/ckpt_step5000.pt
+step  5000-> 5001/10000 | loss=4.1055 | alpha=0.000 | lr=9.78e-04 | 3.15s/step | ETA 4.4h | total 1895s
+step  5010-> 5011/10000 | loss=4.0789 | alpha=0.000 | lr=9.78e-04 | 0.25s/step | ETA 20m | total 1897s
+step  5020-> 5021/10000 | loss=4.0928 | alpha=0.000 | lr=9.78e-04 | 0.25s/step | ETA 20m | total 1900s
+step  5030-> 5031/10000 | loss=4.0685 | alpha=0.000 | lr=9.78e-04 | 0.24s/step | ETA 20m | total 1902s
+step  5040-> 5041/10000 | loss=4.1788 | alpha=0.000 | lr=9.78e-04 | 0.24s/step | ETA 20m | total 1905s
+step  5050-> 5051/10000 | loss=4.0626 | alpha=0.000 | lr=9.78e-04 | 0.24s/step | ETA 20m | total 1907s
+step  5060-> 5061/10000 | loss=4.0921 | alpha=0.000 | lr=9.77e-04 | 0.24s/step | ETA 20m | total 1909s
+step  5070-> 5071/10000 | loss=4.0609 | alpha=0.000 | lr=9.77e-04 | 0.24s/step | ETA 20m | total 1912s
+step  5080-> 5081/10000 | loss=4.0760 | alpha=0.000 | lr=9.77e-04 | 0.24s/step | ETA 20m | total 1914s
+step  5090-> 5091/10000 | loss=4.1360 | alpha=0.000 | lr=9.77e-04 | 0.24s/step | ETA 20m | total 1917s
+step  5100-> 5101/10000 | loss=4.0149 | alpha=0.000 | lr=9.77e-04 | 0.24s/step | ETA 20m | total 1919s
+step  5110-> 5111/10000 | loss=4.1071 | alpha=0.000 | lr=9.77e-04 | 0.24s/step | ETA 20m | total 1922s
+step  5120-> 5121/10000 | loss=4.0988 | alpha=0.000 | lr=9.77e-04 | 0.24s/step | ETA 20m | total 1924s
+step  5130-> 5131/10000 | loss=4.1136 | alpha=0.000 | lr=9.77e-04 | 0.24s/step | ETA 20m | total 1927s
+step  5140-> 5141/10000 | loss=4.0277 | alpha=0.000 | lr=9.77e-04 | 0.25s/step | ETA 20m | total 1929s
+step  5150-> 5151/10000 | loss=4.0561 | alpha=0.000 | lr=9.77e-04 | 0.24s/step | ETA 20m | total 1932s
+step  5160-> 5161/10000 | loss=4.1468 | alpha=0.000 | lr=9.77e-04 | 0.24s/step | ETA 20m | total 1934s
+step  5170-> 5171/10000 | loss=4.1243 | alpha=0.000 | lr=9.76e-04 | 0.24s/step | ETA 20m | total 1936s
+step  5180-> 5181/10000 | loss=4.1299 | alpha=0.000 | lr=9.76e-04 | 0.24s/step | ETA 20m | total 1939s
+step  5190-> 5191/10000 | loss=4.1385 | alpha=0.000 | lr=9.76e-04 | 0.24s/step | ETA 20m | total 1941s
+[Eval @ 5200] alpha=0.0000
+[Eval @ 5200] train_obj=4.1095 | ori_l2r=3.9216 | model_order=4.1068 | unstructured=4.1095 | rw=4.0832
+step  5200-> 5201/10000 | loss=4.0347 | alpha=0.000 | lr=9.76e-04 | 2.84s/step | ETA 3.8h | total 1970s
+step  5210-> 5211/10000 | loss=4.1280 | alpha=0.000 | lr=9.76e-04 | 0.25s/step | ETA 20m | total 1972s
+step  5220-> 5221/10000 | loss=4.1127 | alpha=0.000 | lr=9.76e-04 | 0.24s/step | ETA 20m | total 1975s
+step  5230-> 5231/10000 | loss=4.1670 | alpha=0.000 | lr=9.76e-04 | 0.25s/step | ETA 20m | total 1977s
+step  5240-> 5241/10000 | loss=4.1086 | alpha=0.000 | lr=9.76e-04 | 0.25s/step | ETA 19m | total 1979s
+step  5250-> 5251/10000 | loss=4.1259 | alpha=0.000 | lr=9.76e-04 | 0.24s/step | ETA 19m | total 1982s
+step  5260-> 5261/10000 | loss=4.0379 | alpha=0.000 | lr=9.76e-04 | 0.24s/step | ETA 19m | total 1984s
+step  5270-> 5271/10000 | loss=4.0376 | alpha=0.000 | lr=9.76e-04 | 0.25s/step | ETA 19m | total 1987s
+step  5280-> 5281/10000 | loss=4.0564 | alpha=0.000 | lr=9.75e-04 | 0.24s/step | ETA 19m | total 1989s
+step  5290-> 5291/10000 | loss=4.0547 | alpha=0.000 | lr=9.75e-04 | 0.24s/step | ETA 19m | total 1992s
+step  5300-> 5301/10000 | loss=4.0035 | alpha=0.000 | lr=9.75e-04 | 0.24s/step | ETA 19m | total 1994s
+step  5310-> 5311/10000 | loss=4.1370 | alpha=0.000 | lr=9.75e-04 | 0.25s/step | ETA 19m | total 1997s
+step  5320-> 5321/10000 | loss=4.0110 | alpha=0.000 | lr=9.75e-04 | 0.24s/step | ETA 19m | total 1999s
+step  5330-> 5331/10000 | loss=4.0767 | alpha=0.000 | lr=9.75e-04 | 0.25s/step | ETA 19m | total 2002s
+step  5340-> 5341/10000 | loss=4.0965 | alpha=0.000 | lr=9.75e-04 | 0.24s/step | ETA 19m | total 2004s
+step  5350-> 5351/10000 | loss=3.9986 | alpha=0.000 | lr=9.75e-04 | 0.24s/step | ETA 19m | total 2006s
+step  5360-> 5361/10000 | loss=4.0681 | alpha=0.000 | lr=9.75e-04 | 0.24s/step | ETA 19m | total 2009s
+step  5370-> 5371/10000 | loss=4.0445 | alpha=0.000 | lr=9.75e-04 | 0.24s/step | ETA 19m | total 2011s
+step  5380-> 5381/10000 | loss=4.1147 | alpha=0.000 | lr=9.75e-04 | 0.24s/step | ETA 19m | total 2014s
+step  5390-> 5391/10000 | loss=4.1208 | alpha=0.000 | lr=9.74e-04 | 0.24s/step | ETA 19m | total 2016s
+[Eval @ 5400] alpha=0.0000
+[Eval @ 5400] train_obj=4.0955 | ori_l2r=3.9093 | model_order=4.0933 | unstructured=4.0955 | rw=4.0703
+step  5400-> 5401/10000 | loss=4.0856 | alpha=0.000 | lr=9.74e-04 | 2.80s/step | ETA 3.6h | total 2044s
+step  5410-> 5411/10000 | loss=4.0976 | alpha=0.000 | lr=9.74e-04 | 0.24s/step | ETA 19m | total 2047s
+step  5420-> 5421/10000 | loss=4.1208 | alpha=0.000 | lr=9.74e-04 | 0.24s/step | ETA 19m | total 2049s
+step  5430-> 5431/10000 | loss=4.0589 | alpha=0.000 | lr=9.74e-04 | 0.24s/step | ETA 19m | total 2052s
+step  5440-> 5441/10000 | loss=4.0487 | alpha=0.000 | lr=9.74e-04 | 0.24s/step | ETA 19m | total 2054s
+step  5450-> 5451/10000 | loss=4.0233 | alpha=0.000 | lr=9.74e-04 | 0.24s/step | ETA 19m | total 2056s
+step  5460-> 5461/10000 | loss=4.1089 | alpha=0.000 | lr=9.74e-04 | 0.24s/step | ETA 18m | total 2059s
+step  5470-> 5471/10000 | loss=4.0785 | alpha=0.000 | lr=9.74e-04 | 0.24s/step | ETA 18m | total 2061s
+step  5480-> 5481/10000 | loss=4.0529 | alpha=0.000 | lr=9.74e-04 | 0.24s/step | ETA 18m | total 2064s
+step  5490-> 5491/10000 | loss=4.0882 | alpha=0.000 | lr=9.73e-04 | 0.24s/step | ETA 18m | total 2066s
+step  5500-> 5501/10000 | loss=4.0788 | alpha=0.000 | lr=9.73e-04 | 0.24s/step | ETA 18m | total 2069s
+step  5510-> 5511/10000 | loss=4.0522 | alpha=0.000 | lr=9.73e-04 | 0.24s/step | ETA 18m | total 2071s
+step  5520-> 5521/10000 | loss=4.0590 | alpha=0.000 | lr=9.73e-04 | 0.24s/step | ETA 18m | total 2074s
+step  5530-> 5531/10000 | loss=4.0519 | alpha=0.000 | lr=9.73e-04 | 0.24s/step | ETA 18m | total 2076s
+step  5540-> 5541/10000 | loss=4.0544 | alpha=0.000 | lr=9.73e-04 | 0.24s/step | ETA 18m | total 2078s
+step  5550-> 5551/10000 | loss=4.0939 | alpha=0.000 | lr=9.73e-04 | 0.24s/step | ETA 18m | total 2081s
+step  5560-> 5561/10000 | loss=4.0140 | alpha=0.000 | lr=9.73e-04 | 0.24s/step | ETA 18m | total 2083s
+step  5570-> 5571/10000 | loss=4.0651 | alpha=0.000 | lr=9.73e-04 | 0.24s/step | ETA 18m | total 2086s
+step  5580-> 5581/10000 | loss=4.1114 | alpha=0.000 | lr=9.73e-04 | 0.24s/step | ETA 18m | total 2088s
+step  5590-> 5591/10000 | loss=4.0751 | alpha=0.000 | lr=9.73e-04 | 0.24s/step | ETA 18m | total 2091s
+[Eval @ 5600] alpha=0.0000
+[Eval @ 5600] train_obj=4.0879 | ori_l2r=3.8939 | model_order=4.0855 | unstructured=4.0879 | rw=4.0614
+step  5600-> 5601/10000 | loss=4.0120 | alpha=0.000 | lr=9.72e-04 | 2.80s/step | ETA 3.4h | total 2119s
+step  5610-> 5611/10000 | loss=4.0760 | alpha=0.000 | lr=9.72e-04 | 0.25s/step | ETA 18m | total 2121s
+step  5620-> 5621/10000 | loss=4.0720 | alpha=0.000 | lr=9.72e-04 | 0.24s/step | ETA 18m | total 2124s
+step  5630-> 5631/10000 | loss=4.0580 | alpha=0.000 | lr=9.72e-04 | 0.25s/step | ETA 18m | total 2126s
+step  5640-> 5641/10000 | loss=4.0591 | alpha=0.000 | lr=9.72e-04 | 0.25s/step | ETA 18m | total 2128s
+step  5650-> 5651/10000 | loss=4.0047 | alpha=0.000 | lr=9.72e-04 | 0.25s/step | ETA 18m | total 2131s
+step  5660-> 5661/10000 | loss=4.0457 | alpha=0.000 | lr=9.72e-04 | 0.24s/step | ETA 18m | total 2133s
+step  5670-> 5671/10000 | loss=4.0820 | alpha=0.000 | lr=9.72e-04 | 0.24s/step | ETA 18m | total 2136s
+step  5680-> 5681/10000 | loss=4.0796 | alpha=0.000 | lr=9.72e-04 | 0.24s/step | ETA 18m | total 2138s
+step  5690-> 5691/10000 | loss=4.0924 | alpha=0.000 | lr=9.72e-04 | 0.24s/step | ETA 18m | total 2141s
+step  5700-> 5701/10000 | loss=4.0258 | alpha=0.000 | lr=9.71e-04 | 0.25s/step | ETA 18m | total 2143s
+step  5710-> 5711/10000 | loss=4.0103 | alpha=0.000 | lr=9.71e-04 | 0.24s/step | ETA 18m | total 2146s
+step  5720-> 5721/10000 | loss=4.0235 | alpha=0.000 | lr=9.71e-04 | 0.24s/step | ETA 17m | total 2148s
+step  5730-> 5731/10000 | loss=4.0016 | alpha=0.000 | lr=9.71e-04 | 0.24s/step | ETA 17m | total 2151s
+step  5740-> 5741/10000 | loss=4.0961 | alpha=0.000 | lr=9.71e-04 | 0.24s/step | ETA 17m | total 2153s
+step  5750-> 5751/10000 | loss=4.0599 | alpha=0.000 | lr=9.71e-04 | 0.24s/step | ETA 17m | total 2155s
+step  5760-> 5761/10000 | loss=4.0320 | alpha=0.000 | lr=9.71e-04 | 0.24s/step | ETA 17m | total 2158s
+step  5770-> 5771/10000 | loss=4.0961 | alpha=0.000 | lr=9.71e-04 | 0.24s/step | ETA 17m | total 2160s
+step  5780-> 5781/10000 | loss=4.0795 | alpha=0.000 | lr=9.71e-04 | 0.24s/step | ETA 17m | total 2163s
+step  5790-> 5791/10000 | loss=4.0781 | alpha=0.000 | lr=9.71e-04 | 0.25s/step | ETA 17m | total 2165s
+[Eval @ 5800] alpha=0.0000
+[Eval @ 5800] train_obj=4.0819 | ori_l2r=3.8928 | model_order=4.0803 | unstructured=4.0819 | rw=4.0558
+step  5800-> 5801/10000 | loss=3.9924 | alpha=0.000 | lr=9.70e-04 | 2.83s/step | ETA 3.3h | total 2194s
+step  5810-> 5811/10000 | loss=4.0465 | alpha=0.000 | lr=9.70e-04 | 0.24s/step | ETA 17m | total 2196s
+step  5820-> 5821/10000 | loss=4.0040 | alpha=0.000 | lr=9.70e-04 | 0.25s/step | ETA 17m | total 2198s
+step  5830-> 5831/10000 | loss=4.0116 | alpha=0.000 | lr=9.70e-04 | 0.24s/step | ETA 17m | total 2201s
+step  5840-> 5841/10000 | loss=4.1303 | alpha=0.000 | lr=9.70e-04 | 0.24s/step | ETA 17m | total 2203s
+step  5850-> 5851/10000 | loss=4.0117 | alpha=0.000 | lr=9.70e-04 | 0.24s/step | ETA 17m | total 2206s
+step  5860-> 5861/10000 | loss=4.0225 | alpha=0.000 | lr=9.70e-04 | 0.24s/step | ETA 17m | total 2208s
+step  5870-> 5871/10000 | loss=4.0678 | alpha=0.000 | lr=9.70e-04 | 0.24s/step | ETA 17m | total 2211s
+step  5880-> 5881/10000 | loss=4.0814 | alpha=0.000 | lr=9.70e-04 | 0.24s/step | ETA 17m | total 2213s
+step  5890-> 5891/10000 | loss=4.0786 | alpha=0.000 | lr=9.70e-04 | 0.24s/step | ETA 17m | total 2216s
+step  5900-> 5901/10000 | loss=4.1030 | alpha=0.000 | lr=9.69e-04 | 0.24s/step | ETA 17m | total 2218s
+step  5910-> 5911/10000 | loss=3.9841 | alpha=0.000 | lr=9.69e-04 | 0.24s/step | ETA 17m | total 2220s
+step  5920-> 5921/10000 | loss=4.0594 | alpha=0.000 | lr=9.69e-04 | 0.24s/step | ETA 17m | total 2223s
+step  5930-> 5931/10000 | loss=4.0283 | alpha=0.000 | lr=9.69e-04 | 0.24s/step | ETA 17m | total 2225s
+step  5940-> 5941/10000 | loss=4.0966 | alpha=0.000 | lr=9.69e-04 | 0.24s/step | ETA 17m | total 2228s
+step  5950-> 5951/10000 | loss=3.9956 | alpha=0.000 | lr=9.69e-04 | 0.25s/step | ETA 17m | total 2230s
+step  5960-> 5961/10000 | loss=4.0066 | alpha=0.000 | lr=9.69e-04 | 0.25s/step | ETA 16m | total 2233s
+step  5970-> 5971/10000 | loss=4.1357 | alpha=0.000 | lr=9.69e-04 | 0.24s/step | ETA 16m | total 2235s
+step  5980-> 5981/10000 | loss=4.0888 | alpha=0.000 | lr=9.69e-04 | 0.24s/step | ETA 16m | total 2238s
+step  5990-> 5991/10000 | loss=4.0345 | alpha=0.000 | lr=9.69e-04 | 0.25s/step | ETA 16m | total 2240s
+[Eval @ 6000] alpha=0.0000
+[Eval @ 6000] train_obj=4.0745 | ori_l2r=3.8817 | model_order=4.0723 | unstructured=4.0745 | rw=4.0480
+Saved checkpoint: runs/handoff_overnight/seed42/ckpt_step6000.pt
+step  6000-> 6001/10000 | loss=4.0446 | alpha=0.000 | lr=9.68e-04 | 2.89s/step | ETA 3.2h | total 2269s
+step  6010-> 6011/10000 | loss=4.0222 | alpha=0.000 | lr=9.68e-04 | 0.24s/step | ETA 16m | total 2271s
+step  6020-> 6021/10000 | loss=4.0286 | alpha=0.000 | lr=9.68e-04 | 0.24s/step | ETA 16m | total 2274s
+step  6030-> 6031/10000 | loss=4.1369 | alpha=0.000 | lr=9.68e-04 | 0.24s/step | ETA 16m | total 2276s
+step  6040-> 6041/10000 | loss=4.0690 | alpha=0.000 | lr=9.68e-04 | 0.24s/step | ETA 16m | total 2279s
+step  6050-> 6051/10000 | loss=4.0367 | alpha=0.000 | lr=9.68e-04 | 0.24s/step | ETA 16m | total 2281s
+step  6060-> 6061/10000 | loss=4.0871 | alpha=0.000 | lr=9.68e-04 | 0.24s/step | ETA 16m | total 2284s
+step  6070-> 6071/10000 | loss=4.0874 | alpha=0.000 | lr=9.68e-04 | 0.24s/step | ETA 16m | total 2286s
+step  6080-> 6081/10000 | loss=4.0810 | alpha=0.000 | lr=9.68e-04 | 0.24s/step | ETA 16m | total 2288s
+step  6090-> 6091/10000 | loss=4.0783 | alpha=0.000 | lr=9.67e-04 | 0.25s/step | ETA 16m | total 2291s
+step  6100-> 6101/10000 | loss=4.1147 | alpha=0.000 | lr=9.67e-04 | 0.25s/step | ETA 16m | total 2293s
+step  6110-> 6111/10000 | loss=4.0475 | alpha=0.000 | lr=9.67e-04 | 0.24s/step | ETA 16m | total 2296s
+step  6120-> 6121/10000 | loss=3.9966 | alpha=0.000 | lr=9.67e-04 | 0.25s/step | ETA 16m | total 2298s
+step  6130-> 6131/10000 | loss=3.9733 | alpha=0.000 | lr=9.67e-04 | 0.24s/step | ETA 16m | total 2301s
+step  6140-> 6141/10000 | loss=3.9650 | alpha=0.000 | lr=9.67e-04 | 0.24s/step | ETA 16m | total 2303s
+step  6150-> 6151/10000 | loss=4.0938 | alpha=0.000 | lr=9.67e-04 | 0.24s/step | ETA 16m | total 2306s
+step  6160-> 6161/10000 | loss=3.9403 | alpha=0.000 | lr=9.67e-04 | 0.25s/step | ETA 16m | total 2308s
+step  6170-> 6171/10000 | loss=4.0145 | alpha=0.000 | lr=9.67e-04 | 0.24s/step | ETA 16m | total 2311s
+step  6180-> 6181/10000 | loss=3.9845 | alpha=0.000 | lr=9.66e-04 | 0.25s/step | ETA 16m | total 2313s
+step  6190-> 6191/10000 | loss=3.9737 | alpha=0.000 | lr=9.66e-04 | 0.24s/step | ETA 16m | total 2315s
+[Eval @ 6200] alpha=0.0000
+[Eval @ 6200] train_obj=4.0649 | ori_l2r=3.8731 | model_order=4.0639 | unstructured=4.0649 | rw=4.0386
+step  6200-> 6201/10000 | loss=4.1447 | alpha=0.000 | lr=9.66e-04 | 2.85s/step | ETA 3.0h | total 2344s
+step  6210-> 6211/10000 | loss=3.9597 | alpha=0.000 | lr=9.66e-04 | 0.24s/step | ETA 15m | total 2346s
+step  6220-> 6221/10000 | loss=4.0040 | alpha=0.000 | lr=9.66e-04 | 0.25s/step | ETA 15m | total 2349s
+step  6230-> 6231/10000 | loss=4.0493 | alpha=0.000 | lr=9.66e-04 | 0.25s/step | ETA 15m | total 2351s
+step  6240-> 6241/10000 | loss=3.9597 | alpha=0.000 | lr=9.66e-04 | 0.25s/step | ETA 15m | total 2354s
+step  6250-> 6251/10000 | loss=4.0513 | alpha=0.000 | lr=9.66e-04 | 0.25s/step | ETA 15m | total 2356s
+step  6260-> 6261/10000 | loss=3.9976 | alpha=0.000 | lr=9.66e-04 | 0.25s/step | ETA 15m | total 2359s
+step  6270-> 6271/10000 | loss=4.0257 | alpha=0.000 | lr=9.66e-04 | 0.25s/step | ETA 15m | total 2361s
+step  6280-> 6281/10000 | loss=4.0317 | alpha=0.000 | lr=9.65e-04 | 0.25s/step | ETA 15m | total 2364s
+step  6290-> 6291/10000 | loss=4.0323 | alpha=0.000 | lr=9.65e-04 | 0.25s/step | ETA 15m | total 2366s
+step  6300-> 6301/10000 | loss=3.9492 | alpha=0.000 | lr=9.65e-04 | 0.25s/step | ETA 15m | total 2368s
+step  6310-> 6311/10000 | loss=4.0351 | alpha=0.000 | lr=9.65e-04 | 0.25s/step | ETA 15m | total 2371s
+step  6320-> 6321/10000 | loss=4.0626 | alpha=0.000 | lr=9.65e-04 | 0.25s/step | ETA 15m | total 2373s
+step  6330-> 6331/10000 | loss=4.0701 | alpha=0.000 | lr=9.65e-04 | 0.24s/step | ETA 15m | total 2376s
+step  6340-> 6341/10000 | loss=3.9959 | alpha=0.000 | lr=9.65e-04 | 0.24s/step | ETA 15m | total 2378s
+step  6350-> 6351/10000 | loss=3.9928 | alpha=0.000 | lr=9.65e-04 | 0.24s/step | ETA 15m | total 2381s
+step  6360-> 6361/10000 | loss=4.0089 | alpha=0.000 | lr=9.65e-04 | 0.24s/step | ETA 15m | total 2383s
+step  6370-> 6371/10000 | loss=4.0343 | alpha=0.000 | lr=9.64e-04 | 0.24s/step | ETA 15m | total 2386s
+step  6380-> 6381/10000 | loss=4.0508 | alpha=0.000 | lr=9.64e-04 | 0.25s/step | ETA 15m | total 2388s
+step  6390-> 6391/10000 | loss=3.9841 | alpha=0.000 | lr=9.64e-04 | 0.24s/step | ETA 15m | total 2390s
+[Eval @ 6400] alpha=0.0000
+[Eval @ 6400] train_obj=4.0537 | ori_l2r=3.8618 | model_order=4.0530 | unstructured=4.0537 | rw=4.0278
+step  6400-> 6401/10000 | loss=4.0274 | alpha=0.000 | lr=9.64e-04 | 2.83s/step | ETA 2.8h | total 2419s
+step  6410-> 6411/10000 | loss=4.0795 | alpha=0.000 | lr=9.64e-04 | 0.24s/step | ETA 15m | total 2421s
+step  6420-> 6421/10000 | loss=3.9540 | alpha=0.000 | lr=9.64e-04 | 0.25s/step | ETA 15m | total 2424s
+step  6430-> 6431/10000 | loss=3.9788 | alpha=0.000 | lr=9.64e-04 | 0.24s/step | ETA 15m | total 2426s
+step  6440-> 6441/10000 | loss=4.0146 | alpha=0.000 | lr=9.64e-04 | 0.24s/step | ETA 14m | total 2429s
+step  6450-> 6451/10000 | loss=4.0553 | alpha=0.000 | lr=9.64e-04 | 0.24s/step | ETA 14m | total 2431s
+step  6460-> 6461/10000 | loss=4.0260 | alpha=0.000 | lr=9.63e-04 | 0.24s/step | ETA 14m | total 2433s
+step  6470-> 6471/10000 | loss=3.9794 | alpha=0.000 | lr=9.63e-04 | 0.24s/step | ETA 14m | total 2436s
+step  6480-> 6481/10000 | loss=4.0117 | alpha=0.000 | lr=9.63e-04 | 0.24s/step | ETA 14m | total 2438s
+step  6490-> 6491/10000 | loss=4.0281 | alpha=0.000 | lr=9.63e-04 | 0.24s/step | ETA 14m | total 2441s
+step  6500-> 6501/10000 | loss=4.0921 | alpha=0.000 | lr=9.63e-04 | 0.24s/step | ETA 14m | total 2443s
+step  6510-> 6511/10000 | loss=3.9881 | alpha=0.000 | lr=9.63e-04 | 0.24s/step | ETA 14m | total 2446s
+step  6520-> 6521/10000 | loss=4.0484 | alpha=0.000 | lr=9.63e-04 | 0.24s/step | ETA 14m | total 2448s
+step  6530-> 6531/10000 | loss=4.0132 | alpha=0.000 | lr=9.63e-04 | 0.25s/step | ETA 14m | total 2451s
+step  6540-> 6541/10000 | loss=3.9814 | alpha=0.000 | lr=9.63e-04 | 0.24s/step | ETA 14m | total 2453s
+step  6550-> 6551/10000 | loss=4.0583 | alpha=0.000 | lr=9.62e-04 | 0.24s/step | ETA 14m | total 2455s
+step  6560-> 6561/10000 | loss=4.0051 | alpha=0.000 | lr=9.62e-04 | 0.24s/step | ETA 14m | total 2458s
+step  6570-> 6571/10000 | loss=3.9371 | alpha=0.000 | lr=9.62e-04 | 0.24s/step | ETA 14m | total 2460s
+step  6580-> 6581/10000 | loss=4.0075 | alpha=0.000 | lr=9.62e-04 | 0.24s/step | ETA 14m | total 2463s
+step  6590-> 6591/10000 | loss=4.0677 | alpha=0.000 | lr=9.62e-04 | 0.24s/step | ETA 14m | total 2465s
+[Eval @ 6600] alpha=0.0000
+[Eval @ 6600] train_obj=4.0488 | ori_l2r=3.8565 | model_order=4.0483 | unstructured=4.0488 | rw=4.0240
+step  6600-> 6601/10000 | loss=4.0103 | alpha=0.000 | lr=9.62e-04 | 2.82s/step | ETA 2.7h | total 2493s
+step  6610-> 6611/10000 | loss=3.9395 | alpha=0.000 | lr=9.62e-04 | 0.25s/step | ETA 14m | total 2496s
+step  6620-> 6621/10000 | loss=4.0435 | alpha=0.000 | lr=9.62e-04 | 0.24s/step | ETA 14m | total 2498s
+step  6630-> 6631/10000 | loss=3.9730 | alpha=0.000 | lr=9.62e-04 | 0.25s/step | ETA 14m | total 2501s
+step  6640-> 6641/10000 | loss=3.9727 | alpha=0.000 | lr=9.61e-04 | 0.24s/step | ETA 14m | total 2503s
+step  6650-> 6651/10000 | loss=3.9901 | alpha=0.000 | lr=9.61e-04 | 0.24s/step | ETA 14m | total 2506s
+step  6660-> 6661/10000 | loss=4.0394 | alpha=0.000 | lr=9.61e-04 | 0.24s/step | ETA 14m | total 2508s
+step  6670-> 6671/10000 | loss=3.9669 | alpha=0.000 | lr=9.61e-04 | 0.24s/step | ETA 14m | total 2511s
+step  6680-> 6681/10000 | loss=3.9786 | alpha=0.000 | lr=9.61e-04 | 0.24s/step | ETA 14m | total 2513s
+step  6690-> 6691/10000 | loss=4.0654 | alpha=0.000 | lr=9.61e-04 | 0.25s/step | ETA 14m | total 2515s
+step  6700-> 6701/10000 | loss=4.0436 | alpha=0.000 | lr=9.61e-04 | 0.24s/step | ETA 13m | total 2518s
+step  6710-> 6711/10000 | loss=4.0281 | alpha=0.000 | lr=9.61e-04 | 0.25s/step | ETA 13m | total 2520s
+step  6720-> 6721/10000 | loss=3.9993 | alpha=0.000 | lr=9.60e-04 | 0.24s/step | ETA 13m | total 2523s
+step  6730-> 6731/10000 | loss=3.9442 | alpha=0.000 | lr=9.60e-04 | 0.24s/step | ETA 13m | total 2525s
+step  6740-> 6741/10000 | loss=3.9973 | alpha=0.000 | lr=9.60e-04 | 0.24s/step | ETA 13m | total 2528s
+step  6750-> 6751/10000 | loss=4.0225 | alpha=0.000 | lr=9.60e-04 | 0.24s/step | ETA 13m | total 2530s
+step  6760-> 6761/10000 | loss=4.0535 | alpha=0.000 | lr=9.60e-04 | 0.24s/step | ETA 13m | total 2533s
+step  6770-> 6771/10000 | loss=4.0634 | alpha=0.000 | lr=9.60e-04 | 0.24s/step | ETA 13m | total 2535s
+step  6780-> 6781/10000 | loss=4.0559 | alpha=0.000 | lr=9.60e-04 | 0.24s/step | ETA 13m | total 2537s
+step  6790-> 6791/10000 | loss=3.9248 | alpha=0.000 | lr=9.60e-04 | 0.24s/step | ETA 13m | total 2540s
+[Eval @ 6800] alpha=0.0000
+[Eval @ 6800] train_obj=4.0419 | ori_l2r=3.8425 | model_order=4.0412 | unstructured=4.0419 | rw=4.0150
+step  6800-> 6801/10000 | loss=4.0348 | alpha=0.000 | lr=9.60e-04 | 2.80s/step | ETA 2.5h | total 2568s
+step  6810-> 6811/10000 | loss=3.9290 | alpha=0.000 | lr=9.59e-04 | 0.24s/step | ETA 13m | total 2570s
+step  6820-> 6821/10000 | loss=4.0955 | alpha=0.000 | lr=9.59e-04 | 0.25s/step | ETA 13m | total 2573s
+step  6830-> 6831/10000 | loss=4.0416 | alpha=0.000 | lr=9.59e-04 | 0.25s/step | ETA 13m | total 2575s
+step  6840-> 6841/10000 | loss=4.0240 | alpha=0.000 | lr=9.59e-04 | 0.25s/step | ETA 13m | total 2578s
+step  6850-> 6851/10000 | loss=4.0084 | alpha=0.000 | lr=9.59e-04 | 0.25s/step | ETA 13m | total 2580s
+step  6860-> 6861/10000 | loss=4.0074 | alpha=0.000 | lr=9.59e-04 | 0.24s/step | ETA 13m | total 2583s
+step  6870-> 6871/10000 | loss=3.9484 | alpha=0.000 | lr=9.59e-04 | 0.25s/step | ETA 13m | total 2585s
+step  6880-> 6881/10000 | loss=3.8641 | alpha=0.000 | lr=9.59e-04 | 0.24s/step | ETA 13m | total 2588s
+step  6890-> 6891/10000 | loss=4.0295 | alpha=0.000 | lr=9.58e-04 | 0.24s/step | ETA 13m | total 2590s
+step  6900-> 6901/10000 | loss=3.9816 | alpha=0.000 | lr=9.58e-04 | 0.25s/step | ETA 13m | total 2592s
+step  6910-> 6911/10000 | loss=4.0898 | alpha=0.000 | lr=9.58e-04 | 0.24s/step | ETA 13m | total 2595s
+step  6920-> 6921/10000 | loss=3.9827 | alpha=0.000 | lr=9.58e-04 | 0.25s/step | ETA 13m | total 2597s
+step  6930-> 6931/10000 | loss=4.0613 | alpha=0.000 | lr=9.58e-04 | 0.25s/step | ETA 13m | total 2600s
+step  6940-> 6941/10000 | loss=3.9902 | alpha=0.000 | lr=9.58e-04 | 0.25s/step | ETA 12m | total 2602s
+step  6950-> 6951/10000 | loss=3.9640 | alpha=0.000 | lr=9.58e-04 | 0.24s/step | ETA 12m | total 2605s
+step  6960-> 6961/10000 | loss=4.0554 | alpha=0.000 | lr=9.58e-04 | 0.25s/step | ETA 12m | total 2607s
+step  6970-> 6971/10000 | loss=4.0286 | alpha=0.000 | lr=9.58e-04 | 0.25s/step | ETA 12m | total 2610s
+step  6980-> 6981/10000 | loss=4.0122 | alpha=0.000 | lr=9.57e-04 | 0.25s/step | ETA 12m | total 2612s
+step  6990-> 6991/10000 | loss=3.8874 | alpha=0.000 | lr=9.57e-04 | 0.25s/step | ETA 12m | total 2614s
+[Eval @ 7000] alpha=0.0000
+[Eval @ 7000] train_obj=4.0352 | ori_l2r=3.8368 | model_order=4.0335 | unstructured=4.0352 | rw=4.0091
+Saved checkpoint: runs/handoff_overnight/seed42/ckpt_step7000.pt
+step  7000-> 7001/10000 | loss=3.9686 | alpha=0.000 | lr=9.57e-04 | 2.87s/step | ETA 2.4h | total 2643s
+step  7010-> 7011/10000 | loss=3.9602 | alpha=0.000 | lr=9.57e-04 | 0.25s/step | ETA 12m | total 2646s
+step  7020-> 7021/10000 | loss=3.9920 | alpha=0.000 | lr=9.57e-04 | 0.25s/step | ETA 12m | total 2648s
+step  7030-> 7031/10000 | loss=4.0022 | alpha=0.000 | lr=9.57e-04 | 0.25s/step | ETA 12m | total 2650s
+step  7040-> 7041/10000 | loss=3.9441 | alpha=0.000 | lr=9.57e-04 | 0.25s/step | ETA 12m | total 2653s
+step  7050-> 7051/10000 | loss=3.9420 | alpha=0.000 | lr=9.57e-04 | 0.25s/step | ETA 12m | total 2655s
+step  7060-> 7061/10000 | loss=3.9462 | alpha=0.000 | lr=9.56e-04 | 0.25s/step | ETA 12m | total 2658s
+step  7070-> 7071/10000 | loss=3.9256 | alpha=0.000 | lr=9.56e-04 | 0.24s/step | ETA 12m | total 2660s
+step  7080-> 7081/10000 | loss=4.0274 | alpha=0.000 | lr=9.56e-04 | 0.24s/step | ETA 12m | total 2663s
+step  7090-> 7091/10000 | loss=3.9710 | alpha=0.000 | lr=9.56e-04 | 0.24s/step | ETA 12m | total 2665s
+step  7100-> 7101/10000 | loss=4.0285 | alpha=0.000 | lr=9.56e-04 | 0.24s/step | ETA 12m | total 2668s
+step  7110-> 7111/10000 | loss=4.0065 | alpha=0.000 | lr=9.56e-04 | 0.24s/step | ETA 12m | total 2670s
+step  7120-> 7121/10000 | loss=4.0017 | alpha=0.000 | lr=9.56e-04 | 0.24s/step | ETA 12m | total 2673s
+step  7130-> 7131/10000 | loss=3.9969 | alpha=0.000 | lr=9.56e-04 | 0.24s/step | ETA 12m | total 2675s
+step  7140-> 7141/10000 | loss=4.0063 | alpha=0.000 | lr=9.55e-04 | 0.24s/step | ETA 12m | total 2677s
+step  7150-> 7151/10000 | loss=3.9932 | alpha=0.000 | lr=9.55e-04 | 0.24s/step | ETA 12m | total 2680s
+step  7160-> 7161/10000 | loss=4.0838 | alpha=0.000 | lr=9.55e-04 | 0.24s/step | ETA 12m | total 2682s
+step  7170-> 7171/10000 | loss=3.9550 | alpha=0.000 | lr=9.55e-04 | 0.24s/step | ETA 12m | total 2685s
+step  7180-> 7181/10000 | loss=3.9779 | alpha=0.000 | lr=9.55e-04 | 0.24s/step | ETA 11m | total 2687s
+step  7190-> 7191/10000 | loss=4.0481 | alpha=0.000 | lr=9.55e-04 | 0.24s/step | ETA 11m | total 2690s
+[Eval @ 7200] alpha=0.0000
+[Eval @ 7200] train_obj=4.0294 | ori_l2r=3.8339 | model_order=4.0279 | unstructured=4.0294 | rw=4.0059
+step  7200-> 7201/10000 | loss=3.9448 | alpha=0.000 | lr=9.55e-04 | 2.81s/step | ETA 2.2h | total 2718s
+step  7210-> 7211/10000 | loss=3.9581 | alpha=0.000 | lr=9.55e-04 | 0.24s/step | ETA 11m | total 2720s
+step  7220-> 7221/10000 | loss=3.9117 | alpha=0.000 | lr=9.54e-04 | 0.24s/step | ETA 11m | total 2723s
+step  7230-> 7231/10000 | loss=4.0160 | alpha=0.000 | lr=9.54e-04 | 0.24s/step | ETA 11m | total 2725s
+step  7240-> 7241/10000 | loss=3.9767 | alpha=0.000 | lr=9.54e-04 | 0.24s/step | ETA 11m | total 2727s
+step  7250-> 7251/10000 | loss=3.9878 | alpha=0.000 | lr=9.54e-04 | 0.24s/step | ETA 11m | total 2730s
+step  7260-> 7261/10000 | loss=4.0613 | alpha=0.000 | lr=9.54e-04 | 0.24s/step | ETA 11m | total 2732s
+step  7270-> 7271/10000 | loss=3.9356 | alpha=0.000 | lr=9.54e-04 | 0.24s/step | ETA 11m | total 2735s
+step  7280-> 7281/10000 | loss=4.0329 | alpha=0.000 | lr=9.54e-04 | 0.24s/step | ETA 11m | total 2737s
+step  7290-> 7291/10000 | loss=4.0056 | alpha=0.000 | lr=9.54e-04 | 0.24s/step | ETA 11m | total 2740s
+step  7300-> 7301/10000 | loss=4.0041 | alpha=0.000 | lr=9.53e-04 | 0.24s/step | ETA 11m | total 2742s
+step  7310-> 7311/10000 | loss=3.9235 | alpha=0.000 | lr=9.53e-04 | 0.24s/step | ETA 11m | total 2745s
+step  7320-> 7321/10000 | loss=3.9756 | alpha=0.000 | lr=9.53e-04 | 0.24s/step | ETA 11m | total 2747s
+step  7330-> 7331/10000 | loss=4.0146 | alpha=0.000 | lr=9.53e-04 | 0.24s/step | ETA 11m | total 2749s
+step  7340-> 7341/10000 | loss=3.9775 | alpha=0.000 | lr=9.53e-04 | 0.24s/step | ETA 11m | total 2752s
+step  7350-> 7351/10000 | loss=4.0075 | alpha=0.000 | lr=9.53e-04 | 0.25s/step | ETA 11m | total 2754s
+step  7360-> 7361/10000 | loss=4.0041 | alpha=0.000 | lr=9.53e-04 | 0.24s/step | ETA 11m | total 2757s
+step  7370-> 7371/10000 | loss=3.9704 | alpha=0.000 | lr=9.53e-04 | 0.24s/step | ETA 11m | total 2759s
+step  7380-> 7381/10000 | loss=3.9943 | alpha=0.000 | lr=9.52e-04 | 0.24s/step | ETA 11m | total 2762s
+step  7390-> 7391/10000 | loss=4.0386 | alpha=0.000 | lr=9.52e-04 | 0.24s/step | ETA 11m | total 2764s
+[Eval @ 7400] alpha=0.0000
+[Eval @ 7400] train_obj=4.0210 | ori_l2r=3.8250 | model_order=4.0194 | unstructured=4.0210 | rw=3.9956
+step  7400-> 7401/10000 | loss=3.9906 | alpha=0.000 | lr=9.52e-04 | 2.80s/step | ETA 2.0h | total 2792s
+step  7410-> 7411/10000 | loss=3.9620 | alpha=0.000 | lr=9.52e-04 | 0.24s/step | ETA 11m | total 2795s
+step  7420-> 7421/10000 | loss=4.0031 | alpha=0.000 | lr=9.52e-04 | 0.24s/step | ETA 11m | total 2797s
+step  7430-> 7431/10000 | loss=3.9763 | alpha=0.000 | lr=9.52e-04 | 0.24s/step | ETA 10m | total 2800s
+step  7440-> 7441/10000 | loss=4.0181 | alpha=0.000 | lr=9.52e-04 | 0.24s/step | ETA 10m | total 2802s
+step  7450-> 7451/10000 | loss=3.9343 | alpha=0.000 | lr=9.52e-04 | 0.24s/step | ETA 10m | total 2804s
+step  7460-> 7461/10000 | loss=3.9523 | alpha=0.000 | lr=9.51e-04 | 0.24s/step | ETA 10m | total 2807s
+step  7470-> 7471/10000 | loss=3.9850 | alpha=0.000 | lr=9.51e-04 | 0.24s/step | ETA 10m | total 2809s
+step  7480-> 7481/10000 | loss=4.0073 | alpha=0.000 | lr=9.51e-04 | 0.24s/step | ETA 10m | total 2812s
+step  7490-> 7491/10000 | loss=3.8800 | alpha=0.000 | lr=9.51e-04 | 0.24s/step | ETA 10m | total 2814s
+step  7500-> 7501/10000 | loss=3.9880 | alpha=0.000 | lr=9.51e-04 | 0.24s/step | ETA 10m | total 2817s
+step  7510-> 7511/10000 | loss=3.9536 | alpha=0.000 | lr=9.51e-04 | 0.24s/step | ETA 10m | total 2819s
+step  7520-> 7521/10000 | loss=3.9311 | alpha=0.000 | lr=9.51e-04 | 0.24s/step | ETA 10m | total 2822s
+step  7530-> 7531/10000 | loss=4.0221 | alpha=0.000 | lr=9.51e-04 | 0.24s/step | ETA 10m | total 2824s
+step  7540-> 7541/10000 | loss=3.9953 | alpha=0.000 | lr=9.50e-04 | 0.24s/step | ETA 10m | total 2826s
+step  7550-> 7551/10000 | loss=3.9493 | alpha=0.000 | lr=9.50e-04 | 0.24s/step | ETA 10m | total 2829s
+step  7560-> 7561/10000 | loss=4.0002 | alpha=0.000 | lr=9.50e-04 | 0.24s/step | ETA 10m | total 2831s
+step  7570-> 7571/10000 | loss=4.0436 | alpha=0.000 | lr=9.50e-04 | 0.24s/step | ETA 10m | total 2834s
+step  7580-> 7581/10000 | loss=4.0154 | alpha=0.000 | lr=9.50e-04 | 0.24s/step | ETA 10m | total 2836s
+step  7590-> 7591/10000 | loss=3.9616 | alpha=0.000 | lr=9.50e-04 | 0.24s/step | ETA 10m | total 2839s
+[Eval @ 7600] alpha=0.0000
+[Eval @ 7600] train_obj=4.0195 | ori_l2r=3.8261 | model_order=4.0176 | unstructured=4.0195 | rw=3.9929
+step  7600-> 7601/10000 | loss=3.9770 | alpha=0.000 | lr=9.50e-04 | 2.83s/step | ETA 1.9h | total 2867s
+step  7610-> 7611/10000 | loss=3.9285 | alpha=0.000 | lr=9.50e-04 | 0.24s/step | ETA 10m | total 2869s
+step  7620-> 7621/10000 | loss=3.9738 | alpha=0.000 | lr=9.49e-04 | 0.24s/step | ETA 10m | total 2872s
+step  7630-> 7631/10000 | loss=3.9900 | alpha=0.000 | lr=9.49e-04 | 0.24s/step | ETA 10m | total 2874s
+step  7640-> 7641/10000 | loss=3.9175 | alpha=0.000 | lr=9.49e-04 | 0.24s/step | ETA 10m | total 2877s
+step  7650-> 7651/10000 | loss=3.9443 | alpha=0.000 | lr=9.49e-04 | 0.24s/step | ETA 10m | total 2879s
+step  7660-> 7661/10000 | loss=3.8941 | alpha=0.000 | lr=9.49e-04 | 0.24s/step | ETA 10m | total 2882s
+step  7670-> 7671/10000 | loss=4.0317 | alpha=0.000 | lr=9.49e-04 | 0.24s/step | ETA 9m | total 2884s
+step  7680-> 7681/10000 | loss=3.9143 | alpha=0.000 | lr=9.49e-04 | 0.24s/step | ETA 9m | total 2887s
+step  7690-> 7691/10000 | loss=3.9700 | alpha=0.000 | lr=9.48e-04 | 0.24s/step | ETA 9m | total 2889s
+step  7700-> 7701/10000 | loss=3.9659 | alpha=0.000 | lr=9.48e-04 | 0.24s/step | ETA 9m | total 2891s
+step  7710-> 7711/10000 | loss=4.0292 | alpha=0.000 | lr=9.48e-04 | 0.24s/step | ETA 9m | total 2894s
+step  7720-> 7721/10000 | loss=4.0386 | alpha=0.000 | lr=9.48e-04 | 0.24s/step | ETA 9m | total 2896s
+step  7730-> 7731/10000 | loss=3.9863 | alpha=0.000 | lr=9.48e-04 | 0.24s/step | ETA 9m | total 2899s
+step  7740-> 7741/10000 | loss=3.9606 | alpha=0.000 | lr=9.48e-04 | 0.24s/step | ETA 9m | total 2901s
+step  7750-> 7751/10000 | loss=3.9777 | alpha=0.000 | lr=9.48e-04 | 0.24s/step | ETA 9m | total 2904s
+step  7760-> 7761/10000 | loss=3.9231 | alpha=0.000 | lr=9.48e-04 | 0.24s/step | ETA 9m | total 2906s
+step  7770-> 7771/10000 | loss=3.9290 | alpha=0.000 | lr=9.47e-04 | 0.24s/step | ETA 9m | total 2908s
+step  7780-> 7781/10000 | loss=3.9471 | alpha=0.000 | lr=9.47e-04 | 0.24s/step | ETA 9m | total 2911s
+step  7790-> 7791/10000 | loss=3.9852 | alpha=0.000 | lr=9.47e-04 | 0.24s/step | ETA 9m | total 2913s
+[Eval @ 7800] alpha=0.0000
+[Eval @ 7800] train_obj=4.0125 | ori_l2r=3.8195 | model_order=4.0108 | unstructured=4.0125 | rw=3.9898
+step  7800-> 7801/10000 | loss=4.0259 | alpha=0.000 | lr=9.47e-04 | 2.84s/step | ETA 1.7h | total 2942s
+step  7810-> 7811/10000 | loss=4.0012 | alpha=0.000 | lr=9.47e-04 | 0.24s/step | ETA 9m | total 2944s
+step  7820-> 7821/10000 | loss=3.8983 | alpha=0.000 | lr=9.47e-04 | 0.25s/step | ETA 9m | total 2947s
+step  7830-> 7831/10000 | loss=3.9780 | alpha=0.000 | lr=9.47e-04 | 0.25s/step | ETA 9m | total 2949s
+step  7840-> 7841/10000 | loss=3.9375 | alpha=0.000 | lr=9.46e-04 | 0.25s/step | ETA 9m | total 2952s
+step  7850-> 7851/10000 | loss=3.8822 | alpha=0.000 | lr=9.46e-04 | 0.25s/step | ETA 9m | total 2954s
+step  7860-> 7861/10000 | loss=3.9697 | alpha=0.000 | lr=9.46e-04 | 0.25s/step | ETA 9m | total 2956s
+step  7870-> 7871/10000 | loss=3.9795 | alpha=0.000 | lr=9.46e-04 | 0.25s/step | ETA 9m | total 2959s
+step  7880-> 7881/10000 | loss=3.9417 | alpha=0.000 | lr=9.46e-04 | 0.25s/step | ETA 9m | total 2961s
+step  7890-> 7891/10000 | loss=4.0241 | alpha=0.000 | lr=9.46e-04 | 0.25s/step | ETA 9m | total 2964s
+step  7900-> 7901/10000 | loss=3.9961 | alpha=0.000 | lr=9.46e-04 | 0.25s/step | ETA 9m | total 2966s
+step  7910-> 7911/10000 | loss=3.9424 | alpha=0.000 | lr=9.46e-04 | 0.25s/step | ETA 9m | total 2969s
+step  7920-> 7921/10000 | loss=3.9821 | alpha=0.000 | lr=9.45e-04 | 0.25s/step | ETA 9m | total 2971s
+step  7930-> 7931/10000 | loss=3.9876 | alpha=0.000 | lr=9.45e-04 | 0.25s/step | ETA 8m | total 2974s
+step  7940-> 7941/10000 | loss=4.0573 | alpha=0.000 | lr=9.45e-04 | 0.24s/step | ETA 8m | total 2976s
+step  7950-> 7951/10000 | loss=3.9145 | alpha=0.000 | lr=9.45e-04 | 0.24s/step | ETA 8m | total 2978s
+step  7960-> 7961/10000 | loss=3.9670 | alpha=0.000 | lr=9.45e-04 | 0.24s/step | ETA 8m | total 2981s
+step  7970-> 7971/10000 | loss=3.9512 | alpha=0.000 | lr=9.45e-04 | 0.24s/step | ETA 8m | total 2983s
+step  7980-> 7981/10000 | loss=3.8653 | alpha=0.000 | lr=9.45e-04 | 0.24s/step | ETA 8m | total 2986s
+step  7990-> 7991/10000 | loss=3.9812 | alpha=0.000 | lr=9.44e-04 | 0.24s/step | ETA 8m | total 2988s
+[Eval @ 8000] alpha=0.0000
+[Eval @ 8000] train_obj=4.0065 | ori_l2r=3.8069 | model_order=4.0037 | unstructured=4.0065 | rw=3.9787
+Saved checkpoint: runs/handoff_overnight/seed42/ckpt_step8000.pt
+step  8000-> 8001/10000 | loss=3.8556 | alpha=0.000 | lr=9.44e-04 | 2.87s/step | ETA 1.6h | total 3017s
+step  8010-> 8011/10000 | loss=3.9708 | alpha=0.000 | lr=9.44e-04 | 0.24s/step | ETA 8m | total 3019s
+step  8020-> 8021/10000 | loss=3.9244 | alpha=0.000 | lr=9.44e-04 | 0.24s/step | ETA 8m | total 3022s
+step  8030-> 8031/10000 | loss=3.9838 | alpha=0.000 | lr=9.44e-04 | 0.25s/step | ETA 8m | total 3024s
+step  8040-> 8041/10000 | loss=3.9639 | alpha=0.000 | lr=9.44e-04 | 0.24s/step | ETA 8m | total 3027s
+step  8050-> 8051/10000 | loss=4.0006 | alpha=0.000 | lr=9.44e-04 | 0.24s/step | ETA 8m | total 3029s
+step  8060-> 8061/10000 | loss=4.0244 | alpha=0.000 | lr=9.44e-04 | 0.24s/step | ETA 8m | total 3032s
+step  8070-> 8071/10000 | loss=4.0438 | alpha=0.000 | lr=9.43e-04 | 0.25s/step | ETA 8m | total 3034s
+step  8080-> 8081/10000 | loss=4.0473 | alpha=0.000 | lr=9.43e-04 | 0.24s/step | ETA 8m | total 3037s
+step  8090-> 8091/10000 | loss=3.9005 | alpha=0.000 | lr=9.43e-04 | 0.25s/step | ETA 8m | total 3039s
+step  8100-> 8101/10000 | loss=3.9981 | alpha=0.000 | lr=9.43e-04 | 0.24s/step | ETA 8m | total 3041s
+step  8110-> 8111/10000 | loss=3.9434 | alpha=0.000 | lr=9.43e-04 | 0.24s/step | ETA 8m | total 3044s
+step  8120-> 8121/10000 | loss=3.8721 | alpha=0.000 | lr=9.43e-04 | 0.24s/step | ETA 8m | total 3046s
+step  8130-> 8131/10000 | loss=3.9659 | alpha=0.000 | lr=9.43e-04 | 0.25s/step | ETA 8m | total 3049s
+step  8140-> 8141/10000 | loss=3.8885 | alpha=0.000 | lr=9.42e-04 | 0.24s/step | ETA 8m | total 3051s
+step  8150-> 8151/10000 | loss=3.9451 | alpha=0.000 | lr=9.42e-04 | 0.25s/step | ETA 8m | total 3054s
+step  8160-> 8161/10000 | loss=3.9359 | alpha=0.000 | lr=9.42e-04 | 0.24s/step | ETA 8m | total 3056s
+step  8170-> 8171/10000 | loss=4.1060 | alpha=0.000 | lr=9.42e-04 | 0.24s/step | ETA 7m | total 3059s
+step  8180-> 8181/10000 | loss=3.9906 | alpha=0.000 | lr=9.42e-04 | 0.24s/step | ETA 7m | total 3061s
+step  8190-> 8191/10000 | loss=3.9630 | alpha=0.000 | lr=9.42e-04 | 0.24s/step | ETA 7m | total 3064s
+[Eval @ 8200] alpha=0.0000
+[Eval @ 8200] train_obj=3.9974 | ori_l2r=3.8010 | model_order=3.9972 | unstructured=3.9974 | rw=3.9720
+step  8200-> 8201/10000 | loss=3.9149 | alpha=0.000 | lr=9.42e-04 | 2.83s/step | ETA 1.4h | total 3092s
+step  8210-> 8211/10000 | loss=3.9572 | alpha=0.000 | lr=9.41e-04 | 0.24s/step | ETA 7m | total 3094s
+step  8220-> 8221/10000 | loss=3.9371 | alpha=0.000 | lr=9.41e-04 | 0.24s/step | ETA 7m | total 3097s
+step  8230-> 8231/10000 | loss=3.9374 | alpha=0.000 | lr=9.41e-04 | 0.24s/step | ETA 7m | total 3099s
+step  8240-> 8241/10000 | loss=4.0351 | alpha=0.000 | lr=9.41e-04 | 0.24s/step | ETA 7m | total 3102s
+step  8250-> 8251/10000 | loss=4.0410 | alpha=0.000 | lr=9.41e-04 | 0.24s/step | ETA 7m | total 3104s
+step  8260-> 8261/10000 | loss=3.9676 | alpha=0.000 | lr=9.41e-04 | 0.24s/step | ETA 7m | total 3106s
+step  8270-> 8271/10000 | loss=3.8991 | alpha=0.000 | lr=9.41e-04 | 0.24s/step | ETA 7m | total 3109s
+step  8280-> 8281/10000 | loss=3.9871 | alpha=0.000 | lr=9.40e-04 | 0.24s/step | ETA 7m | total 3111s
+step  8290-> 8291/10000 | loss=3.9716 | alpha=0.000 | lr=9.40e-04 | 0.24s/step | ETA 7m | total 3114s
+step  8300-> 8301/10000 | loss=4.0011 | alpha=0.000 | lr=9.40e-04 | 0.24s/step | ETA 7m | total 3116s
+step  8310-> 8311/10000 | loss=3.8827 | alpha=0.000 | lr=9.40e-04 | 0.24s/step | ETA 7m | total 3119s
+step  8320-> 8321/10000 | loss=3.9288 | alpha=0.000 | lr=9.40e-04 | 0.24s/step | ETA 7m | total 3121s
+step  8330-> 8331/10000 | loss=3.9987 | alpha=0.000 | lr=9.40e-04 | 0.24s/step | ETA 7m | total 3124s
+step  8340-> 8341/10000 | loss=3.9117 | alpha=0.000 | lr=9.40e-04 | 0.24s/step | ETA 7m | total 3126s
+step  8350-> 8351/10000 | loss=3.9748 | alpha=0.000 | lr=9.39e-04 | 0.25s/step | ETA 7m | total 3128s
+step  8360-> 8361/10000 | loss=3.9287 | alpha=0.000 | lr=9.39e-04 | 0.25s/step | ETA 7m | total 3131s
+step  8370-> 8371/10000 | loss=3.8785 | alpha=0.000 | lr=9.39e-04 | 0.24s/step | ETA 7m | total 3133s
+step  8380-> 8381/10000 | loss=3.9471 | alpha=0.000 | lr=9.39e-04 | 0.25s/step | ETA 7m | total 3136s
+step  8390-> 8391/10000 | loss=3.9735 | alpha=0.000 | lr=9.39e-04 | 0.24s/step | ETA 7m | total 3138s
+[Eval @ 8400] alpha=0.0000
+[Eval @ 8400] train_obj=3.9907 | ori_l2r=3.7931 | model_order=3.9900 | unstructured=3.9907 | rw=3.9646
+step  8400-> 8401/10000 | loss=3.9052 | alpha=0.000 | lr=9.39e-04 | 2.81s/step | ETA 1.2h | total 3166s
+step  8410-> 8411/10000 | loss=3.9504 | alpha=0.000 | lr=9.39e-04 | 0.24s/step | ETA 6m | total 3169s
+step  8420-> 8421/10000 | loss=3.9667 | alpha=0.000 | lr=9.38e-04 | 0.25s/step | ETA 6m | total 3171s
+step  8430-> 8431/10000 | loss=3.9593 | alpha=0.000 | lr=9.38e-04 | 0.24s/step | ETA 6m | total 3174s
+step  8440-> 8441/10000 | loss=3.9296 | alpha=0.000 | lr=9.38e-04 | 0.24s/step | ETA 6m | total 3176s
+step  8450-> 8451/10000 | loss=3.9894 | alpha=0.000 | lr=9.38e-04 | 0.24s/step | ETA 6m | total 3179s
+step  8460-> 8461/10000 | loss=3.9149 | alpha=0.000 | lr=9.38e-04 | 0.24s/step | ETA 6m | total 3181s
+step  8470-> 8471/10000 | loss=3.9399 | alpha=0.000 | lr=9.38e-04 | 0.24s/step | ETA 6m | total 3184s
+step  8480-> 8481/10000 | loss=4.0001 | alpha=0.000 | lr=9.38e-04 | 0.24s/step | ETA 6m | total 3186s
+step  8490-> 8491/10000 | loss=4.0164 | alpha=0.000 | lr=9.37e-04 | 0.24s/step | ETA 6m | total 3188s
+step  8500-> 8501/10000 | loss=3.9266 | alpha=0.000 | lr=9.37e-04 | 0.24s/step | ETA 6m | total 3191s
+step  8510-> 8511/10000 | loss=4.0375 | alpha=0.000 | lr=9.37e-04 | 0.24s/step | ETA 6m | total 3193s
+step  8520-> 8521/10000 | loss=3.9799 | alpha=0.000 | lr=9.37e-04 | 0.24s/step | ETA 6m | total 3196s
+step  8530-> 8531/10000 | loss=3.9849 | alpha=0.000 | lr=9.37e-04 | 0.24s/step | ETA 6m | total 3198s
+step  8540-> 8541/10000 | loss=3.9132 | alpha=0.000 | lr=9.37e-04 | 0.24s/step | ETA 6m | total 3201s
+step  8550-> 8551/10000 | loss=3.9424 | alpha=0.000 | lr=9.37e-04 | 0.24s/step | ETA 6m | total 3203s
+step  8560-> 8561/10000 | loss=3.9510 | alpha=0.000 | lr=9.36e-04 | 0.25s/step | ETA 6m | total 3206s
+step  8570-> 8571/10000 | loss=3.9488 | alpha=0.000 | lr=9.36e-04 | 0.24s/step | ETA 6m | total 3208s
+step  8580-> 8581/10000 | loss=3.9980 | alpha=0.000 | lr=9.36e-04 | 0.24s/step | ETA 6m | total 3210s
+step  8590-> 8591/10000 | loss=3.9143 | alpha=0.000 | lr=9.36e-04 | 0.24s/step | ETA 6m | total 3213s
+[Eval @ 8600] alpha=0.0000
+[Eval @ 8600] train_obj=3.9920 | ori_l2r=3.7977 | model_order=3.9908 | unstructured=3.9920 | rw=3.9676
+step  8600-> 8601/10000 | loss=3.9914 | alpha=0.000 | lr=9.36e-04 | 2.82s/step | ETA 1.1h | total 3241s
+step  8610-> 8611/10000 | loss=4.0109 | alpha=0.000 | lr=9.36e-04 | 0.24s/step | ETA 6m | total 3244s
+step  8620-> 8621/10000 | loss=3.9015 | alpha=0.000 | lr=9.36e-04 | 0.25s/step | ETA 6m | total 3246s
+step  8630-> 8631/10000 | loss=3.9781 | alpha=0.000 | lr=9.35e-04 | 0.25s/step | ETA 6m | total 3248s
+step  8640-> 8641/10000 | loss=4.0187 | alpha=0.000 | lr=9.35e-04 | 0.24s/step | ETA 6m | total 3251s
+step  8650-> 8651/10000 | loss=3.9262 | alpha=0.000 | lr=9.35e-04 | 0.25s/step | ETA 6m | total 3253s
+step  8660-> 8661/10000 | loss=3.9492 | alpha=0.000 | lr=9.35e-04 | 0.25s/step | ETA 5m | total 3256s
+step  8670-> 8671/10000 | loss=3.9075 | alpha=0.000 | lr=9.35e-04 | 0.25s/step | ETA 5m | total 3258s
+step  8680-> 8681/10000 | loss=3.8667 | alpha=0.000 | lr=9.35e-04 | 0.25s/step | ETA 5m | total 3261s
+step  8690-> 8691/10000 | loss=3.9393 | alpha=0.000 | lr=9.35e-04 | 0.24s/step | ETA 5m | total 3263s
+step  8700-> 8701/10000 | loss=3.9866 | alpha=0.000 | lr=9.34e-04 | 0.24s/step | ETA 5m | total 3266s
+step  8710-> 8711/10000 | loss=3.9418 | alpha=0.000 | lr=9.34e-04 | 0.25s/step | ETA 5m | total 3268s
+step  8720-> 8721/10000 | loss=3.9288 | alpha=0.000 | lr=9.34e-04 | 0.25s/step | ETA 5m | total 3271s
+step  8730-> 8731/10000 | loss=3.9375 | alpha=0.000 | lr=9.34e-04 | 0.25s/step | ETA 5m | total 3273s
+step  8740-> 8741/10000 | loss=4.0189 | alpha=0.000 | lr=9.34e-04 | 0.24s/step | ETA 5m | total 3275s
+step  8750-> 8751/10000 | loss=3.8887 | alpha=0.000 | lr=9.34e-04 | 0.25s/step | ETA 5m | total 3278s
+step  8760-> 8761/10000 | loss=3.9509 | alpha=0.000 | lr=9.34e-04 | 0.24s/step | ETA 5m | total 3280s
+step  8770-> 8771/10000 | loss=3.9340 | alpha=0.000 | lr=9.33e-04 | 0.25s/step | ETA 5m | total 3283s
+step  8780-> 8781/10000 | loss=3.9512 | alpha=0.000 | lr=9.33e-04 | 0.24s/step | ETA 5m | total 3285s
+step  8790-> 8791/10000 | loss=3.8817 | alpha=0.000 | lr=9.33e-04 | 0.24s/step | ETA 5m | total 3288s
+[Eval @ 8800] alpha=0.0000
+[Eval @ 8800] train_obj=3.9902 | ori_l2r=3.7915 | model_order=3.9895 | unstructured=3.9902 | rw=3.9645
+step  8800-> 8801/10000 | loss=3.9452 | alpha=0.000 | lr=9.33e-04 | 2.82s/step | ETA 56m | total 3316s
+step  8810-> 8811/10000 | loss=3.9095 | alpha=0.000 | lr=9.33e-04 | 0.24s/step | ETA 5m | total 3318s
+step  8820-> 8821/10000 | loss=3.9232 | alpha=0.000 | lr=9.33e-04 | 0.24s/step | ETA 5m | total 3321s
+step  8830-> 8831/10000 | loss=3.9164 | alpha=0.000 | lr=9.33e-04 | 0.25s/step | ETA 5m | total 3323s
+step  8840-> 8841/10000 | loss=3.8927 | alpha=0.000 | lr=9.32e-04 | 0.25s/step | ETA 5m | total 3326s
+step  8850-> 8851/10000 | loss=3.9506 | alpha=0.000 | lr=9.32e-04 | 0.24s/step | ETA 5m | total 3328s
+step  8860-> 8861/10000 | loss=3.9558 | alpha=0.000 | lr=9.32e-04 | 0.24s/step | ETA 5m | total 3331s
+step  8870-> 8871/10000 | loss=4.0158 | alpha=0.000 | lr=9.32e-04 | 0.24s/step | ETA 5m | total 3333s
+step  8880-> 8881/10000 | loss=3.9473 | alpha=0.000 | lr=9.32e-04 | 0.24s/step | ETA 5m | total 3335s
+step  8890-> 8891/10000 | loss=3.9698 | alpha=0.000 | lr=9.32e-04 | 0.24s/step | ETA 5m | total 3338s
+step  8900-> 8901/10000 | loss=3.9141 | alpha=0.000 | lr=9.31e-04 | 0.24s/step | ETA 4m | total 3340s
+step  8910-> 8911/10000 | loss=4.0452 | alpha=0.000 | lr=9.31e-04 | 0.24s/step | ETA 4m | total 3343s
+step  8920-> 8921/10000 | loss=3.8952 | alpha=0.000 | lr=9.31e-04 | 0.24s/step | ETA 4m | total 3345s
+step  8930-> 8931/10000 | loss=3.9580 | alpha=0.000 | lr=9.31e-04 | 0.24s/step | ETA 4m | total 3348s
+step  8940-> 8941/10000 | loss=3.9082 | alpha=0.000 | lr=9.31e-04 | 0.24s/step | ETA 4m | total 3350s
+step  8950-> 8951/10000 | loss=3.9098 | alpha=0.000 | lr=9.31e-04 | 0.24s/step | ETA 4m | total 3353s
+step  8960-> 8961/10000 | loss=3.9876 | alpha=0.000 | lr=9.31e-04 | 0.24s/step | ETA 4m | total 3355s
+step  8970-> 8971/10000 | loss=3.9405 | alpha=0.000 | lr=9.30e-04 | 0.24s/step | ETA 4m | total 3357s
+step  8980-> 8981/10000 | loss=4.0085 | alpha=0.000 | lr=9.30e-04 | 0.24s/step | ETA 4m | total 3360s
+step  8990-> 8991/10000 | loss=3.9157 | alpha=0.000 | lr=9.30e-04 | 0.24s/step | ETA 4m | total 3362s
+[Eval @ 9000] alpha=0.0000
+[Eval @ 9000] train_obj=3.9786 | ori_l2r=3.7780 | model_order=3.9774 | unstructured=3.9786 | rw=3.9507
+Saved checkpoint: runs/handoff_overnight/seed42/ckpt_step9000.pt
+step  9000-> 9001/10000 | loss=4.0183 | alpha=0.000 | lr=9.30e-04 | 2.89s/step | ETA 48m | total 3391s
+step  9010-> 9011/10000 | loss=3.9561 | alpha=0.000 | lr=9.30e-04 | 0.24s/step | ETA 4m | total 3394s
+step  9020-> 9021/10000 | loss=4.0364 | alpha=0.000 | lr=9.30e-04 | 0.25s/step | ETA 4m | total 3396s
+step  9030-> 9031/10000 | loss=3.9890 | alpha=0.000 | lr=9.29e-04 | 0.25s/step | ETA 4m | total 3399s
+step  9040-> 9041/10000 | loss=3.9796 | alpha=0.000 | lr=9.29e-04 | 0.25s/step | ETA 4m | total 3401s
+step  9050-> 9051/10000 | loss=3.9677 | alpha=0.000 | lr=9.29e-04 | 0.24s/step | ETA 4m | total 3403s
+step  9060-> 9061/10000 | loss=3.9555 | alpha=0.000 | lr=9.29e-04 | 0.24s/step | ETA 4m | total 3406s
+step  9070-> 9071/10000 | loss=3.9830 | alpha=0.000 | lr=9.29e-04 | 0.24s/step | ETA 4m | total 3408s
+step  9080-> 9081/10000 | loss=3.9411 | alpha=0.000 | lr=9.29e-04 | 0.24s/step | ETA 4m | total 3411s
+step  9090-> 9091/10000 | loss=3.9777 | alpha=0.000 | lr=9.29e-04 | 0.24s/step | ETA 4m | total 3413s
+step  9100-> 9101/10000 | loss=4.0082 | alpha=0.000 | lr=9.28e-04 | 0.24s/step | ETA 4m | total 3416s
+step  9110-> 9111/10000 | loss=3.9315 | alpha=0.000 | lr=9.28e-04 | 0.24s/step | ETA 4m | total 3418s
+step  9120-> 9121/10000 | loss=3.9418 | alpha=0.000 | lr=9.28e-04 | 0.24s/step | ETA 4m | total 3421s
+step  9130-> 9131/10000 | loss=3.9881 | alpha=0.000 | lr=9.28e-04 | 0.24s/step | ETA 4m | total 3423s
+step  9140-> 9141/10000 | loss=4.0010 | alpha=0.000 | lr=9.28e-04 | 0.24s/step | ETA 4m | total 3425s
+step  9150-> 9151/10000 | loss=3.9985 | alpha=0.000 | lr=9.28e-04 | 0.24s/step | ETA 3m | total 3428s
+step  9160-> 9161/10000 | loss=3.9780 | alpha=0.000 | lr=9.28e-04 | 0.24s/step | ETA 3m | total 3430s
+step  9170-> 9171/10000 | loss=3.8802 | alpha=0.000 | lr=9.27e-04 | 0.24s/step | ETA 3m | total 3433s
+step  9180-> 9181/10000 | loss=3.9619 | alpha=0.000 | lr=9.27e-04 | 0.25s/step | ETA 3m | total 3435s
+step  9190-> 9191/10000 | loss=3.9144 | alpha=0.000 | lr=9.27e-04 | 0.24s/step | ETA 3m | total 3438s
+[Eval @ 9200] alpha=0.0000
+[Eval @ 9200] train_obj=3.9711 | ori_l2r=3.7742 | model_order=3.9711 | unstructured=3.9711 | rw=3.9447
+step  9200-> 9201/10000 | loss=3.9252 | alpha=0.000 | lr=9.27e-04 | 2.80s/step | ETA 37m | total 3466s
+step  9210-> 9211/10000 | loss=3.9944 | alpha=0.000 | lr=9.27e-04 | 0.24s/step | ETA 3m | total 3468s
+step  9220-> 9221/10000 | loss=3.9502 | alpha=0.000 | lr=9.27e-04 | 0.25s/step | ETA 3m | total 3471s
+step  9230-> 9231/10000 | loss=3.9241 | alpha=0.000 | lr=9.26e-04 | 0.25s/step | ETA 3m | total 3473s
+step  9240-> 9241/10000 | loss=3.9092 | alpha=0.000 | lr=9.26e-04 | 0.25s/step | ETA 3m | total 3476s
+step  9250-> 9251/10000 | loss=3.9204 | alpha=0.000 | lr=9.26e-04 | 0.25s/step | ETA 3m | total 3478s
+step  9260-> 9261/10000 | loss=3.9847 | alpha=0.000 | lr=9.26e-04 | 0.25s/step | ETA 3m | total 3480s
+step  9270-> 9271/10000 | loss=3.9294 | alpha=0.000 | lr=9.26e-04 | 0.24s/step | ETA 3m | total 3483s
+step  9280-> 9281/10000 | loss=3.9203 | alpha=0.000 | lr=9.26e-04 | 0.24s/step | ETA 3m | total 3485s
+step  9290-> 9291/10000 | loss=3.8788 | alpha=0.000 | lr=9.25e-04 | 0.24s/step | ETA 3m | total 3488s
+step  9300-> 9301/10000 | loss=3.8958 | alpha=0.000 | lr=9.25e-04 | 0.24s/step | ETA 3m | total 3490s
+step  9310-> 9311/10000 | loss=3.9833 | alpha=0.000 | lr=9.25e-04 | 0.24s/step | ETA 3m | total 3493s
+step  9320-> 9321/10000 | loss=3.9828 | alpha=0.000 | lr=9.25e-04 | 0.24s/step | ETA 3m | total 3495s
+step  9330-> 9331/10000 | loss=3.8885 | alpha=0.000 | lr=9.25e-04 | 0.25s/step | ETA 3m | total 3498s
+step  9340-> 9341/10000 | loss=3.8792 | alpha=0.000 | lr=9.25e-04 | 0.24s/step | ETA 3m | total 3500s
+step  9350-> 9351/10000 | loss=3.9099 | alpha=0.000 | lr=9.25e-04 | 0.24s/step | ETA 3m | total 3502s
+step  9360-> 9361/10000 | loss=3.9397 | alpha=0.000 | lr=9.24e-04 | 0.24s/step | ETA 3m | total 3505s
+step  9370-> 9371/10000 | loss=3.9178 | alpha=0.000 | lr=9.24e-04 | 0.24s/step | ETA 3m | total 3507s
+step  9380-> 9381/10000 | loss=3.9124 | alpha=0.000 | lr=9.24e-04 | 0.24s/step | ETA 3m | total 3510s
+step  9390-> 9391/10000 | loss=4.0029 | alpha=0.000 | lr=9.24e-04 | 0.24s/step | ETA 2m | total 3512s
+[Eval @ 9400] alpha=0.0000
+[Eval @ 9400] train_obj=3.9716 | ori_l2r=3.7717 | model_order=3.9702 | unstructured=3.9716 | rw=3.9456
+step  9400-> 9401/10000 | loss=3.9584 | alpha=0.000 | lr=9.24e-04 | 2.81s/step | ETA 28m | total 3540s
+step  9410-> 9411/10000 | loss=3.9820 | alpha=0.000 | lr=9.24e-04 | 0.24s/step | ETA 2m | total 3543s
+step  9420-> 9421/10000 | loss=3.9879 | alpha=0.000 | lr=9.23e-04 | 0.24s/step | ETA 2m | total 3545s
+step  9430-> 9431/10000 | loss=3.9021 | alpha=0.000 | lr=9.23e-04 | 0.24s/step | ETA 2m | total 3548s
+step  9440-> 9441/10000 | loss=3.9433 | alpha=0.000 | lr=9.23e-04 | 0.24s/step | ETA 2m | total 3550s
+step  9450-> 9451/10000 | loss=3.9012 | alpha=0.000 | lr=9.23e-04 | 0.24s/step | ETA 2m | total 3553s
+step  9460-> 9461/10000 | loss=3.9898 | alpha=0.000 | lr=9.23e-04 | 0.24s/step | ETA 2m | total 3555s
+step  9470-> 9471/10000 | loss=3.8890 | alpha=0.000 | lr=9.23e-04 | 0.24s/step | ETA 2m | total 3558s
+step  9480-> 9481/10000 | loss=3.9806 | alpha=0.000 | lr=9.23e-04 | 0.24s/step | ETA 2m | total 3560s
+step  9490-> 9491/10000 | loss=3.9847 | alpha=0.000 | lr=9.22e-04 | 0.24s/step | ETA 2m | total 3562s
+step  9500-> 9501/10000 | loss=3.8570 | alpha=0.000 | lr=9.22e-04 | 0.25s/step | ETA 2m | total 3565s
+step  9510-> 9511/10000 | loss=3.9464 | alpha=0.000 | lr=9.22e-04 | 0.24s/step | ETA 2m | total 3567s
+step  9520-> 9521/10000 | loss=3.9452 | alpha=0.000 | lr=9.22e-04 | 0.25s/step | ETA 2m | total 3570s
+step  9530-> 9531/10000 | loss=3.9238 | alpha=0.000 | lr=9.22e-04 | 0.25s/step | ETA 2m | total 3572s
+step  9540-> 9541/10000 | loss=3.9510 | alpha=0.000 | lr=9.22e-04 | 0.24s/step | ETA 2m | total 3575s
+step  9550-> 9551/10000 | loss=3.8974 | alpha=0.000 | lr=9.21e-04 | 0.25s/step | ETA 2m | total 3577s
+step  9560-> 9561/10000 | loss=3.9189 | alpha=0.000 | lr=9.21e-04 | 0.24s/step | ETA 2m | total 3580s
+step  9570-> 9571/10000 | loss=3.9167 | alpha=0.000 | lr=9.21e-04 | 0.24s/step | ETA 2m | total 3582s
+step  9580-> 9581/10000 | loss=3.9131 | alpha=0.000 | lr=9.21e-04 | 0.25s/step | ETA 2m | total 3584s
+step  9590-> 9591/10000 | loss=3.9437 | alpha=0.000 | lr=9.21e-04 | 0.24s/step | ETA 2m | total 3587s
+[Eval @ 9600] alpha=0.0000
+[Eval @ 9600] train_obj=3.9666 | ori_l2r=3.7716 | model_order=3.9667 | unstructured=3.9666 | rw=3.9418
+step  9600-> 9601/10000 | loss=3.9444 | alpha=0.000 | lr=9.21e-04 | 2.82s/step | ETA 19m | total 3615s
+step  9610-> 9611/10000 | loss=3.8787 | alpha=0.000 | lr=9.20e-04 | 0.24s/step | ETA 2m | total 3618s
+step  9620-> 9621/10000 | loss=3.9223 | alpha=0.000 | lr=9.20e-04 | 0.24s/step | ETA 2m | total 3620s
+step  9630-> 9631/10000 | loss=3.9362 | alpha=0.000 | lr=9.20e-04 | 0.24s/step | ETA 2m | total 3622s
+step  9640-> 9641/10000 | loss=3.9239 | alpha=0.000 | lr=9.20e-04 | 0.24s/step | ETA 1m | total 3625s
+step  9650-> 9651/10000 | loss=3.9571 | alpha=0.000 | lr=9.20e-04 | 0.24s/step | ETA 1m | total 3627s
+step  9660-> 9661/10000 | loss=3.8788 | alpha=0.000 | lr=9.20e-04 | 0.24s/step | ETA 1m | total 3630s
+step  9670-> 9671/10000 | loss=3.8882 | alpha=0.000 | lr=9.19e-04 | 0.24s/step | ETA 1m | total 3632s
+step  9680-> 9681/10000 | loss=3.9418 | alpha=0.000 | lr=9.19e-04 | 0.24s/step | ETA 1m | total 3635s
+step  9690-> 9691/10000 | loss=3.9068 | alpha=0.000 | lr=9.19e-04 | 0.24s/step | ETA 1m | total 3637s
+step  9700-> 9701/10000 | loss=3.8819 | alpha=0.000 | lr=9.19e-04 | 0.24s/step | ETA 1m | total 3640s
+step  9710-> 9711/10000 | loss=3.9012 | alpha=0.000 | lr=9.19e-04 | 0.24s/step | ETA 1m | total 3642s
+step  9720-> 9721/10000 | loss=4.0160 | alpha=0.000 | lr=9.19e-04 | 0.25s/step | ETA 1m | total 3644s
+step  9730-> 9731/10000 | loss=3.9402 | alpha=0.000 | lr=9.18e-04 | 0.24s/step | ETA 1m | total 3647s
+step  9740-> 9741/10000 | loss=3.8897 | alpha=0.000 | lr=9.18e-04 | 0.25s/step | ETA 1m | total 3649s
+step  9750-> 9751/10000 | loss=3.9634 | alpha=0.000 | lr=9.18e-04 | 0.24s/step | ETA 1m | total 3652s
+step  9760-> 9761/10000 | loss=3.8873 | alpha=0.000 | lr=9.18e-04 | 0.25s/step | ETA 1m | total 3654s
+step  9770-> 9771/10000 | loss=3.9257 | alpha=0.000 | lr=9.18e-04 | 0.25s/step | ETA 1m | total 3657s
+step  9780-> 9781/10000 | loss=3.8854 | alpha=0.000 | lr=9.18e-04 | 0.25s/step | ETA 1m | total 3659s
+step  9790-> 9791/10000 | loss=3.8534 | alpha=0.000 | lr=9.18e-04 | 0.25s/step | ETA 1m | total 3662s
+[Eval @ 9800] alpha=0.0000
+[Eval @ 9800] train_obj=3.9628 | ori_l2r=3.7635 | model_order=3.9608 | unstructured=3.9628 | rw=3.9374
+step  9800-> 9801/10000 | loss=3.9794 | alpha=0.000 | lr=9.17e-04 | 2.83s/step | ETA 9m | total 3690s
+step  9810-> 9811/10000 | loss=3.8981 | alpha=0.000 | lr=9.17e-04 | 0.24s/step | ETA 1m | total 3692s
+step  9820-> 9821/10000 | loss=3.9167 | alpha=0.000 | lr=9.17e-04 | 0.24s/step | ETA 1m | total 3695s
+step  9830-> 9831/10000 | loss=3.9217 | alpha=0.000 | lr=9.17e-04 | 0.24s/step | ETA 1m | total 3697s
+step  9840-> 9841/10000 | loss=3.8526 | alpha=0.000 | lr=9.17e-04 | 0.25s/step | ETA 1m | total 3700s
+step  9850-> 9851/10000 | loss=3.9197 | alpha=0.000 | lr=9.17e-04 | 0.24s/step | ETA 1m | total 3702s
+step  9860-> 9861/10000 | loss=3.9416 | alpha=0.000 | lr=9.16e-04 | 0.25s/step | ETA 1m | total 3705s
+step  9870-> 9871/10000 | loss=3.8359 | alpha=0.000 | lr=9.16e-04 | 0.25s/step | ETA 1m | total 3707s
+step  9880-> 9881/10000 | loss=3.9538 | alpha=0.000 | lr=9.16e-04 | 0.24s/step | ETA 0m | total 3710s
+step  9890-> 9891/10000 | loss=3.9313 | alpha=0.000 | lr=9.16e-04 | 0.24s/step | ETA 0m | total 3712s
+step  9900-> 9901/10000 | loss=3.8696 | alpha=0.000 | lr=9.16e-04 | 0.24s/step | ETA 0m | total 3714s
+step  9910-> 9911/10000 | loss=3.9090 | alpha=0.000 | lr=9.16e-04 | 0.25s/step | ETA 0m | total 3717s
+step  9920-> 9921/10000 | loss=3.8935 | alpha=0.000 | lr=9.15e-04 | 0.24s/step | ETA 0m | total 3719s
+step  9930-> 9931/10000 | loss=3.9686 | alpha=0.000 | lr=9.15e-04 | 0.24s/step | ETA 0m | total 3722s
+step  9940-> 9941/10000 | loss=3.8756 | alpha=0.000 | lr=9.15e-04 | 0.24s/step | ETA 0m | total 3724s
+step  9950-> 9951/10000 | loss=3.9617 | alpha=0.000 | lr=9.15e-04 | 0.24s/step | ETA 0m | total 3727s
+step  9960-> 9961/10000 | loss=3.8430 | alpha=0.000 | lr=9.15e-04 | 0.24s/step | ETA 0m | total 3729s
+step  9970-> 9971/10000 | loss=3.8499 | alpha=0.000 | lr=9.15e-04 | 0.24s/step | ETA 0m | total 3732s
+step  9980-> 9981/10000 | loss=3.9407 | alpha=0.000 | lr=9.14e-04 | 0.24s/step | ETA 0m | total 3734s
+step  9990-> 9991/10000 | loss=3.8968 | alpha=0.000 | lr=9.14e-04 | 0.24s/step | ETA 0m | total 3736s
+[Eval @ 10000] alpha=0.0000
+[Eval @ 10000] train_obj=3.9565 | ori_l2r=3.7562 | model_order=3.9564 | unstructured=3.9565 | rw=3.9294
+[attn_traj] heatmaps saved @ step 10000 (extraction 0.1s)
+Saved checkpoint: runs/handoff_overnight/seed42/ckpt_step10000.pt
+[attn_trajectory] trajectory summary written to runs/handoff_overnight/seed42/attention_trajectory
+Done. eval_curve=runs/handoff_overnight/seed42/eval_curve.tsv

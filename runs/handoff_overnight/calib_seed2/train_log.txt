@@ -1,0 +1,61 @@
+Run kind: baseline
+graph_rw_active: False  alpha_active: False
+alpha_schedule: constant 0.0 (run_kind=baseline short-circuits alpha_for_step). Any rw_* CLI flags are ignored at training time.
+shuffle_granularity: 64 (groups of 4 tokens)
+Output dir: runs/handoff_overnight/calib_seed2
+Device: cuda:0
+[data-source=continuous] memmap streams train=/home/admin/ych/nanogpt-learned-order/data/wikitext103/train.bin val=/home/admin/ych/nanogpt-learned-order/data/wikitext103/val.bin
+[continuous] train stream tokens=118496151 eval windows=2000 (block=256)
+[attn_trajectory] enabled — 16 fixed samples, heatmap every 5000 steps, output=runs/handoff_overnight/calib_seed2/attention_trajectory
+[Eval @ 0] alpha=0.0000
+[Eval @ 0] train_obj=10.9009 | ori_l2r=10.9008 | model_order=10.9008 | unstructured=10.9009 | rw=10.9008
+[attn_traj] fixed 16 attention samples, indices_hash=0x7b01409d
+[attn_traj] heatmaps saved @ step 0 (extraction 0.3s)
+Saved checkpoint: runs/handoff_overnight/calib_seed2/ckpt_step0.pt
+step     0->    1/400 | loss=10.8999 | alpha=0.000 | lr=1.00e-03 | 3.00s/step | ETA 20m | total 30s
+step    10->   11/400 | loss=8.0667 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 2m | total 32s
+step    20->   21/400 | loss=7.5300 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 2m | total 35s
+step    30->   31/400 | loss=7.5101 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 2m | total 37s
+step    40->   41/400 | loss=7.4175 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 40s
+step    50->   51/400 | loss=7.2643 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 42s
+step    60->   61/400 | loss=7.0227 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 45s
+step    70->   71/400 | loss=6.8724 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 47s
+step    80->   81/400 | loss=6.6830 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 50s
+step    90->   91/400 | loss=6.6218 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 52s
+step   100->  101/400 | loss=6.4947 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 54s
+step   110->  111/400 | loss=6.4327 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 57s
+step   120->  121/400 | loss=6.4445 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 59s
+step   130->  131/400 | loss=6.3393 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 62s
+step   140->  141/400 | loss=6.2890 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 64s
+step   150->  151/400 | loss=6.2436 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 67s
+step   160->  161/400 | loss=6.2335 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 69s
+step   170->  171/400 | loss=6.1798 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 71s
+step   180->  181/400 | loss=6.1990 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 74s
+step   190->  191/400 | loss=6.1792 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 76s
+[Eval @ 200] alpha=0.0000
+[Eval @ 200] train_obj=6.0481 | ori_l2r=5.9916 | model_order=6.0498 | unstructured=6.0481 | rw=6.0406
+step   200->  201/400 | loss=6.0473 | alpha=0.000 | lr=1.00e-03 | 2.83s/step | ETA 9m | total 105s
+step   210->  211/400 | loss=6.0865 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 107s
+step   220->  221/400 | loss=6.0172 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 110s
+step   230->  231/400 | loss=6.0225 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 112s
+step   240->  241/400 | loss=5.8717 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 114s
+step   250->  251/400 | loss=5.9910 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 117s
+step   260->  261/400 | loss=5.9146 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 119s
+step   270->  271/400 | loss=5.9612 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 1m | total 122s
+step   280->  281/400 | loss=5.8467 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 0m | total 124s
+step   290->  291/400 | loss=5.8796 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 0m | total 127s
+step   300->  301/400 | loss=5.7910 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 0m | total 129s
+step   310->  311/400 | loss=5.8201 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 0m | total 132s
+step   320->  321/400 | loss=5.8375 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 0m | total 134s
+step   330->  331/400 | loss=5.7714 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 0m | total 136s
+step   340->  341/400 | loss=5.7604 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 0m | total 139s
+step   350->  351/400 | loss=5.8449 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 0m | total 141s
+step   360->  361/400 | loss=5.7387 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 0m | total 144s
+step   370->  371/400 | loss=5.7221 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 0m | total 146s
+step   380->  381/400 | loss=5.8459 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 0m | total 149s
+step   390->  391/400 | loss=5.7332 | alpha=0.000 | lr=1.00e-03 | 0.24s/step | ETA 0m | total 151s
+[Eval @ 400] alpha=0.0000
+[Eval @ 400] train_obj=5.6926 | ori_l2r=5.6265 | model_order=5.6939 | unstructured=5.6926 | rw=5.6846
+Saved checkpoint: runs/handoff_overnight/calib_seed2/ckpt_step400.pt
+[attn_trajectory] trajectory summary written to runs/handoff_overnight/calib_seed2/attention_trajectory
+Done. eval_curve=runs/handoff_overnight/calib_seed2/eval_curve.tsv

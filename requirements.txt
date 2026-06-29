@@ -1,0 +1,32 @@
+# order_rw — attn-order / AO-GPT pipeline dependencies
+# Captured from the working env (conda env "X1", Python 3.8.5, CUDA 12.1) on 2026-05-25.
+# NOTE: torch/torchvision are CUDA builds. On a new server, install the torch build
+# that matches the target CUDA first (see MIGRATION.md), then `pip install -r requirements.txt`.
+
+# --- core numerics / DL ---
+torch==2.4.1
+torchvision==0.19.1
+numpy==1.22.3
+scipy==1.9.1
+
+# --- HuggingFace stack (VQ-f4 VAE decode + datasets) ---
+diffusers==0.36.0
+transformers==4.46.3
+datasets==3.1.0
+huggingface-hub==0.36.2
+tokenizers==0.20.3
+safetensors==0.5.3
+accelerate==1.0.1          # optional but silences diffusers low_cpu_mem_usage warning
+
+# --- metrics / eval ---
+torchmetrics==1.5.2        # FrechetInceptionDistance (FID)
+scikit-learn==1.3.2
+
+# --- io / plotting / utils ---
+Pillow==10.4.0
+matplotlib==3.7.5
+pandas==2.0.3
+tqdm==4.67.1
+einops==0.8.1
+regex==2024.11.6
+wandb==0.24.0              # only needed if running the nanogpt baseline trainer with wandb_log=True
