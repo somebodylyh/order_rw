@@ -74,3 +74,27 @@ def sample_scaffold(ckpt_path, M, layer=0, head=1, n_reveals=8, fixed_reveal_see
     sig = [sigma_from_B65(B) for B in B_list]
     return {"B": B_list, "sigma_B": sig, "chunks": chunks,
             "clean_perm": clean_perm, "model": model, "dev": dev}
+
+
+# ── Task 3: Candidate-order pool ─────────────────────────────────────────────
+
+def _swap_perturb(sigma, rng, n_swaps):
+    s = np.asarray(sigma, dtype=np.int64).copy()
+    for _ in range(n_swaps):
+        i, j = rng.integers(0, len(s), size=2)
+        s[i], s[j] = s[j], s[i]
+    return s
+
+
+def candidate_orders(sigma_B, rng, n_random=4, n_noisy=4, noisy_swaps=3):
+    sigma_B = np.asarray(sigma_B, dtype=np.int64)
+    phys = np.arange(64, dtype=np.int64)
+    pool = {"sigma_B": sigma_B.copy(),
+            "phys": phys.copy(),
+            "reverse_phys": phys[::-1].copy(),
+            "local": phys.copy()}                       # local = identity adjacency baseline
+    for k in range(n_random):
+        pool[f"random_{k}"] = rng.permutation(64).astype(np.int64)
+    for k in range(n_noisy):
+        pool[f"noisy_B_{k}"] = _swap_perturb(sigma_B, rng, noisy_swaps)
+    return pool
