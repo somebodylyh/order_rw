@@ -98,3 +98,26 @@ def candidate_orders(sigma_B, rng, n_random=4, n_noisy=4, noisy_swaps=3):
     for k in range(n_noisy):
         pool[f"noisy_B_{k}"] = _swap_perturb(sigma_B, rng, noisy_swaps)
     return pool
+
+
+# ── Task 4: Utility-headroom gate ────────────────────────────────────────────
+
+def headroom_stats(nll_by_label, sigma_b_label="sigma_B", n_boot=1000, seed=0):
+    rng = np.random.default_rng(seed)
+    abs_h, rel_h, best_labels = [], [], []
+    for d in nll_by_label:
+        nb = d[sigma_b_label]
+        best_label = min(d, key=lambda k: d[k])
+        best = d[best_label]
+        abs_h.append(nb - best)                       # >=0 by construction
+        rel_h.append((nb - best) / (abs(nb) + 1e-9))
+        best_labels.append(best_label)
+    abs_h = np.asarray(abs_h)
+    boot = np.array([rng.choice(abs_h, size=len(abs_h), replace=True).mean()
+                     for _ in range(n_boot)])
+    lo, hi = float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5))
+    labels = sorted({l for d in nll_by_label for l in d})
+    best_dist = {l: float(np.mean([bl == l for bl in best_labels])) for l in labels}
+    return {"abs_mean": float(abs_h.mean()), "abs_ci_low": lo, "abs_ci_high": hi,
+            "rel_mean": float(np.mean(rel_h)), "gate_pass": bool(lo > 0.0),
+            "best_dist": best_dist}
