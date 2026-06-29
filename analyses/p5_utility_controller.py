@@ -5,6 +5,7 @@ NOT recover physical order. Supervision = downstream teacher-forced AO NLL (neve
 physical-rank/CDL(B), which structurally ignore H under fixed layout).
 See docs/superpowers/specs/2026-06-29-p5-attention-scaffolded-utility-controller-design.md.
 """
+import json as _json
 import pathlib, sys
 import numpy as np
 import torch
@@ -331,3 +332,38 @@ def classify_p5(m):
     content = m["h_shuffle_drop"] > 0.5 * abs(m["delta_nll"])     # shuffle loses most gain
     not_capacity = (not m["zero_match"]) and (not m["mean_match"])
     return "utility_gain" if (gain and content and not_capacity) else "no_gain"
+
+
+# ── Task 10: Phase-0 driver ─────────────────────────────────────────────────
+
+def _split_idx(n, split, seed=0):
+    rng = np.random.default_rng(seed)
+    perm = rng.permutation(n)
+    n_tr = int(split[0] * n); n_va = int(split[1] * n)
+    return perm[:n_tr], perm[n_tr:n_tr + n_va], perm[n_tr + n_va:]
+
+
+def run_phase0(ckpt_path, M=64, n_reveals=8, T=0.3, split=(0.7, 0.15, 0.15),
+               epochs=200, layer=0, head=1, out_dir="runs/p5/seed123", device="cpu"):
+    out = pathlib.Path(out_dir); out.mkdir(parents=True, exist_ok=True)
+    samples = build_dataset(ckpt_path, M, layer=layer, head=head, n_reveals=n_reveals,
+                            T=T, device=device)
+    tr, va, te = _split_idx(len(samples), split)
+    test = [samples[i] for i in te] or [samples[i] for i in tr]
+    head_in = headroom_stats([s["nll_by_label"] for s in test])
+    result = {"ckpt": ckpt_path, "layer": layer, "head": head, "headroom": head_in}
+    if head_in["gate_pass"]:
+        train = [samples[i] for i in tr]
+        g_B = train_b_only(train, epochs=epochs)
+        for p in g_B.parameters():
+            p.requires_grad_(False)
+        h_dim = samples[0]["H"].shape[1]
+        sc_real = train_residual(train, g_B, h_dim, epochs=epochs, h_mode="real")
+        sc_shuf = train_residual(train, g_B, h_dim, epochs=epochs, h_mode="shuffle")
+        sc_zero = train_residual(train, g_B, h_dim, epochs=epochs, h_mode="zero")
+        sc_mean = train_residual(train, g_B, h_dim, epochs=epochs, h_mode="mean")
+        result["metrics"] = p5_metrics(test, g_B, sc_real, sc_shuf, sc_zero, sc_mean)
+        result["residual_ratio"] = sc_real.residual_ratio(
+            torch.tensor(test[0]["B_feat"]), torch.tensor(test[0]["H"]))
+    _json.dump(result, open(out / "phase0.json", "w"), indent=2, default=float)
+    return result
