@@ -80,13 +80,15 @@ claim while keeping the real, non-trivial phenomenon.
   support B. Truly separating "learned fixed map" from "could-be-content-if-trained-multi-layout"
   needs **multi-layout training** (deferred).
 
-## P3′ fork (pre-registered next step) — verdict is B+
+## P3′ outcome — mixed/departure
 
-P3′ (causal verification, separate spec) targets **separating the fixed-layout base map from
-the content-modulation residual** on the L0 carrier:
-- **base map:** intervene on the positional / slot / QK-geometry path → expect the bulk of
-  physical τ to collapse (the map lives there);
-- **content residual:** content corruption / block replacement at fixed slots → expect a
-  smaller, head-specific change (the modulation);
-- avoid output-ablation→same-head-readout (degenerate for an attention-map metric).
-A decisive strengthening of the content side would be **multi-layout training** + re-running P2.
+The pre-registered causal follow-up is complete. P3′ confirms the QK/OV intervention geometry
+and parallel-copy redundancy, but it does **not** consistently recover the two causal components
+implied by this statistical B+ basis. Position intervention gives only partial/joint-inconsistent
+base-map collapse, and content corruption does not consistently exceed the real sampling floor.
+Accordingly, **P2 remains a strong correlational B+ decomposition; it is not upgraded to causal
+`B+ confirmed`.** See `analyses/p3prime_causal_README.md` and
+`analyses/final_mechanism_synthesis_README.md`.
+
+A decisive strengthening of the content side still requires **multi-layout training** followed
+by re-running P2/P3′.

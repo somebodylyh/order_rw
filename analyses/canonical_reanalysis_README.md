@@ -10,6 +10,11 @@ AR frame, posthoc-inv physical scoring, method **C-D+L**, gate strong/weak/fail,
 controls. Run via `search_none_separated_65_heads`-equivalent functions on the
 `runs/handoff_overnight` checkpoints, K=3 sampling seeds.
 
+> **Supersession note (2026-06-29):** use this report for the existence, emergence timing, and
+> L0 localization of the canonical signal. Its original `content-bound` source interpretation
+> is superseded by P2 and P3′: under fixed layout the signal is dominated by a learned
+> slot→physical map with smaller content modulation, and the causal verdict is mixed/departure.
+
 ## Why this re-analysis exists
 
 The ③/A/⑤ arc read order with `build_model_frame_strict65` **but scored τ vs `arange` in the
@@ -33,11 +38,10 @@ picture is different and correct.
    window. **Spec A's *timing* was right; its *carrier identity* (L1) was a model-frame artifact.**
 2. **Carrier is L0** in all 3 seeds (L0H2–5 / L0H2 / L0H1–4), not L1. The model-frame ③/A/⑤
    L1 carrier was a tautological-readout artifact.
-3. **Content-bound, not a slot scaffold** — under `content_label_permutation_control` the
-   carrier's τ collapses 1.00 → 0.08 (entry-shuffled → 0.04). Recovering the original-text
-   block order under a shuffled layout requires content; this **corrects ⑤'s "slot-scaffold"
-   conclusion to content/structure-bound** (the project's original `[[paper_framing]]` claim,
-   now verified with the canonical metric).
+3. **The canonical signal is perturbation-sensitive, but the control is not source-identifying.**
+   Under `content_label_permutation_control` τ collapses 1.00 → 0.08 (entry-shuffled → 0.04).
+   P2 later showed that this collapse is compatible with a dominant fixed-layout slot→physical
+   map, so it cannot by itself establish content-bound recovery.
 
 ## Per-component corrections
 
@@ -51,8 +55,8 @@ picture is different and correct.
   — so this ablation cannot test a head's own readout (same limitation as Pillar ③). The finding
   is that order is an L0 *attention-pattern* phenomenon, read in a single layer, with a redundant
   head set; a causal test would need QK-path / input ablation, not output ablation.
-- **⑤ (binding):** corrected to **content-bound** (content-perm collapse), reversing the
-  identity-probe "slot-scaffold" claim.
+- **⑤ (binding):** the content-permutation collapse establishes sensitivity of the canonical
+  readout, not a content-bound mechanism. P2 is the source-disambiguation result.
 
 ## Caveats
 
@@ -64,7 +68,7 @@ picture is different and correct.
 
 ## Net
 
-The order signal is **not** present at init and **not** a positional artifact: it **emerges**
-(~step 2000) into a **redundant L0 carrier set** that **recovers the original-text (content) block
-order**. The recent model-frame ③/A/⑤ characterized a tautological identity-reveal readout; this
-canonical re-analysis restores the project's real, content-bound emergence finding.
+The global physical-order-aligned signal is absent at init and emerges around step 2000 into a
+redundant L0 carrier set. The model-frame ③/A/⑤ result was a tautological identity-reveal readout.
+Mechanism attribution is deferred to P2/P3′: P2 finds fixed-map-dominant correlational B+, while
+P3′ gives mixed/departure causal evidence rather than a content-bound or modular B+ confirmation.
