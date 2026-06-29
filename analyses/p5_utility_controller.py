@@ -20,6 +20,7 @@ from neural_readout.extract_b import _load_model_and_chunks  # noqa: E402
 from clean_training_protocol import physical_blocks_to_model_token_order  # noqa: E402
 from physical_signal_source import carrier_b65_per_text  # noqa: E402
 from none_separated_block_graph import rollout_by_method  # noqa: E402
+from path_patch_handoff import capture_block_input  # noqa: E402
 
 SEQ_LEN, N, BLOCK_LEN = 256, 64, 4
 
@@ -121,3 +122,28 @@ def headroom_stats(nll_by_label, sigma_b_label="sigma_B", n_boot=1000, seed=0):
     return {"abs_mean": float(abs_h.mean()), "abs_ci_low": lo, "abs_ci_high": hi,
             "rel_mean": float(np.mean(rel_h)), "gate_pass": bool(lo > 0.0),
             "best_dist": best_dist}
+
+
+# ── Task 5: Block-level hidden-state extraction ──────────────────────────────
+
+@torch.no_grad()
+def block_hidden_states(model, idx_row, sigma_phys, clean_perm, layer, device):
+    """Per model-block mean-pooled residual entering `layer`, under reveal sigma_phys."""
+    sigma = np.asarray(sigma_phys, dtype=np.int64)[None, :]
+    token_order = physical_blocks_to_model_token_order(
+        torch.from_numpy(sigma), clean_perm, BLOCK_LEN).to(device)   # (1,256) model-token order
+    handle, store = capture_block_input(model, layer)
+    try:
+        model.forward_fn(idx_row.to(device), token_order)
+    finally:
+        handle.remove()
+    x = store["x"][0].cpu().numpy()                     # (257, d) incl leading [None]
+    revealed = x[1:]                                    # (256, d) reveal-ordered positions
+    tok = token_order[0].cpu().numpy()                  # model-token index at each position
+    block_of_pos = tok // BLOCK_LEN                      # (256,) model block per position
+    d_val = revealed.shape[1]
+    H = np.zeros((N, d_val), dtype=np.float64)
+    for m in range(N):
+        sel = revealed[block_of_pos == m]
+        H[m] = sel.mean(axis=0) if len(sel) else 0.0
+    return H.astype(np.float32)
