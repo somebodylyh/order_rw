@@ -433,3 +433,148 @@ def run_phase0(ckpt_path, M=64, n_reveals=8, T=0.3, split=(0.7, 0.15, 0.15),
             torch.tensor(test[0]["B_feat"]), torch.tensor(test[0]["H"]))
     _json.dump(result, open(out / "phase0.json", "w"), indent=2, default=float)
     return result
+
+
+# ── Version A: direct-NLL soft-routing ───────────────────────────────────────
+# Replace the pairwise-teacher imitation objective with NLL-weighted candidate
+# routing on the SAME frozen scaffold. L_k are pre-computed constants; the frozen
+# model is NOT in the gradient path. Spec:
+#   docs/superpowers/specs/2026-06-30-p5-direct-nll-soft-routing-design.md
+
+def candidate_priority(sigma, n=N):
+    """Reveal-priority vector y for a candidate order: y[i] = 1 - rank_sigma(i)/(n-1).
+    Block revealed first -> priority 1.0; revealed last -> 0.0."""
+    sigma = np.asarray(sigma, dtype=np.int64)
+    rank = np.empty(len(sigma), dtype=np.int64)
+    rank[sigma] = np.arange(len(sigma))
+    return (1.0 - rank / (len(sigma) - 1)).astype(np.float32)
+
+
+def priority_matrix(cands):
+    """cands: {label -> sigma}. Returns (sorted labels, Y of shape (K, N))."""
+    labels = sorted(cands)
+    Y = np.stack([candidate_priority(cands[l]) for l in labels], axis=0)
+    return labels, Y.astype(np.float32)
+
+
+def _routing_tensors(sample):
+    """Per-sample (Y, L, labels) with a stable shared label ordering."""
+    labels, Y = priority_matrix(sample["cands"])
+    L = np.array([sample["nll_by_label"][l] for l in labels], dtype=np.float32)
+    return torch.tensor(Y), torch.tensor(L), labels
+
+
+def direct_nll_routing_loss(z, Y, L, tau):
+    """L = sum_k softmax((z . y_k)/tau)_k * L_k. Returns (loss, p)."""
+    a = Y @ z                                           # (K,)
+    p = torch.softmax(a / max(tau, 1e-9), dim=0)
+    return (p * L).sum(), p
+
+
+def train_b_only_routing(samples, tau=0.3, epochs=300, lr=5e-2, return_history=False):
+    g_B = BOnlyController(b_dim=samples[0]["B_feat"].shape[1])
+    YL = [_routing_tensors(s) for s in samples]
+    opt = torch.optim.Adam(g_B.parameters(), lr=lr)
+    hist = []
+    for _ in range(epochs):
+        opt.zero_grad(); loss = 0.0
+        for s, (Y, L, _) in zip(samples, YL):
+            z = g_B(torch.tensor(s["B_feat"]))
+            l, _p = direct_nll_routing_loss(z, Y, L, tau)
+            loss = loss + l
+        loss = loss / len(samples)
+        loss.backward(); opt.step()
+        hist.append(float(loss))
+    return (g_B, hist) if return_history else g_B
+
+
+def train_residual_routing(samples, g_B, h_dim, tau=0.3, epochs=300, lr=5e-2,
+                           h_mode="real", return_history=False):
+    for p in g_B.parameters():
+        p.requires_grad_(False)
+    sc = ScaffoldedController(g_B, h_dim=h_dim)
+    Hs = _apply_h_mode(samples, h_mode)
+    YL = [_routing_tensors(s) for s in samples]
+    opt = torch.optim.Adam([p for p in sc.parameters() if p.requires_grad], lr=lr)
+    hist = []
+    for _ in range(epochs):
+        opt.zero_grad(); loss = 0.0
+        for s, H, (Y, L, _) in zip(samples, Hs, YL):
+            z = sc(torch.tensor(s["B_feat"]), torch.tensor(H))
+            l, _p = direct_nll_routing_loss(z, Y, L, tau)
+            loss = loss + l
+        loss = loss / len(samples)
+        loss.backward(); opt.step()
+        hist.append(float(loss))
+    return (sc, hist) if return_history else sc
+
+
+@torch.no_grad()
+def routing_eval(samples, controller, h_mode=None, tau=0.3, with_model=True):
+    """Two eval modes (spec): pool-selected NLL (primary, argmax_k p_k) and
+    free-argsort NLL (diagnostic, argsort(-z), needs the model)."""
+    Hs = _apply_h_mode(samples, h_mode) if h_mode is not None else None
+    pool_nll, regret_pool, free_nll, regret_free = [], [], [], []
+    ents, maxps = [], []
+    sel = {}
+    for i, s in enumerate(samples):
+        B = torch.tensor(s["B_feat"])
+        z = controller(B) if Hs is None else controller(B, torch.tensor(Hs[i]))
+        labels, Y = priority_matrix(s["cands"])
+        L = np.array([s["nll_by_label"][l] for l in labels], dtype=np.float64)
+        a = torch.tensor(Y) @ z
+        p = torch.softmax(a / max(tau, 1e-9), dim=0).cpu().numpy()
+        kstar = int(p.argmax()); Lmin = float(L.min())
+        pool_nll.append(float(L[kstar])); regret_pool.append(float(L[kstar]) - Lmin)
+        sel[labels[kstar]] = sel.get(labels[kstar], 0) + 1
+        ents.append(float(-(p * np.log(p + 1e-12)).sum())); maxps.append(float(p.max()))
+        if with_model:
+            sigma_free = np.argsort(-z.cpu().numpy()).astype(np.int64)
+            nf = order_nll(s["model"], s["idx_row"], sigma_free, s["clean_perm"], s["dev"])
+            free_nll.append(nf); regret_free.append(nf - Lmin)
+    out = {"nll_pool": float(np.mean(pool_nll)), "regret_pool": float(np.mean(regret_pool)),
+           "entropy": float(np.mean(ents)), "max_p": float(np.mean(maxps)),
+           "best_candidate_frac": {k: v / len(samples) for k, v in sel.items()}}
+    if with_model:
+        out["nll_free"] = float(np.mean(free_nll))
+        out["regret_free"] = float(np.mean(regret_free))
+    return out
+
+
+def run_routing_A(ckpt_path, M=64, out_dir="runs/p5/seed123/routing_A",
+                  taus=(0.03, 0.1, 0.3, 1.0), epochs=300, lr=5e-2,
+                  layer=0, head=1, heads=None, n_reveals=8,
+                  split=(0.7, 0.15, 0.15), device="cpu", tag="main_L0H1"):
+    out = pathlib.Path(out_dir); out.mkdir(parents=True, exist_ok=True)
+    samples = build_dataset(ckpt_path, M, layer=layer, head=head,
+                            n_reveals=n_reveals, device=device, heads=heads)
+    tr, va, te = _split_idx(len(samples), split)
+    train = [samples[i] for i in tr]
+    test = [samples[i] for i in (list(te) or list(tr))]
+    h_dim = samples[0]["H"].shape[1]
+    head_in = headroom_stats([s["nll_by_label"] for s in test])
+
+    # pairwise baseline (tau-independent training; evaluated per tau)
+    pairwise_gB = train_b_only(train, epochs=epochs)
+    for p in pairwise_gB.parameters():
+        p.requires_grad_(False)
+
+    per_tau = {}
+    for tau in taus:
+        d_gB, hist = train_b_only_routing(train, tau=tau, epochs=epochs, lr=lr,
+                                          return_history=True)
+        arms = {
+            "pairwise_b_only": routing_eval(test, pairwise_gB, None, tau),
+            "direct_b_only": routing_eval(test, d_gB, None, tau),
+        }
+        for mode in ("real", "shuffle", "zero", "mean"):
+            sc = train_residual_routing(train, d_gB, h_dim, tau=tau,
+                                        epochs=epochs, lr=lr, h_mode=mode)
+            arms[f"direct_bh_{mode}"] = routing_eval(test, sc, mode, tau)
+        per_tau[f"tau_{tau}"] = {"loss_hist_first_last": [hist[0], hist[-1]],
+                                 "arms": arms}
+
+    result = {"ckpt": ckpt_path, "tag": tag, "layer": layer, "head": head,
+              "heads": heads, "M": M, "headroom": head_in, "per_tau": per_tau}
+    _json.dump(result, open(out / f"{tag}.json", "w"), indent=2, default=float)
+    return result
