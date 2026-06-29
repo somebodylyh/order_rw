@@ -1,0 +1,4 @@
+[2026-05-28T20:54:56+08:00] waiting for Task 12 pid=123119 to exit
+[2026-05-28T20:55:26+08:00] Task 12 pid=123119 exited
+[2026-05-28T20:55:26+08:00] smoke gate did NOT PASS -- chain aborted
+/home/admin/anaconda3/envs/X1/bin/python: Error while finding module specification for 'neural_readout.train_nr1' (ModuleNotFoundError: No module named 'neural_readout')
