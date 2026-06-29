@@ -91,39 +91,6 @@ def _attn_to_A_block_vec(attn, reveal_tokens, inv_perm,
     return A.reshape(lead + (num_blocks, num_blocks)) if lead else A[0]
 
 
-def _attn_to_A_block_b0_vec(attn, reveal_tokens, inv_perm,
-                            seq_len=SEQ_LEN, num_blocks=N, block_len=BLOCK_LEN):
-    """none→block0 physical-frame block graph, vectorized over leading dims.
-
-    Folds the [None] token (index 0) into physical block 0 (both its query row
-    and key column) via a normalized segment-selection matrix, then segment-means
-    the (T+1,T+1) attention into (N,N). No magic none_weight, no coordinate
-    mismatch (everything is mapped to the physical frame before aggregation).
-    Diagonal zeroed. Mirrors b0_fast.py::agg_b0 for arbitrary leading dims; the
-    per-chunk reference pins this bit-for-bit (test_per_head_scan_b0).
-    """
-    attn = np.asarray(attn, dtype=np.float64)
-    lead = attn.shape[:-2]
-    K = int(np.prod(lead)) if lead else 1
-    a = attn.reshape(K, seq_len + 1, seq_len + 1)
-
-    reveal_tokens = np.asarray(reveal_tokens, dtype=np.int64)
-    inv_perm = np.asarray(inv_perm, dtype=np.int64)
-    phys_blocks = inv_perm[reveal_tokens // block_len]          # (T,) physical block per revealed token
-    labels = np.empty(seq_len + 1, dtype=np.int64)
-    labels[0] = 0                                              # [None] -> physical block 0
-    labels[1:] = phys_blocks
-    counts = np.bincount(labels, minlength=num_blocks).astype(np.float64)  # every physical block gets block_len revealed tokens (block 0 also gets [None]) -> never 0
-    S = np.zeros((num_blocks, seq_len + 1), dtype=np.float64)
-    S[labels, np.arange(seq_len + 1)] = 1.0
-    S = S / counts[:, None]                                    # segment-mean selection rows
-    A = np.einsum("bt,ktu,cu->kbc", S, a, S, optimize=True)    # (K, N, N)
-    di = np.arange(num_blocks)
-    A[:, di, di] = 0.0
-    A = A.astype(np.float32, copy=False)
-    return A.reshape(lead + (num_blocks, num_blocks)) if lead else A[0]
-
-
 def _attn_to_A_block_predictor_vec(attn, reveal_tokens, inv_perm,
                                    seq_len=SEQ_LEN, num_blocks=N, block_len=BLOCK_LEN):
     """AO-GPT predictor-aligned block graph, vectorized over leading dims.
@@ -154,8 +121,8 @@ def _attn_to_A_block_b1_vec(attn, reveal_tokens, inv_perm,
                             seq_len=SEQ_LEN, num_blocks=N, block_len=BLOCK_LEN):
     """B1: predictor frame (attn[:-1,:-1]) + physical remap, vectorized.
 
-    Like B0, this does a physical-frame block aggregation via segment-mean
-    selection.  The difference from B0 is the predictor-aligned frame:
+    A physical-frame block aggregation via segment-mean selection with
+    predictor-aligned frame (attn[:-1,:-1]):
       - attn[:-1, :-1] (256×256) instead of attn[1:, 1:]
       - Key 0 = [None] → physical block 0
       - Key j (1..255) = real token (j-1) → its physical block
@@ -534,11 +501,11 @@ def _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top, none_mode="old", h
     """Per-sample physical-frame A_lh (L,H,N,N) and heavy A (N,N) from one
     sample's attention stack (L,H,T+1,T+1). Identical math to the loop body.
 
-    none_mode in {"old","b0","b1","predictor","model","content","loss_aligned"} selects the [None]-handling for BOTH the per-head
+    none_mode in {"old","b1","predictor","model","content","loss_aligned"} selects the [None]-handling for BOTH the per-head
     and heavy block graphs ("old" = canonical 0.1-weighted [None] source term,
-    "b0" = none->physical-block-0 fold, "predictor" = original AO-GPT
+    "predictor" = original AO-GPT
     predictor-aligned attn[:-1, :-1] reveal-frame aggregation,
-    "model" = like b0 but keeps model-block labels, NO inv_perm remap,
+    "model" = model-block labels, NO inv_perm remap,
     "content" = attn[1:,1:] only, model-block segment-mean, NO [None], NO inv_perm,
     "loss_aligned" = AR target-block queries to source/content-block keys).
 
@@ -560,7 +527,6 @@ def _per_sample_A(attn_stack, reveal_tokens, inv_perm, n_top, none_mode="old", h
     # with default none_weight), so the OLD path is byte-unchanged.
     _AGG_BY_NONE_MODE = {
         "old": _attn_to_A_block_vec,
-        "b0": _attn_to_A_block_b0_vec,
         "b1": _attn_to_A_block_b1_vec,
         "predictor": _attn_to_A_block_predictor_vec,
         "model": _attn_to_A_block_model_vec,
@@ -736,7 +702,7 @@ def main():
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--split", default="train")
     p.add_argument("--alpha-dep", type=float, default=0.5)
-    p.add_argument("--none-mode", default="old", choices=["old", "b0", "b1", "predictor", "loss_aligned"])
+    p.add_argument("--none-mode", default="old", choices=["old", "b1", "predictor", "loss_aligned"])
     p.add_argument("--out", required=True)
     args = p.parse_args()
 
