@@ -85,6 +85,32 @@ non-selective (null heads collapse under the same global position ablation — s
 - a clean modular causal B+ mechanism;
 - a head-to-head handoff chain.
 
+## Scope: this line is attention-only (the load-bearing limitation)
+
+The entire readout (B65 = order graph from `softmax(QKᵀ)`) is **attention-only**: it probes whether
+the **attention geometry** contains an order-aligned structure, not whether the full hidden state
+contains sample-specific semantic order information. These are different questions —
+*"does attention geometry contain an emergent order-aligned signal?"* vs *"can hidden states
+reconstruct order from semantic context?"*.
+
+> Our current readout is intentionally attention-only. It probes whether the attention graph itself
+> contains an order-aligned structure, not whether the full hidden state contains sample-specific
+> semantic order information. The lack of layout transfer in the attention-only readout
+> (`layout_ood_README.md`: all seeds = lookup) should therefore be interpreted as a limitation of
+> attention-geometry signals, **not** as evidence that the model lacks context-dependent order
+> information altogether.
+
+(中文：当前 readout 是 attention-only，检验的是 attention graph 本身是否含 order-aligned structure，
+而非整个 hidden state 是否含 sample-specific semantic order information。attention-only 在新 layout 上
+不泛化，应解释为 attention geometry signal 的局限，而非模型完全没有 context-dependent order information。)
+
+**Unit of the signal:** slot-pair / position-pair relation (position-implemented), **not**
+sample-specific semantic order inference. The cleanly-discriminating follow-up (line B) is a
+**hidden-state-conditioned** readout evaluated on held-out layouts — where OOD generalization, if
+any, necessarily comes from content (a pure position→rank map fails OOD exactly like attention-only,
+so held-out τ is itself the position-vs-content discriminator). See
+`p3prime-causal-verification` / `p4lite` memory for the line-B design (H-only / B-only / fusion).
+
 ## Next decision
 
 Do not tune P3′ thresholds toward confirmation. An optional bounded power check may rerun only
