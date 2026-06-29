@@ -8,6 +8,7 @@ See docs/superpowers/specs/2026-06-29-p5-attention-scaffolded-utility-controller
 import pathlib, sys
 import numpy as np
 import torch
+import torch.nn as nn
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 _BLOCK = ROOT / "block_lo_arm_order_network"
@@ -179,3 +180,41 @@ def pairwise_loss(z, P):
     bce = -(P * torch.log(p_hat + eps) + (1 - P) * torch.log(1 - p_hat + eps))
     mask = ~torch.eye(N, dtype=torch.bool, device=z.device)
     return (c * bce)[mask].mean()
+
+
+# ── Task 7: Controllers ─────────────────────────────────────────────────────
+
+class BOnlyController(nn.Module):
+    def __init__(self, b_dim, hidden=64):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(b_dim, hidden), nn.GELU(), nn.Linear(hidden, 1))
+
+    def forward(self, B_feat):
+        return self.net(B_feat).squeeze(-1)            # (64,)
+
+
+class ScaffoldedController(nn.Module):
+    def __init__(self, g_B, h_dim, hidden=64, alpha_init=0.01):
+        super().__init__()
+        self.g_B = g_B
+        for p in self.g_B.parameters():
+            p.requires_grad_(False)
+        self.g_H = nn.Sequential(nn.Linear(h_dim, hidden), nn.GELU(), nn.Linear(hidden, 1))
+        # softplus(a)=alpha_init  ->  a = log(exp(alpha)-1)
+        self.a = nn.Parameter(torch.tensor(float(np.log(np.expm1(alpha_init)))))
+
+    @property
+    def alpha(self):
+        return torch.nn.functional.softplus(self.a)
+
+    def _delta(self, H):
+        return self.g_H(H).squeeze(-1)
+
+    def forward(self, B_feat, H):
+        return self.g_B(B_feat) + self.alpha * self._delta(H)
+
+    @torch.no_grad()
+    def residual_ratio(self, B_feat, H):
+        zb = self.g_B(B_feat)
+        dh = self.alpha * self._delta(H)
+        return float(dh.norm() / (zb.norm() + 1e-9))
