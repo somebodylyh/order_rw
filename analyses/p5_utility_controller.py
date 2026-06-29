@@ -218,3 +218,68 @@ class ScaffoldedController(nn.Module):
         zb = self.g_B(B_feat)
         dh = self.alpha * self._delta(H)
         return float(dh.norm() / (zb.norm() + 1e-9))
+
+
+# ── Task 8: Dataset assembly + train loops ───────────────────────────────────
+
+def build_dataset(ckpt_path, M, layer=0, head=1, n_reveals=8, K_rand=4, K_noisy=4,
+                  T=0.3, cand_seed=0, device="cpu"):
+    sc = sample_scaffold(ckpt_path, M, layer=layer, head=head, n_reveals=n_reveals,
+                         device=device)
+    model, chunks, clean_perm, dev = sc["model"], sc["chunks"], sc["clean_perm"], sc["dev"]
+    rng = np.random.default_rng(cand_seed)
+    samples = []
+    for t in range(M):
+        B65 = sc["B"][t]; sigma_B = sc["sigma_B"][t]
+        cands = candidate_orders(sigma_B, rng, n_random=K_rand, n_noisy=K_noisy)
+        labels = list(cands)
+        nlls = utility_pool(model, chunks[t:t+1], [cands[l] for l in labels], clean_perm, dev)
+        nll_by_label = dict(zip(labels, nlls))
+        P = soft_pref([cands[l] for l in labels], nlls, T)
+        H = block_hidden_states(model, chunks[t:t+1], sigma_B, clean_perm, layer, dev)
+        samples.append({"B_feat": block_b_features(B65), "H": H, "P": P,
+                        "sigma_B": sigma_B, "idx_row": chunks[t:t+1],
+                        "nll_by_label": nll_by_label, "cands": cands,
+                        "clean_perm": clean_perm, "model": model, "dev": dev})
+    return samples
+
+
+def _apply_h_mode(samples, h_mode):
+    Hs = [s["H"] for s in samples]
+    if h_mode == "real":
+        return Hs
+    if h_mode == "shuffle":
+        return Hs[1:] + Hs[:1]                          # text-level mismatch (roll by 1)
+    if h_mode == "zero":
+        return [np.zeros_like(h) for h in Hs]
+    if h_mode == "mean":
+        m = np.mean(Hs, axis=0)
+        return [m.copy() for _ in Hs]
+    raise ValueError(h_mode)
+
+
+def train_b_only(samples, epochs=200, lr=1e-2):
+    g_B = BOnlyController(b_dim=samples[0]["B_feat"].shape[1])
+    opt = torch.optim.Adam(g_B.parameters(), lr=lr)
+    for _ in range(epochs):
+        opt.zero_grad(); loss = 0.0
+        for s in samples:
+            z = g_B(torch.tensor(s["B_feat"]))
+            loss = loss + pairwise_loss(z, s["P"])
+        (loss / len(samples)).backward(); opt.step()
+    return g_B
+
+
+def train_residual(samples, g_B, h_dim, epochs=200, lr=1e-2, h_mode="real"):
+    for p in g_B.parameters():
+        p.requires_grad_(False)
+    sc = ScaffoldedController(g_B, h_dim=h_dim)
+    Hs = _apply_h_mode(samples, h_mode)
+    opt = torch.optim.Adam([p for p in sc.parameters() if p.requires_grad], lr=lr)
+    for _ in range(epochs):
+        opt.zero_grad(); loss = 0.0
+        for s, H in zip(samples, Hs):
+            z = sc(torch.tensor(s["B_feat"]), torch.tensor(H))
+            loss = loss + pairwise_loss(z, s["P"])
+        (loss / len(samples)).backward(); opt.step()
+    return sc
