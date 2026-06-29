@@ -1,5 +1,5 @@
 seed,layer,head,tau_none,tau_abl,r2_none,r2_abl,b_verdict,resid_change,noise_floor,ratio,content_driven
-123,0,1,0.6211,0.0773,0.8513,0.9103,mixed_tau_only,4.8e-05,8.5e-05,0.567,False
-123,0,2,0.4797,0.0626,0.9117,0.726,mixed_tau_only,4.3e-05,2.9e-05,1.465,True
-123,0,3,1.0,0.0562,0.9834,0.4773,base_map_collapses,4.6e-05,0.000215,0.216,False
-123,0,4,1.0,0.0561,0.9922,0.6751,base_map_collapses,0.00012,0.000455,0.264,False
+123,0,1,0.6211,0.0773,0.8513,0.51,base_map_collapses,4.8e-05,8.5e-05,0.567,False
+123,0,2,0.4797,0.0626,0.9117,0.3446,base_map_collapses,4.3e-05,2.9e-05,1.465,True
+123,0,3,1.0,0.0562,0.9834,0.0816,base_map_collapses,4.6e-05,0.000215,0.216,False
+123,0,4,1.0,0.0561,0.9922,0.593,base_map_collapses,0.00012,0.000455,0.264,False

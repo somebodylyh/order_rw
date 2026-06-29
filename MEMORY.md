@@ -2,7 +2,8 @@
 
 ## 2026-06-29: P3′ causal verification
 
-- [P3′ Causal Verification 2026-06-29](analyses/p3prime_causal_README.md) — L0 global physical-order carrier: P3′-B joint τ+R², P3′-C residual>floor, D says OV degenerate and QK path matters; A is calibration/redundancy only; not B+→C (needs P4).
+- [P3′ Causal Verification 2026-06-29](analyses/p3prime_causal_README.md) — final verdict **mixed/departure, not B+ confirmed**. QK-sensitive, same-head OV/output-degenerate, parallel-copy redundancy; P3′-B only partial and P3′-C not seed-uniform. P2 remains correlational B+; content recovery needs multi-layout P4.
+- [Final mechanism synthesis 2026-06-29](analyses/final_mechanism_synthesis_README.md) — model-frame correction → canonical L0 emergence → P2 correlational B+ → P3′ mixed causal boundary.
 
 ## 2026-06-21: seed123 CDL/g_beta closed-loop pipeline
 

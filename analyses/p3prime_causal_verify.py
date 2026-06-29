@@ -17,6 +17,7 @@ for _path in (str(_ROOT), str(_BLOCK_DIR)):
 
 from analyses.physical_signal_source import (  # noqa: E402
     P2_CARRIERS,
+    _stack,
     block_swap_chunk,
     carrier_b65_per_text,
     row_normalize_l1,
@@ -380,8 +381,51 @@ def _b_verdict(tau_none, tau_abl, r2_none, r2_abl, drop=0.3):
     return "intact"
 
 
+def _base_map_cross_r2(B_table_src, B_eval, mask, normalize=False):
+    """How well the CLEAN slot-mean fixed-map table predicts `B_eval`.
+
+    B_hat is the content-free slot-pair mean over `B_table_src` (the clean carrier
+    B65). Predicting held-out CLEAN B keeps R² high; predicting the position-ablated
+    B drops R² IF the ablation actually disrupts that fixed map. This is the correct
+    base-map-survival metric: unlike a self-referential slot_only_r2(B_abl), a
+    degenerate-but-cross-text-consistent ablated pattern does NOT score high here,
+    because it is scored against the *clean* table, not its own."""
+    Xtr = _stack(B_table_src, mask, normalize)
+    Xte = _stack(B_eval, mask, normalize)
+    B_hat = Xtr.mean(axis=0)
+    ss_res = ((Xte - B_hat) ** 2).sum()
+    ss_tot = ((Xte - Xte.mean()) ** 2).sum() + 1e-12
+    return float(1.0 - ss_res / ss_tot)
+
+
+def _b_per_head_row(head, clean_B, abl_B, tau_none, tau_abl, mask):
+    """Build one P3'-B per-head row using the clean-predict base-map R².
+
+    tau_abl/abl_B MUST come from the POSITION ablation (pe_mode='both'), never from
+    the A0 self-QK patch. r2_none/r2_abl both score against the SAME clean fixed-map
+    table (a train-half of the clean carrier B65): r2_none predicts the held-out
+    clean half, r2_abl predicts the position-ablated B. A drop in r2_abl means the
+    clean fixed map no longer explains the attention -> the base map was disrupted.
+    (r2_abl_selfref keeps the old self-referential value for transparency; NOT used
+    in the verdict.)"""
+    n_tr = max(1, len(clean_B) // 2)
+    table_src = clean_B[:n_tr]
+    clean_eval = clean_B[n_tr:] if len(clean_B) - n_tr >= 1 else clean_B
+    r2_none = _base_map_cross_r2(table_src, clean_eval, mask)
+    r2_abl = _base_map_cross_r2(table_src, abl_B, mask)
+    return {
+        "head": head,
+        "tau_none": tau_none,
+        "tau_abl": tau_abl,
+        "r2_none": r2_none,
+        "r2_abl": r2_abl,
+        "r2_abl_selfref": slot_only_r2(abl_B, mask, normalize=False),
+        "verdict": _b_verdict(tau_none, tau_abl, r2_none, r2_abl),
+    }
+
+
 def b_position_ablation(ckpt_path, layer, heads, M=12, n_reveals=8, device="cpu"):
-    """Ablate the position path and require joint tau + R² collapse."""
+    """Ablate the position path and require joint tau + base-map collapse."""
     mask = valid_edge_mask(65)
     none = p3_canonical_b65(ckpt_path, layer, heads, M=M, n_reveals=n_reveals, device=device)
     abl = p3_canonical_b65(
@@ -393,22 +437,11 @@ def b_position_ablation(ckpt_path, layer, heads, M=12, n_reveals=8, device="cpu"
         device=device,
         pe_mode="both",
     )
-    per_head = []
-    for head in heads:
-        tau_none = _mean_abs(none[head][1])
-        tau_abl = _mean_abs(abl[head][1])
-        r2_none = slot_only_r2(none[head][0], mask, normalize=False)
-        r2_abl = slot_only_r2(abl[head][0], mask, normalize=False)
-        per_head.append(
-            {
-                "head": head,
-                "tau_none": tau_none,
-                "tau_abl": tau_abl,
-                "r2_none": r2_none,
-                "r2_abl": r2_abl,
-                "verdict": _b_verdict(tau_none, tau_abl, r2_none, r2_abl),
-            }
-        )
+    per_head = [
+        _b_per_head_row(head, none[head][0], abl[head][0],
+                        _mean_abs(none[head][1]), _mean_abs(abl[head][1]), mask)
+        for head in heads
+    ]
     return {"layer": layer, "per_head": per_head}
 
 
@@ -629,19 +662,14 @@ def run_seed(seed, root="runs/handoff_overnight", out_dir=None, M=8, n_reveals=8
     b = {
         "layer": layer,
         "per_head": [
-            {
-                "head": head,
-                "tau_none": _mean_abs(clean[head][1]),
-                "tau_abl": _mean_abs(patched_all[head][1]),
-                "r2_none": slot_only_r2(clean[head][0], valid_edge_mask(65), normalize=False),
-                "r2_abl": slot_only_r2(abl[head][0], valid_edge_mask(65), normalize=False),
-                "verdict": _b_verdict(
-                    _mean_abs(clean[head][1]),
-                    _mean_abs(patched_all[head][1]),
-                    slot_only_r2(clean[head][0], valid_edge_mask(65), normalize=False),
-                    slot_only_r2(abl[head][0], valid_edge_mask(65), normalize=False),
-                ),
-            }
+            _b_per_head_row(
+                head,
+                clean[head][0],
+                abl[head][0],
+                _mean_abs(clean[head][1]),
+                _mean_abs(abl[head][1]),   # POSITION-ablation tau, not the A0 self-QK patch
+                valid_edge_mask(65),
+            )
             for head in heads
         ],
     }
@@ -704,19 +732,14 @@ def run_seed(seed, root="runs/handoff_overnight", out_dir=None, M=8, n_reveals=8
     b_null = {
         "layer": layer,
         "per_head": [
-            {
-                "head": head,
-                "tau_none": _mean_abs(null_clean[head][1]),
-                "tau_abl": _mean_abs(null_abl[head][1]),
-                "r2_none": slot_only_r2(null_clean[head][0], valid_edge_mask(65), normalize=False),
-                "r2_abl": slot_only_r2(null_abl[head][0], valid_edge_mask(65), normalize=False),
-                "verdict": _b_verdict(
-                    _mean_abs(null_clean[head][1]),
-                    _mean_abs(null_abl[head][1]),
-                    slot_only_r2(null_clean[head][0], valid_edge_mask(65), normalize=False),
-                    slot_only_r2(null_abl[head][0], valid_edge_mask(65), normalize=False),
-                ),
-            }
+            _b_per_head_row(
+                head,
+                null_clean[head][0],
+                null_abl[head][0],
+                _mean_abs(null_clean[head][1]),
+                _mean_abs(null_abl[head][1]),
+                valid_edge_mask(65),
+            )
             for head in null_heads
         ],
     }

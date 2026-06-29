@@ -23,4 +23,8 @@ CKPT = ROOT / "runs/handoff_overnight/seed2/ckpt_step10000.pt"
 def test_b_position_ablation_runs():
     res = b_position_ablation(str(CKPT), 0, [2], M=6, n_reveals=4)
     row = res["per_head"][0]
-    assert set(row) == {"head", "tau_none", "tau_abl", "r2_none", "r2_abl", "verdict"}
+    assert set(row) == {"head", "tau_none", "tau_abl", "r2_none", "r2_abl",
+                        "r2_abl_selfref", "verdict"}
+    # the clean fixed-map table predicts held-out clean B better than the
+    # position-ablated B: r2 drops under ablation (base-map disruption is visible).
+    assert row["r2_none"] > row["r2_abl"]

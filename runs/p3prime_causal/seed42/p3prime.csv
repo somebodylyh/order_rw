@@ -1,2 +1,2 @@
 seed,layer,head,tau_none,tau_abl,r2_none,r2_abl,b_verdict,resid_change,noise_floor,ratio,content_driven
-42,0,2,0.1354,0.0218,0.8674,0.4545,mixed_r2_only,3e-05,9.3e-05,0.327,False
+42,0,2,0.8385,0.0646,0.8558,0.3453,base_map_collapses,9e-06,6.9e-05,0.124,False
