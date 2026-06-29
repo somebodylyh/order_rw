@@ -70,6 +70,13 @@ hard threshold (e.g. 0.01) at first — use statistical significance + effect si
 **stop**: under fixed layout the attention scaffold is already sufficient and there is no utility
 room for H. (This is a publishable negative: "attention scaffold is utility-sufficient".)
 
+**Oracle vs learnable (necessary, not sufficient).** This is *candidate-pool oracle headroom*: it
+establishes only that a better order exists in the pool, **not** that the controller can predict it
+from `[B,H]`. **A positive gate is necessary but not sufficient for a learnable H contribution;
+Phase 0 tests learnability via held-out ΔNLL / regret and the shuffled-H controls.** A positive gate
+with a null B+H result therefore means "utility room exists but H/controller did not learn it" —
+**not** an experiment failure.
+
 ---
 
 ## 3. Candidate orders (diverse, scaffold-centred but not scaffold-only)
@@ -87,16 +94,28 @@ differ from σ_B, but anchored near the scaffold for residual learning:
 
 The pool must not be only σ_B-derived, or the headroom is artificially capped.
 
+**Best-candidate distribution monitor (teacher-noise guard).** Report the identity distribution of
+the best (min-NLL) candidate: `% best = σ_B / σ_CDL / σ_phys / σ_random / σ_noisy_B / σ_local`. If
+random candidates dominate the best-order distribution **without** consistent validation gains,
+treat the utility teacher as noisy (high `order_nll` variance) and increase candidate averaging
+(more reveal samples per NLL estimate) / reduce random weight — do **not** delete random orders
+(they guard diversity), just monitor.
+
 ---
 
 ## 4. Utility teacher: soft preference (not hard argmin)
 
-Candidate NLLs can be close; hard argmin is noisy. Build a **soft pairwise** teacher per sample:
+Candidate NLLs can be close; hard argmin is noisy. Build a **soft pairwise** teacher per sample,
+using a **normalized temperature** (so absolute NLL scale does not affect sharpness):
 
 ```
-w_k  = softmax(-NLL_k / T)                          # temperature-weighted candidate weights
+w_k  = softmax(-(NLL_k - min_k NLL_k) / T)          # normalized, temperature-weighted weights
 P_ij = Σ_k w_k · 1[i before j in σ_k]               # soft "block i revealed before block j"
 ```
+
+**T is a hyperparameter selected on VALIDATION texts** (by B-only utility-regret / pairwise
+validation loss), never on test. Sweep e.g. `T ∈ {0.01, 0.03, 0.1, 0.3, 1.0} × median_NLL_gap`.
+Too small → hard argmin (noisy); too large → averaged order (no signal).
 
 Controller predicts `P_hat_ij = sigmoid(z_i - z_j)`. Loss is confidence-weighted BCE:
 
@@ -132,6 +151,13 @@ the block residual (`path_patch_handoff.capture_block_input`) and pooling token 
 via the reveal/block mapping (`per_head_order_scan` block labels). Layer of H is a config (try
 L0/L1/L2/L3).
 
+**Extraction-context consistency (no order leakage).** `B` and `H` for a sample MUST be extracted
+from the **same frozen AO-GPT forward pass** under the **same reveal/order context**. The first
+version fixes both to the canonical scaffold rollout context (`σ_B_current` / the existing canonical
+B65 extraction context). Do **not** extract `H` under a different candidate order than `B` unless
+explicitly running a labelled ablation — mismatched contexts conflate the residual with order
+leakage.
+
 ---
 
 ## 6. Data split (TEXT-level, fixed layout)
@@ -158,6 +184,12 @@ sample-level utility patterns).
 - `Utility regret = NLL(pred order) − min_k NLL(candidate order)` — want B+H regret < B-only regret.
 - `H-shuffle drop = NLL(B+shuffled-H) − NLL(B+H)` — want the shuffle to **lose most/all** of the gain.
 
+**Reporting rule (hard-order forward NLL, not teacher loss).** All reported ΔNLL / regret /
+shuffle-drop metrics MUST be computed by converting the controller scores `z` into a **hard order**
+`σ_pred = argsort(-z)`, then **re-running** `model.forward_fn(idx, token_order_of(σ_pred))` to get
+the real downstream NLL. The training pairwise loss (§4) is an optimization objective, **not** a
+reporting metric — P5 success rests on real downstream NLL, never on teacher-imitation loss.
+
 **Success requires all three:**
 1. `ΔNLL(B+H − B-only) < 0` on held-out texts;
 2. `B+shuffled-H` loses most/all of the gain;
@@ -173,6 +205,11 @@ never a P5 success/failure criterion.
 **Phase 0 — method validation on ONE checkpoint** (preferably the seed123 strong ckpt):
 headroom gate → utility teacher → train B-only → freeze → train B+H residual → controls. Decide
 whether the paradigm works (success criteria §7). Do NOT scan ckpts here.
+
+**Fastest early signal (do these three first):** the **headroom gate** (§2) + the **best-candidate
+distribution** (§3) + the **B-only utility baseline** (Stage 1) are the cheapest checks and tell you
+soonest whether P5 is worth continuing — a failed headroom gate or a random-dominated best-candidate
+distribution stops the line before any residual training.
 
 **Phase 1 — only if Phase 0 is positive — the co-adaptation curve:**
 scan `pre-gbeta / gbeta+2k / gbeta+5k / gbeta+10k` checkpoints; for each, run B-only / B+H /
