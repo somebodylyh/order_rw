@@ -48,6 +48,20 @@ __pycache__/
 *.json
 !package.json
 !tsconfig.json
+*.jsonl
+*.wandb
+*.pkl
+*.out
+*.html
+
+# wandb run logs (top-level)
+wandb/
+
+# Large binaries / personal docs (never commit)
+*.zip
+*.pdf
+*.pptx
+by/
 
 # Python bytecode
 *.pyc
