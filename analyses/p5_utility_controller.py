@@ -283,3 +283,51 @@ def train_residual(samples, g_B, h_dim, epochs=200, lr=1e-2, h_mode="real"):
             loss = loss + pairwise_loss(z, s["P"])
         (loss / len(samples)).backward(); opt.step()
     return sc
+
+
+# ── Task 9: Hard-order forward-NLL metrics + verdict ─────────────────────────
+
+@torch.no_grad()
+def predict_order(controller, B_feat, H=None):
+    B = torch.tensor(B_feat)
+    z = controller(B) if H is None else controller(B, torch.tensor(H))
+    return np.argsort(-z.cpu().numpy()).astype(np.int64)
+
+
+@torch.no_grad()
+def eval_controller_nll(samples, controller, h_list=None):
+    out = []
+    for i, s in enumerate(samples):
+        H = None if h_list is None else h_list[i]
+        sigma = predict_order(controller, s["B_feat"], H)
+        out.append(order_nll(s["model"], s["idx_row"], sigma, s["clean_perm"], s["dev"]))
+    return out
+
+
+def _regret(samples, nll_pred):
+    return float(np.mean([nll_pred[i] - min(s["nll_by_label"].values())
+                          for i, s in enumerate(samples)]))
+
+
+def p5_metrics(samples, g_B, sc_real, sc_shuf, sc_zero, sc_mean):
+    n_b = eval_controller_nll(samples, g_B)
+    n_bh = eval_controller_nll(samples, sc_real, _apply_h_mode(samples, "real"))
+    n_sh = eval_controller_nll(samples, sc_shuf, _apply_h_mode(samples, "shuffle"))
+    n_zero = eval_controller_nll(samples, sc_zero, _apply_h_mode(samples, "zero"))
+    n_mean = eval_controller_nll(samples, sc_mean, _apply_h_mode(samples, "mean"))
+    mb, mbh = float(np.mean(n_b)), float(np.mean(n_bh))
+    m = {"nll_b_only": mb, "nll_bh": mbh,
+         "delta_nll": mbh - mb,
+         "regret_bonly": _regret(samples, n_b), "regret_bh": _regret(samples, n_bh),
+         "h_shuffle_drop": float(np.mean(n_sh)) - mbh,
+         "zero_match": bool(abs(float(np.mean(n_zero)) - mbh) < 0.005),
+         "mean_match": bool(abs(float(np.mean(n_mean)) - mbh) < 0.005)}
+    m["verdict"] = classify_p5(m)
+    return m
+
+
+def classify_p5(m):
+    gain = m["delta_nll"] < 0
+    content = m["h_shuffle_drop"] > 0.5 * abs(m["delta_nll"])     # shuffle loses most gain
+    not_capacity = (not m["zero_match"]) and (not m["mean_match"])
+    return "utility_gain" if (gain and content and not_capacity) else "no_gain"
