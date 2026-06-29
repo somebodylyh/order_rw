@@ -15,6 +15,21 @@
 
 set -euo pipefail
 
+cat >&2 <<'EOF'
+Joint head-gated g_beta training is intentionally not launched by this script yet.
+
+The current train_clean_aogpt.py integration supports frozen/read-only
+head-gated controllers via --gbeta-input-mode layer_heads. It does not yet
+implement differentiable in-loop g_beta updates, --gbeta-lr,
+--gbeta-entropy-penalty, or --gbeta-stopgrad-head-features.
+
+Run frozen feedback first:
+  bash scripts/queue_head_gated_gbeta_feedback.sh smoke|full ...
+
+Then run model-frame head drift diagnostics before implementing true joint mode.
+EOF
+exit 2
+
 G_BETA_CKPT="${1:?usage: $0 <g_beta_best.pt> <base_ckpt.pt> <out_dir>}"
 BASE_CKPT="${2:?usage: $0 <g_beta_best.pt> <base_ckpt.pt> <out_dir>}"
 OUT_DIR="${3:?usage: $0 <g_beta_best.pt> <base_ckpt.pt> <out_dir>}"

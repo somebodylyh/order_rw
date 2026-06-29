@@ -45,7 +45,7 @@ def _ckpt(step: int, ckpt_dir=None) -> str:
     return str(d / f"ckpt_step{step}.pt")
 
 
-def _build(step, head, M, batch_size, seed, out_path, device, fwd_batch, ckpt_dir=None, none_mode="b0"):
+def _build(step, head, M, batch_size, seed, out_path, device, fwd_batch, ckpt_dir=None, none_mode="b1"):
     if out_path is not None and pathlib.Path(out_path).exists():
         d = np.load(out_path, allow_pickle=True)
         sig = np.concatenate([d["train_sigma_T"], d["val_sigma_T"], d["test_sigma_T"]])
@@ -126,8 +126,8 @@ def main():
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--fwd-batch", type=int, default=8,
                     help="forward batch for attention extraction; keep small on a shared GPU")
-    ap.add_argument("--none-mode", default="b0", choices=["b0", "b1", "predictor", "model", "content"],
-                    help="block-aggregation mode (default b0)")
+    ap.add_argument("--none-mode", default="b1", choices=["b1", "predictor", "model", "content"],
+                    help="block-aggregation mode (B1=65-node)")
     ap.add_argument("--out", default=str(PKG / "batch_readout" / "logs" / "phase33_gbeta"))
     ap.add_argument("--cross-steps", type=int, nargs="*", default=[10000, 20000])
     ap.add_argument("--ckpt-dir", default=str(CKPT_DIR_DEFAULT),

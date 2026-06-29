@@ -2,9 +2,9 @@
 
 Mirrors `batch_readout.dataset_batch.build_dataset`, but swaps the B-extraction
 front-end: instead of the top-4-variance *head-mean* heavy graph under the OLD
-none-token handling, it extracts ONE selected head's block graph under the **B0
-canonical extraction** (`none_mode="b0"`), which the §3.0 full-ladder gate sealed
-as canonical (winner L0H0, 45/45 stable).
+none-token handling, it extracts ONE selected head's block graph under the **B1
+canonical extraction** (`none_mode="b1"` = 65-node), which the §3.0 full-ladder
+gate sealed as canonical (winner L0H0, 45/45 stable).
 
 Pipeline (single ckpt, single head):
     load model + M*batch_size chunks
@@ -14,7 +14,7 @@ Pipeline (single ckpt, single head):
     -> _build_from_B_array: CDL teacher σ_T + train/val/test split + save
 
 Everything downstream (CDL teacher labels, split, training, eval) is reused
-verbatim from NR-1 / BR-1 so the only new logic is head selection + B0 wiring.
+verbatim from NR-1 / BR-1 so the only new logic is head selection + B1 wiring.
 This keeps `offline scan == g_β pretrain dataset == hook input` on one extraction
 path (the mismatch guard from spec §3.2).
 """
@@ -51,7 +51,7 @@ def extract_selected_head_batch_mean_B(
     M: int,
     batch_size: int,
     seed: int,
-    none_mode: str = "b0",
+    none_mode: str = "b1",
     device: str = "cuda:0",
     split: str = "train",
     fwd_batch: int = 64,
@@ -92,7 +92,7 @@ def build_selected_head_dataset(
     M: int,
     batch_size: int,
     seed: int,
-    none_mode: str = "b0",
+    none_mode: str = "b1",
     alpha_dep: float = 0.5,
     out_path: str | None = None,
     train_frac: float = 0.8,
@@ -101,7 +101,7 @@ def build_selected_head_dataset(
     split: str = "train",
     fwd_batch: int = 64,
 ):
-    """End-to-end: extract selected-head B0 batch-mean B, CDL-label, split, save.
+    """End-to-end: extract selected-head B1 (65-node) batch-mean B, CDL-label, split, save.
 
     `head` is (layer, head_index). With `train_frac`/`val_frac` < 1 the remainder
     becomes the test split. Returns the `_build_from_B_array` info dict.

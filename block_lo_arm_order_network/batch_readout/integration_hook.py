@@ -37,6 +37,7 @@ class FrozenBetaHook:
         g_beta_ckpt: str,
         mode: str = "argsort",
         tau: float = 1.0,
+        reverse: bool = False,
         seed=None,
         device: str = "cuda:0",
     ):
@@ -52,6 +53,7 @@ class FrozenBetaHook:
         self.model.to(self.device)
         self.mode = mode
         self.tau = float(tau)
+        self.reverse = bool(reverse)
         # CPU generator -- the PL sampler runs on CPU tensors.
         self.generator = torch.Generator(device="cpu")
         if seed is not None:
@@ -70,5 +72,9 @@ class FrozenBetaHook:
         B[:, diag, diag] = 0.0
         z = self.model(B).cpu()
         if self.mode == "argsort":
-            return pl_argsort(z)[0]
-        return pl_sample(z, tau=self.tau, generator=self.generator)[0]
+            sigma = pl_argsort(z)[0]
+        else:
+            sigma = pl_sample(z, tau=self.tau, generator=self.generator)[0]
+        if self.reverse:
+            sigma = torch.flip(sigma, dims=[0])
+        return sigma

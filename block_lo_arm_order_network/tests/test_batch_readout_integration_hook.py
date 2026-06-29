@@ -17,6 +17,10 @@ sys.path.insert(0, str(ROOT / "block_lo_arm_order_network"))
 def fake_g_beta_ckpt(tmp_path):
     from batch_readout.model import FlattenReadout
     m = FlattenReadout(N=64, hidden=(64,))
+    with torch.no_grad():
+        for param in m.parameters():
+            param.zero_()
+        m.net[-1].bias.copy_(torch.arange(63, -1, -1, dtype=torch.float32))
     p = tmp_path / "fake_gbeta.pt"
     torch.save({"model": m.state_dict(), "config": {"model_name": "flatten", "N": 64, "hidden": (64,)}}, p)
     return str(p)
@@ -47,6 +51,14 @@ def test_argsort_is_deterministic_across_calls(fake_g_beta_ckpt):
     a = hook.step(A)
     b = hook.step(A)
     assert torch.equal(a, b)
+
+
+def test_reverse_flips_argsort_order(fake_g_beta_ckpt):
+    from batch_readout.integration_hook import FrozenBetaHook
+    A = torch.randn(8, 64, 64)
+    base = FrozenBetaHook(g_beta_ckpt=fake_g_beta_ckpt, mode="argsort", device="cpu")
+    rev = FrozenBetaHook(g_beta_ckpt=fake_g_beta_ckpt, mode="argsort", reverse=True, device="cpu")
+    assert torch.equal(rev.step(A), torch.flip(base.step(A), dims=[0]))
 
 
 def test_rejects_bad_attention_shape(fake_g_beta_ckpt):
