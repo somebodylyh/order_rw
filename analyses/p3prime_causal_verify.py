@@ -71,10 +71,14 @@ def _run_intervened_b65(
     pe_mode=None,
     corrupt_fn=None,
     attn_transform=None,
+    bundle=None,
 ):
-    model, chunks, clean_perm, dev, _ = _load_model_and_chunks(
-        ckpt_path, M, seed=0, device=device, split="train"
-    )
+    if bundle is None:
+        model, chunks, clean_perm, dev, _ = _load_model_and_chunks(
+            ckpt_path, M, seed=0, device=device, split="train"
+        )
+    else:
+        model, chunks, clean_perm, dev = bundle
     inv = clean_perm.inv_perm_model_to_phys.cpu().numpy()
     if corrupt_fn is not None:
         chunks = corrupt_fn(chunks)
@@ -125,6 +129,7 @@ def p3_canonical_b65(
     pe_mode=None,
     corrupt_fn=None,
     attn_transform=None,
+    bundle=None,
 ):
     """Intervention-aware canonical B65 builder.
 
@@ -138,6 +143,15 @@ def p3_canonical_b65(
         raise ValueError(f"pe_mode must be one of {_ALLOWED_PE_MODES} or None")
 
     if pe_mode is None and corrupt_fn is None and attn_transform is None:
+        if bundle is not None:
+            return _p3_canonical_b65_from_bundle(
+                bundle,
+                layer,
+                heads,
+                M=M,
+                n_reveals=n_reveals,
+                fixed_reveal_seed=fixed_reveal_seed,
+            )
         return {
             head: carrier_b65_per_text(
                 ckpt_path,
@@ -162,7 +176,99 @@ def p3_canonical_b65(
         pe_mode=pe_mode,
         corrupt_fn=corrupt_fn,
         attn_transform=attn_transform,
+        bundle=bundle,
     )
+
+
+def _load_p3_bundle(ckpt_path, M, device="cpu"):
+    model, chunks, clean_perm, dev, _ = _load_model_and_chunks(
+        ckpt_path, M, seed=0, device=device, split="train"
+    )
+    return model, chunks, clean_perm, dev
+
+
+@torch.no_grad()
+def _p3_canonical_b65_from_bundle(
+    bundle,
+    layer,
+    heads,
+    M=24,
+    n_reveals=32,
+    fixed_reveal_seed=0,
+    pe_mode=None,
+    corrupt_fn=None,
+    attn_transform=None,
+):
+    model, chunks, clean_perm, dev = bundle
+    inv = clean_perm.inv_perm_model_to_phys.cpu().numpy()
+    reveals = random_reveal_orders(n_reveals, fixed_reveal_seed)
+    results = {head: ([], []) for head in heads}
+    ctx = contextlib.nullcontext(model) if pe_mode is None else pe_ablation(model, pe_mode)
+    if corrupt_fn is not None:
+        chunks = corrupt_fn(chunks)
+    with ctx:
+        for text_index in range(M):
+            accum = None
+            for reveal in reveals:
+                po = torch.from_numpy(np.asarray(reveal)[None, :]).to(dev)
+                _, _, attn_list = model.forward_fn(
+                    chunks[text_index : text_index + 1].to(dev),
+                    po,
+                    return_attentions=True,
+                )
+                attn = torch.stack(attn_list, dim=0).detach().cpu().numpy()[:, 0]
+                if attn_transform is not None:
+                    attn = attn_transform(attn, layer)
+                A = _attn_to_A_block_loss_aligned_with_none_vec(attn, reveal, inv)
+                accum = A.astype(np.float64) if accum is None else accum + A
+            A_mean = accum / float(n_reveals)
+            for head in heads:
+                B = build_none_separated_B(A_mean[layer, head])
+                tau = float(discovery_metrics(rollout_by_method(B, "C-D+L"))["tau_vs_l2r"])
+                results[head][0].append(B)
+                results[head][1].append(tau)
+    return results
+
+
+@torch.no_grad()
+def _carrier_b65_per_text_bundle(bundle, layer, head, M=24, n_reveals=32,
+                                 fixed_reveal_seed=0, return_halves=False):
+    model, chunks, clean_perm, dev = bundle
+    inv = clean_perm.inv_perm_model_to_phys.cpu().numpy()
+    reveals = random_reveal_orders(n_reveals, fixed_reveal_seed)
+    half = n_reveals // 2
+    B_list, tau_list = [], []
+    halfA_list, halfB_list = [], []
+    for text_index in range(M):
+        accum = None
+        accum_a = None
+        accum_b = None
+        for reveal_index, reveal in enumerate(reveals):
+            po = torch.from_numpy(np.asarray(reveal)[None, :]).to(dev)
+            _, _, attn_list = model.forward_fn(
+                chunks[text_index : text_index + 1].to(dev),
+                po,
+                return_attentions=True,
+            )
+            attn = torch.stack(attn_list, dim=0).detach().cpu().numpy()[:, 0]
+            A = _attn_to_A_block_loss_aligned_with_none_vec(attn, reveal, inv)
+            accum = A.astype(np.float64) if accum is None else accum + A
+            if return_halves:
+                if reveal_index < half:
+                    accum_a = A.astype(np.float64) if accum_a is None else accum_a + A
+                else:
+                    accum_b = A.astype(np.float64) if accum_b is None else accum_b + A
+        B = build_none_separated_B((accum / n_reveals)[layer, head])
+        B_list.append(B)
+        tau_list.append(float(discovery_metrics(rollout_by_method(B, "C-D+L"))["tau_vs_l2r"]))
+        if return_halves:
+            nA = max(half, 1)
+            nB = max(n_reveals - half, 1)
+            halfA_list.append(build_none_separated_B((accum_a / nA)[layer, head]))
+            halfB_list.append(build_none_separated_B((accum_b / nB)[layer, head]))
+    if return_halves:
+        return B_list, tau_list, halfA_list, halfB_list
+    return B_list, tau_list
 
 
 def causal_uniform_transform(heads):
@@ -312,9 +418,9 @@ def make_block_swap_corrupt(swaps, block_len=4):
     def _corrupt(chunks):
         out = chunks.clone()
         for index in range(out.shape[0]):
-            row = out[index].cpu().numpy()
+            row = out[index].detach().cpu()
             swapped = block_swap_chunk(row, swaps, block_len=block_len)
-            out[index] = torch.from_numpy(swapped).to(out.device)
+            out[index] = torch.as_tensor(swapped, device=out.device)
         return out
 
     return _corrupt
@@ -418,13 +524,14 @@ def d_locus(ckpt_path, layer, head, M=8, n_reveals=8, device="cpu"):
             pe_mode="both",
         )[head][1]
     )
+    tau_clean_scan = _canonical_head_tau(ckpt_path, layer, head, M, device, ablate=None)
     tau_ov = _canonical_head_tau(ckpt_path, layer, head, M, device, ablate=(layer, [head]))
     return {
         "tau_clean": tau_clean,
         "tau_pe": tau_pe,
         "tau_ovablate": tau_ov,
         "qk_changes": bool((tau_clean - tau_pe) > 0.3),
-        "ov_degenerate": bool(abs(tau_clean - tau_ov) < 0.1),
+        "ov_degenerate": bool(abs(tau_clean_scan - tau_ov) < 0.1),
     }
 
 
@@ -443,14 +550,176 @@ def run_seed(seed, root="runs/handoff_overnight", out_dir=None, M=8, n_reveals=8
     layer, heads = P2_CARRIERS[seed]
     ckpt = f"{root}/seed{seed}/ckpt_step10000.pt"
     null_heads = canonical_null_heads(ckpt, layer, heads, k=2, M=max(2, M // 2), device=device)
+    bundle = _load_p3_bundle(ckpt, M, device=device)
 
-    a0 = a0_self_qk_calibration(ckpt, layer, heads, M=M, n_reveals=n_reveals, device=device)
-    a1_local = a1_head_local(ckpt, layer, heads, M=M, n_reveals=n_reveals, device=device)
-    a1_loko = a1_leave_k_out(ckpt, layer, heads, M=M, n_reveals=n_reveals, device=device)
-    b = b_position_ablation(ckpt, layer, heads, M=M, n_reveals=n_reveals, device=device)
-    c = c_content_residual(ckpt, layer, heads, M=M, n_reveals=n_reveals, device=device)
+    clean = _p3_canonical_b65_from_bundle(
+        bundle,
+        layer,
+        heads,
+        M=M,
+        n_reveals=n_reveals,
+        fixed_reveal_seed=0,
+    )
+    patched_all = _p3_canonical_b65_from_bundle(
+        bundle,
+        layer,
+        heads,
+        M=M,
+        n_reveals=n_reveals,
+        fixed_reveal_seed=0,
+        attn_transform=causal_uniform_transform(heads),
+    )
+    a0 = {
+        "layer": layer,
+        "load_bearing": False,
+        "per_head": [
+            {
+                "head": head,
+                "tau_clean": _mean_abs(clean[head][1]),
+                "tau_selfpatch": _mean_abs(patched_all[head][1]),
+            }
+            for head in heads
+        ],
+    }
+    patched_by_head = {
+        patched_head: _p3_canonical_b65_from_bundle(
+            bundle,
+            layer,
+            heads,
+            M=M,
+            n_reveals=n_reveals,
+            fixed_reveal_seed=0,
+            attn_transform=causal_uniform_transform([patched_head]),
+        )
+        for patched_head in heads
+    }
+    a1_local = {
+        "layer": layer,
+        "delta": {
+            patched_head: {
+                read_head: _mean_abs(clean[read_head][1]) - _mean_abs(patched_by_head[patched_head][read_head][1])
+                for read_head in heads
+            }
+            for patched_head in heads
+        },
+        "parallel_independent": True,
+    }
+    off_diag = [
+        abs(a1_local["delta"][patched_head][read_head])
+        for patched_head in heads
+        for read_head in heads
+        if patched_head != read_head
+    ]
+    a1_local["parallel_independent"] = bool(max(off_diag) < 0.1) if off_diag else True
+    a1_loko = {"layer": layer, "full_tau": _cluster_tau({h: clean[h][0] for h in heads}, heads),
+               "subset_tau": [{"kept": [h for h in heads if h != drop],
+                                "tau": _cluster_tau({h: clean[h][0] for h in heads},
+                                                    [h for h in heads if h != drop])}
+                               for drop in heads] if len(heads) > 1 else [],
+               "single_head": bool(len(heads) == 1)}
+    abl = _p3_canonical_b65_from_bundle(
+        bundle,
+        layer,
+        heads,
+        M=M,
+        n_reveals=n_reveals,
+        fixed_reveal_seed=0,
+        pe_mode="both",
+    )
+    b = {
+        "layer": layer,
+        "per_head": [
+            {
+                "head": head,
+                "tau_none": _mean_abs(clean[head][1]),
+                "tau_abl": _mean_abs(patched_all[head][1]),
+                "r2_none": slot_only_r2(clean[head][0], valid_edge_mask(65), normalize=False),
+                "r2_abl": slot_only_r2(abl[head][0], valid_edge_mask(65), normalize=False),
+                "verdict": _b_verdict(
+                    _mean_abs(clean[head][1]),
+                    _mean_abs(patched_all[head][1]),
+                    slot_only_r2(clean[head][0], valid_edge_mask(65), normalize=False),
+                    slot_only_r2(abl[head][0], valid_edge_mask(65), normalize=False),
+                ),
+            }
+            for head in heads
+        ],
+    }
+    c = {
+        "layer": layer,
+        "per_head": [],
+    }
+    corrupt = make_block_swap_corrupt(((1, 2),))
+    for head in heads:
+        clean_B, clean_tau, halfA, halfB = _carrier_b65_per_text_bundle(
+            bundle,
+            layer,
+            head,
+            M=M,
+            n_reveals=n_reveals,
+            fixed_reveal_seed=0,
+            return_halves=True,
+        )
+        floor = within_text_noise_floor(halfA, halfB, valid_edge_mask(65))
+        corr = _p3_canonical_b65_from_bundle(
+            bundle,
+            layer,
+            [head],
+            M=M,
+            n_reveals=n_reveals,
+            fixed_reveal_seed=0,
+            corrupt_fn=corrupt,
+        )
+        corr_B, corr_tau = corr[head]
+        resid_change = _resid_change(clean_B, corr_B, valid_edge_mask(65))
+        ratio = float(resid_change / (floor + 1e-9))
+        c["per_head"].append(
+            {
+                "head": head,
+                "resid_change": resid_change,
+                "noise_floor": floor,
+                "ratio": ratio,
+                "dtau": _mean_abs(clean_tau) - _mean_abs(corr_tau),
+                "content_driven": bool(ratio > 1.0),
+            }
+        )
     d = {head: d_locus(ckpt, layer, head, M=M, n_reveals=n_reveals, device=device) for head in heads}
-    b_null = b_position_ablation(ckpt, layer, null_heads, M=M, n_reveals=n_reveals, device=device)
+    null_clean = _p3_canonical_b65_from_bundle(
+        bundle,
+        layer,
+        null_heads,
+        M=M,
+        n_reveals=n_reveals,
+        fixed_reveal_seed=0,
+    )
+    null_abl = _p3_canonical_b65_from_bundle(
+        bundle,
+        layer,
+        null_heads,
+        M=M,
+        n_reveals=n_reveals,
+        fixed_reveal_seed=0,
+        pe_mode="both",
+    )
+    b_null = {
+        "layer": layer,
+        "per_head": [
+            {
+                "head": head,
+                "tau_none": _mean_abs(null_clean[head][1]),
+                "tau_abl": _mean_abs(null_abl[head][1]),
+                "r2_none": slot_only_r2(null_clean[head][0], valid_edge_mask(65), normalize=False),
+                "r2_abl": slot_only_r2(null_abl[head][0], valid_edge_mask(65), normalize=False),
+                "verdict": _b_verdict(
+                    _mean_abs(null_clean[head][1]),
+                    _mean_abs(null_abl[head][1]),
+                    slot_only_r2(null_clean[head][0], valid_edge_mask(65), normalize=False),
+                    slot_only_r2(null_abl[head][0], valid_edge_mask(65), normalize=False),
+                ),
+            }
+            for head in null_heads
+        ],
+    }
     verdict = classify_p3prime(b, c)
 
     summary = {
