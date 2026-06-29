@@ -1760,9 +1760,11 @@ def main(default_run_kind="baseline"):
                 mode=args.frozen_beta_mode, tau=args.frozen_beta_tau,
                 seed=args.seed, device=str(device), none_mode=args.frozen_beta_none_mode,
                 reverse=args.frozen_beta_rev,
+                batch_mean_probes=args.batch_mean_probes,
             )
             log(f"[frozen_beta all-layers] g_β={args.frozen_beta_ckpt} "
                 f"all_layers topk={args.gbeta_topk} "
+                f"batch_mean_probes={args.batch_mean_probes} "
                 f"none_mode={args.frozen_beta_none_mode} "
                 f"mode={args.frozen_beta_mode} rev={args.frozen_beta_rev} "
                 f"refresh_every={args.frozen_beta_refresh}")
