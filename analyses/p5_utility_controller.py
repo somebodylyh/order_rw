@@ -147,3 +147,35 @@ def block_hidden_states(model, idx_row, sigma_phys, clean_perm, layer, device):
         sel = revealed[block_of_pos == m]
         H[m] = sel.mean(axis=0) if len(sel) else 0.0
     return H.astype(np.float32)
+
+
+# ── Task 6: Soft pairwise utility teacher ────────────────────────────────────
+
+def _order_to_rank(sigma):
+    """sigma is a reveal order (positions->block). Return rank[block] = reveal position."""
+    rank = np.empty(N, dtype=np.int64)
+    rank[np.asarray(sigma, dtype=np.int64)] = np.arange(N)
+    return rank
+
+
+def soft_pref(sigmas, nlls, T):
+    nlls = np.asarray(nlls, dtype=np.float64)
+    w = np.exp(-(nlls - nlls.min()) / max(T, 1e-9))
+    w = w / w.sum()
+    P = np.zeros((N, N), dtype=np.float64)
+    for wk, sig in zip(w, sigmas):
+        rank = _order_to_rank(sig)
+        before = (rank[:, None] < rank[None, :]).astype(np.float64)   # i before j
+        P += wk * before
+    return P
+
+
+def pairwise_loss(z, P):
+    P = torch.as_tensor(P, dtype=torch.float32, device=z.device)
+    diff = z[:, None] - z[None, :]                      # z_i - z_j
+    p_hat = torch.sigmoid(diff)
+    c = (P - 0.5).abs()
+    eps = 1e-6
+    bce = -(P * torch.log(p_hat + eps) + (1 - P) * torch.log(1 - p_hat + eps))
+    mask = ~torch.eye(N, dtype=torch.bool, device=z.device)
+    return (c * bce)[mask].mean()
