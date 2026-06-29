@@ -1,0 +1,40 @@
+{
+  "seed": 42,
+  "carrier": {
+    "layer": 0,
+    "heads": [
+      2
+    ]
+  },
+  "anchors": {
+    "var_invariant": 3.0373927770533044e-34,
+    "var_randomized": 0.0005250925755507187,
+    "r2_raw_null": -0.08001057306173842,
+    "r2_norm_null": 0.6830624933567129
+  },
+  "per_head": [
+    {
+      "seed": 42,
+      "layer": 0,
+      "head": 2,
+      "n_valid": 23,
+      "cross_variance": 0.000141,
+      "noise_floor": 4.3e-05,
+      "content_variance": 9.8e-05,
+      "content_floor_ratio": 2.249,
+      "r2_raw": 0.8694,
+      "r2_norm": 0.9429,
+      "r2_raw_null": -0.08,
+      "r2_norm_null": 0.6831,
+      "r2_raw_excess": 0.879,
+      "pairwise_sim": 0.9484,
+      "verdict": "B+"
+    }
+  ],
+  "relayout": {
+    "anchor_tau": 0.9623015873015872,
+    "relayout_mean_tau": 0.13888888888888887,
+    "drop": 0.8234126984126984
+  },
+  "seed_verdict": "B+"
+}

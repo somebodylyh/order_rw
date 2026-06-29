@@ -1,0 +1,94 @@
+{
+  "seed": 123,
+  "carrier": {
+    "layer": 0,
+    "heads": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "anchors": {
+    "var_invariant": 3.0373927770533044e-34,
+    "var_randomized": 0.0005250925755507187,
+    "r2_raw_null": -0.08001057306173842,
+    "r2_norm_null": 0.6830624933567129
+  },
+  "per_head": [
+    {
+      "seed": 123,
+      "layer": 0,
+      "head": 1,
+      "n_valid": 2,
+      "cross_variance": 0.000461,
+      "noise_floor": 4.9e-05,
+      "content_variance": 0.000412,
+      "content_floor_ratio": 8.456,
+      "r2_raw": 0.8481,
+      "r2_norm": 0.9169,
+      "r2_raw_null": -0.08,
+      "r2_norm_null": 0.6831,
+      "r2_raw_excess": 0.859,
+      "pairwise_sim": 0.9248,
+      "verdict": "B+"
+    },
+    {
+      "seed": 123,
+      "layer": 0,
+      "head": 2,
+      "n_valid": 3,
+      "cross_variance": 0.00039,
+      "noise_floor": 1.9e-05,
+      "content_variance": 0.000371,
+      "content_floor_ratio": 19.216,
+      "r2_raw": 0.9194,
+      "r2_norm": 0.9222,
+      "r2_raw_null": -0.08,
+      "r2_norm_null": 0.6831,
+      "r2_raw_excess": 0.925,
+      "pairwise_sim": 0.9256,
+      "verdict": "B+"
+    },
+    {
+      "seed": 123,
+      "layer": 0,
+      "head": 3,
+      "n_valid": 24,
+      "cross_variance": 0.000545,
+      "noise_floor": 0.000145,
+      "content_variance": 0.0004,
+      "content_floor_ratio": 2.761,
+      "r2_raw": 0.9875,
+      "r2_norm": 0.9331,
+      "r2_raw_null": -0.08,
+      "r2_norm_null": 0.6831,
+      "r2_raw_excess": 0.988,
+      "pairwise_sim": 0.9371,
+      "verdict": "B+"
+    },
+    {
+      "seed": 123,
+      "layer": 0,
+      "head": 4,
+      "n_valid": 24,
+      "cross_variance": 0.001348,
+      "noise_floor": 0.000323,
+      "content_variance": 0.001025,
+      "content_floor_ratio": 3.17,
+      "r2_raw": 0.9961,
+      "r2_norm": 0.8605,
+      "r2_raw_null": -0.08,
+      "r2_norm_null": 0.6831,
+      "r2_raw_excess": 0.996,
+      "pairwise_sim": 0.8714,
+      "verdict": "B+"
+    }
+  ],
+  "relayout": {
+    "anchor_tau": 1.0,
+    "relayout_mean_tau": 0.13326719576719576,
+    "drop": 0.8667328042328042
+  },
+  "seed_verdict": "B+"
+}

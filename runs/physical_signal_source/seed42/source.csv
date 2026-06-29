@@ -1,0 +1,2 @@
+seed,layer,head,n_valid,cross_variance,noise_floor,content_variance,content_floor_ratio,r2_raw,r2_norm,r2_raw_null,r2_norm_null,r2_raw_excess,pairwise_sim,verdict
+42,0,2,23,0.000141,4.3e-05,9.8e-05,2.249,0.8694,0.9429,-0.08,0.6831,0.879,0.9484,B+
