@@ -68,12 +68,28 @@ def sigma_from_B65(B65):
 
 
 def sample_scaffold(ckpt_path, M, layer=0, head=1, n_reveals=8, fixed_reveal_seed=0,
-                    device="cpu"):
-    """Per-text B65 (seed123 carrier L0H1), its C-D+L order sigma_B, and the chunks."""
+                    device="cpu", heads=None):
+    """Per-text B65 (seed123 carrier L0H1), its C-D+L order sigma_B, and the chunks.
+
+    If heads is a list of ints, B65 is averaged element-wise across those heads
+    before computing sigma_B and block_b_features."""
     model, chunks, clean_perm, dev = load_p5_ckpt(ckpt_path, M, device=device)
-    B_list, _tau = carrier_b65_per_text(
-        ckpt_path, layer, head, M=M, n_reveals=n_reveals,
-        fixed_reveal_seed=fixed_reveal_seed, device=device)
+    if heads is not None and len(heads) > 0:
+        # Multi-head: collect B65 per head, mean across heads per text
+        B_per_head = []
+        for h in heads:
+            B_h, _ = carrier_b65_per_text(
+                ckpt_path, layer, h, M=M, n_reveals=n_reveals,
+                fixed_reveal_seed=fixed_reveal_seed, device=device)
+            B_per_head.append([np.asarray(b, dtype=np.float64) for b in B_h])
+        B_list = []
+        for t in range(M):
+            mean_B = np.mean([B_per_head[hi][t] for hi in range(len(heads))], axis=0)
+            B_list.append(mean_B)
+    else:
+        B_list, _tau = carrier_b65_per_text(
+            ckpt_path, layer, head, M=M, n_reveals=n_reveals,
+            fixed_reveal_seed=fixed_reveal_seed, device=device)
     sig = [sigma_from_B65(B) for B in B_list]
     return {"B": B_list, "sigma_B": sig, "chunks": chunks,
             "clean_perm": clean_perm, "model": model, "dev": dev}
@@ -151,6 +167,47 @@ def block_hidden_states(model, idx_row, sigma_phys, clean_perm, layer, device):
     return H.astype(np.float32)
 
 
+@torch.no_grad()
+def multi_layer_hidden_states(model, idx_row, sigma_phys, clean_perm, layers, device):
+    """Per model-block hidden states, mean-pooled across specified layers.
+
+    layers: list of ints, e.g. [0,1,2,3] for L0–L3 mean."""
+    Hs = [block_hidden_states(model, idx_row, sigma_phys, clean_perm, l, device)
+          for l in layers]
+    return np.mean(Hs, axis=0).astype(np.float32)   # (64, d)
+
+
+@torch.no_grad()
+def order_averaged_hidden_states(model, idx_row, sigmas, clean_perm, layers, device):
+    """Per-block H extracted under each sigma, then averaged across sigma.
+
+    Averages out order-specific reveal-context traces, retaining content component."""
+    all_H = []
+    for sigma in sigmas:
+        all_H.append(multi_layer_hidden_states(
+            model, idx_row, sigma, clean_perm, layers, device))
+    return np.mean(all_H, axis=0).astype(np.float32)   # (64, d)
+
+
+def extract_h_by_context(model, idx_row, sigma_B, clean_perm, layers, device, context):
+    """Extract H under a named context.
+
+    context: "sigma_B" | "phys" | "avg" (mean of sigma_B + phys + random)"""
+    if context == "sigma_B":
+        return multi_layer_hidden_states(model, idx_row, sigma_B, clean_perm, layers, device)
+    elif context == "phys":
+        phys = np.arange(N, dtype=np.int64)
+        return multi_layer_hidden_states(model, idx_row, phys, clean_perm, layers, device)
+    elif context == "avg":
+        phys = np.arange(N, dtype=np.int64)
+        rng = np.random.default_rng(0)
+        rand = rng.permutation(N).astype(np.int64)
+        sigmas = [sigma_B, phys, rand]
+        return order_averaged_hidden_states(model, idx_row, sigmas, clean_perm, layers, device)
+    else:
+        raise ValueError(f"Unknown H context: {context!r}. Use sigma_B, phys, or avg.")
+
+
 # ── Task 6: Soft pairwise utility teacher ────────────────────────────────────
 
 def _order_to_rank(sigma):
@@ -224,10 +281,13 @@ class ScaffoldedController(nn.Module):
 # ── Task 8: Dataset assembly + train loops ───────────────────────────────────
 
 def build_dataset(ckpt_path, M, layer=0, head=1, n_reveals=8, K_rand=4, K_noisy=4,
-                  T=0.3, cand_seed=0, device="cpu"):
+                  T=0.3, cand_seed=0, device="cpu", layers=None, heads=None,
+                  h_context="sigma_B"):
     sc = sample_scaffold(ckpt_path, M, layer=layer, head=head, n_reveals=n_reveals,
-                         device=device)
+                         device=device, heads=heads)
     model, chunks, clean_perm, dev = sc["model"], sc["chunks"], sc["clean_perm"], sc["dev"]
+    if layers is None:
+        layers = [layer]
     rng = np.random.default_rng(cand_seed)
     samples = []
     for t in range(M):
@@ -237,11 +297,13 @@ def build_dataset(ckpt_path, M, layer=0, head=1, n_reveals=8, K_rand=4, K_noisy=
         nlls = utility_pool(model, chunks[t:t+1], [cands[l] for l in labels], clean_perm, dev)
         nll_by_label = dict(zip(labels, nlls))
         P = soft_pref([cands[l] for l in labels], nlls, T)
-        H = block_hidden_states(model, chunks[t:t+1], sigma_B, clean_perm, layer, dev)
+        H = extract_h_by_context(model, chunks[t:t+1], sigma_B, clean_perm, layers, dev,
+                                 h_context)
         samples.append({"B_feat": block_b_features(B65), "H": H, "P": P,
                         "sigma_B": sigma_B, "idx_row": chunks[t:t+1],
                         "nll_by_label": nll_by_label, "cands": cands,
-                        "clean_perm": clean_perm, "model": model, "dev": dev})
+                        "clean_perm": clean_perm, "model": model, "dev": dev,
+                        "h_context": h_context})
     return samples
 
 
@@ -344,14 +406,18 @@ def _split_idx(n, split, seed=0):
 
 
 def run_phase0(ckpt_path, M=64, n_reveals=8, T=0.3, split=(0.7, 0.15, 0.15),
-               epochs=200, layer=0, head=1, out_dir="runs/p5/seed123", device="cpu"):
+               epochs=200, layer=0, head=1, out_dir="runs/p5/seed123", device="cpu",
+               layers=None, heads=None, h_context="sigma_B"):
     out = pathlib.Path(out_dir); out.mkdir(parents=True, exist_ok=True)
     samples = build_dataset(ckpt_path, M, layer=layer, head=head, n_reveals=n_reveals,
-                            T=T, device=device)
+                            T=T, device=device, layers=layers, heads=heads,
+                            h_context=h_context)
     tr, va, te = _split_idx(len(samples), split)
     test = [samples[i] for i in te] or [samples[i] for i in tr]
     head_in = headroom_stats([s["nll_by_label"] for s in test])
-    result = {"ckpt": ckpt_path, "layer": layer, "head": head, "headroom": head_in}
+    result = {"ckpt": ckpt_path, "layer": layer, "head": head,
+              "layers": layers, "heads": heads, "h_context": h_context,
+              "headroom": head_in}
     if head_in["gate_pass"]:
         train = [samples[i] for i in tr]
         g_B = train_b_only(train, epochs=epochs)
