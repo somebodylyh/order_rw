@@ -79,16 +79,34 @@ is large; **learnability/reachability is the bottleneck**, not existence.
    sample-specific oracle headroom over true L2R. The open problems are (i) is it
    meaningful vs a teacher-forced-NLL artifact, and (ii) is it learnable.
 
-## OPEN — decisive control not yet run (GPU-bound)
+## Easy-first control — DONE: genuine non-myopic structure (NOT artifact)
 
-The +0.20 is **not yet distinguished from sample-specific easy-first NLL-gaming**:
-teacher-forced NLL is lowered by revealing each sample's conditionally-easy blocks
-first, and block difficulty is itself per-sample → it also passes the cross-transfer
-control. **Next: greedy-easy-first comparison** — build an explicit per-sample
-greedy-easy-first order; if hill-climb best ≈ it → artifact; if best clearly beats
-it → structure beyond easy-first (real, usable). Then: is it learnable, and can an
-end-to-end architecture (controller in the forward, not routing a weak pool) reach
-these non-L2R per-sample orders?
+`analyses/p6_easy_first_control.py`, seed123 10k, M=4, hill-climb 600. Gain vs L2R:
+
+| order | gain vs L2R |
+|---|---|
+| hill-climb best | **+0.187** |
+| dynamic greedy easy-first | **−0.070** (worse than L2R) |
+| static easy-first | −0.180 |
+| dynamic greedy hard-first | −0.235 |
+
+best − dyn_easy = **−0.257**; τ(best, dyn_easy) = **−0.11**. Easy-first (static &
+dynamic) cannot even beat L2R; hill-climb best beats it by 0.26 nat and the orders
+are anti-correlated. → **The +0.19 headroom is genuine, non-myopic, sample-specific
+order structure, NOT an easy-first teacher-forced-NLL artifact.**
+
+## Now OPEN — is the structure LEARNABLE (P7 line)?
+
+Existence is settled; the question is whether any feature predicts σ* (hill-climb
+best order). P7 plan: (1) **predictability probe** `p7_predictability_probe.py` —
+feature→σ* learnability, frame-correct physical-block features (B/H position
+controls vs content-embedding / one-step-difficulty); (2) if a feature predicts
+σ*, train a **Plackett-Luce reveal policy** via AO-NLL policy gradient (EMA
+baseline train; L2R/B-only/greedy/oracle eval). Key constraint from above:
+structure is non-myopic + content-dependent, and (B,H) is position-only → static
+(B,H) policy likely insufficient; the bet is content features + a dynamic
+π(i|x,R_t) policy. Reranker history warns σ* may be hard to predict (oracle Δ huge,
+MLP Δ≈0) — the probe is the cheap decisive gate before any RL.
 
 ## Code / artifacts (branch p5-direct-nll-routing)
 

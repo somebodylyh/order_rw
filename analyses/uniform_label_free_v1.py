@@ -265,36 +265,46 @@ def stage_bc_train_readout(ckpt_path, cluster_heads, M=200, batch_size=8,
         if (end % (fwd_batch * 10) == 0) or end == total:
             print(f"  [extract] {end}/{total}", flush=True)
 
-    # Batch-mean
-    B_bm = B_content.reshape(M, batch_size, 64, 64).mean(axis=1).astype(np.float32)
-
-    # Teacher: CDL rollout on batch-mean cluster B
-    sigma_T = np.zeros((M, 64), dtype=np.int64)
-    T_pair = np.zeros((M, 64, 64), dtype=np.float32)
-    for m in range(M):
-        B65_bm = np.zeros((65, 65), dtype=np.float32)
-        B65_bm[1:, 1:] = B_bm[m]  # reconstruct with None row/col = 0
-        sigma_T[m] = rollout_by_method(B65_bm, "C-D+L")
-        o = sigma_T[m]
+    # ═══ Per-sample teacher (NO batch-mean collapse) ═══
+    # Each sample gets its own CDL teacher → preserves sample diversity
+    total_samples = B_content.shape[0]  # total (not M)
+    sigma_T_per = np.zeros((total_samples, 64), dtype=np.int64)
+    T_pair_per = np.zeros((total_samples, 64, 64), dtype=np.float32)
+    for si in range(total_samples):
+        B65_s = np.zeros((65, 65), dtype=np.float32)
+        B65_s[1:, 1:] = B_content[si]
+        sigma_T_per[si] = rollout_by_method(B65_s, "C-D+L")
+        o = sigma_T_per[si]
         for i in range(64):
             for j in range(64):
                 if i != j:
-                    T_pair[m, i, j] = 1.0 if np.where(o == i)[0] < np.where(o == j)[0] else 0.0
+                    T_pair_per[si, i, j] = 1.0 if np.where(o == i)[0] < np.where(o == j)[0] else 0.0
+
+    # Teacher diagnostics
+    unique_teachers = len(set(tuple(s) for s in sigma_T_per))
+    taus_vs_l2r = []
+    for si in range(min(total_samples, 100)):
+        tau_t, _ = kendalltau(sigma_T_per[si], np.arange(64))
+        taus_vs_l2r.append(tau_t)
+    tau_mean_t = np.mean(taus_vs_l2r)
+    tau_std_t = np.std(taus_vs_l2r)
+    print(f"  Teacher: {total_samples} samples, unique={unique_teachers}, "
+          f"τ_vs_L2R mean={tau_mean_t:.4f} std={tau_std_t:.4f}", flush=True)
+    if unique_teachers <= 1 or (abs(tau_mean_t) > 0.99 and tau_std_t < 0.01):
+        print(f"  WARNING: teacher collapsed to near-constant L2R!", flush=True)
 
     # Split
     rng = np.random.default_rng(seed)
-    perm = rng.permutation(M)
-    train_n = int(M * 0.8)
-    val_idx = perm[train_n:train_n + int(M * 0.1)]
+    perm = rng.permutation(total_samples)
+    train_n = int(total_samples * 0.8)
+    val_idx = perm[train_n:train_n + int(total_samples * 0.1)]
     train_idx = perm[:train_n]
 
-    # Train FlattenReadout
+    # Train FlattenReadout with per-sample teacher
     readout = FlattenReadout(N=64, hidden=(1024, 256)).to(dev_actual)
     optimizer = torch.optim.AdamW(readout.parameters(), lr=lr, weight_decay=1e-2)
-    B_train = torch.from_numpy(B_bm[train_idx]).float().to(dev_actual)
-    T_train = torch.from_numpy(T_pair[train_idx]).float().to(dev_actual)
-    B_val = torch.from_numpy(B_bm[val_idx]).float().to(dev_actual)
-    T_val = torch.from_numpy(T_pair[val_idx]).float().to(dev_actual)
+    B_all = torch.from_numpy(B_content).float().to(dev_actual)
+    T_all = torch.from_numpy(T_pair_per).float().to(dev_actual)
 
     best_acc = 0.0
     best_state = None
@@ -302,10 +312,11 @@ def stage_bc_train_readout(ckpt_path, cluster_heads, M=200, batch_size=8,
         readout.train()
         perm_ep = torch.randperm(len(train_idx))
         total_loss = 0.0
+        n_batches = 0
         for start in range(0, len(train_idx), 32):
             idx = perm_ep[start:start+32]
-            scores = readout(B_train[idx])  # (bs, 64)
-            t = T_train[idx]
+            scores = readout(B_all[train_idx[idx]])  # (bs, 64)
+            t = T_all[train_idx[idx]]  # (bs, 64, 64) — PER-SAMPLE
             s_diff = scores.unsqueeze(2) - scores.unsqueeze(1)  # (bs, 64, 64)
             loss = torch.nn.functional.binary_cross_entropy_with_logits(
                 s_diff, t, reduction="mean"
@@ -314,35 +325,53 @@ def stage_bc_train_readout(ckpt_path, cluster_heads, M=200, batch_size=8,
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
+            n_batches += 1
 
         # Val
         readout.eval()
         with torch.no_grad():
-            scores_val = readout(B_val)
+            scores_val = readout(B_all[val_idx])
             s_diff_v = scores_val.unsqueeze(2) - scores_val.unsqueeze(1)
             pred = (s_diff_v > 0).float()
-            acc = (pred == T_val).float().mean().item()
+            acc = (pred == T_all[val_idx]).float().mean().item()
 
         if acc > best_acc:
             best_acc = acc
             best_state = {k: v.clone() for k, v in readout.state_dict().items()}
 
         if (ep + 1) % 10 == 0:
-            print(f"  [{ep+1:>3}/{epochs}] loss={total_loss/len(range(0,len(train_idx),32)):.4f} val_acc={acc:.4f} best={best_acc:.4f}", flush=True)
+            print(f"  [{ep+1:>3}/{epochs}] loss={total_loss/n_batches:.4f} val_acc={acc:.4f} best={best_acc:.4f}", flush=True)
 
     readout.load_state_dict(best_state)
     readout.eval()
 
-    # ── Physical τ evaluation (ONLY here) ──
+    # ═══ Input sanity: real B vs noise/zero/shuffle ═══
     with torch.no_grad():
-        taus = []
-        for m in range(M):
-            scores = readout(B_val[[0]] if m == 0 else torch.from_numpy(B_bm[m:m+1]).float().to(dev_actual))
-            sigma_model = scores[0].argsort(descending=True).cpu().numpy()
-            sigma_phys = inv_perm[sigma_model]
-            tau, _ = kendalltau(sigma_phys, np.arange(64))
-            taus.append(tau)
-    tau_mean = float(np.mean(taus))
+        # Real B
+        scores_real = readout(B_all[:100])
+        sigma_real = scores_real.argsort(dim=1, descending=True).cpu().numpy()
+        # Random noise B
+        B_noise = torch.randn(100, 64, 64).to(dev_actual)
+        scores_noise = readout(B_noise)
+        sigma_noise = scores_noise.argsort(dim=1, descending=True).cpu().numpy()
+        # Zero B
+        B_zero = torch.zeros(100, 64, 64).to(dev_actual)
+        scores_zero = readout(B_zero)
+        sigma_zero = scores_zero.argsort(dim=1, descending=True).cpu().numpy()
+
+    taus_real, taus_noise, taus_zero = [], [], []
+    sigma_lists = [sigma_real, sigma_noise, sigma_zero]
+    names = ["real", "noise", "zero"]
+    for name, sigmas in zip(names, sigma_lists):
+        for si in range(min(100, len(sigmas))):
+            tau_s, _ = kendalltau(inv_perm[sigmas[si]], np.arange(64))
+            locals()[f"taus_{name}"].append(abs(tau_s))
+        print(f"  Sanity {name} B: |τ_phys| mean={np.mean(locals()[f'taus_{name}']):.4f} "
+              f"output_unique={len(set(tuple(s) for s in sigmas[:50]))}", flush=True)
+
+    tau_mean_final = float(np.mean(taus_real))
+    delta_input = float(np.mean(taus_real) - np.mean(taus_noise))
+    print(f"  Input gap Δ(real-noise): {delta_input:.4f}", flush=True)
 
     # Save
     out_path = pathlib.Path(out_dir) / "label_free_readout.pt"
@@ -351,7 +380,7 @@ def stage_bc_train_readout(ckpt_path, cluster_heads, M=200, batch_size=8,
                  "config": {"model_name": "flatten", "N": 64, "hidden": (1024, 256)}},
                str(out_path))
 
-    return {"tau_physical": tau_mean, "val_acc": best_acc, "path": str(out_path)}
+    return {"tau_physical": tau_mean_final, "val_acc": best_acc, "delta_input": delta_input, "path": str(out_path)}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
