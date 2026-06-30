@@ -153,6 +153,40 @@ def test_b0_sanity_smoke():
     assert r["loss_down"]["b_only"]                 # loss decreased
 
 
+def test_b2_step_updates_model_and_controller():
+    # the gradient test the user asked for: one joint step must move BOTH the
+    # AO-GPT params and the controller params (model grad via L_k, controller via p_k)
+    if not pathlib.Path(CKPT).exists():
+        import pytest; pytest.skip("ckpt absent")
+    import copy
+    from analyses.p6_online_controller import (
+        load_p5_ckpt, _set_trainable, make_b2_controller, build_live_samples,
+        b2_routing_step, random_reveal_orders,
+    )
+    model, chunks, clean_perm, dev = load_p5_ckpt(CKPT, 4, device="cpu")
+    _set_trainable(model)
+    inv = clean_perm.inv_perm_model_to_phys.cpu().numpy()
+    reveals = random_reveal_orders(2, 0)
+    samples = build_live_samples(model, chunks, clean_perm, dev, [0, 1], reveals, inv,
+                                 0, [1, 2, 3, 4], 1, 4, np.random.default_rng(0))
+    ctrl = make_b2_controller(2 * (N + 1), samples[0]["H"].shape[1], "real",
+                              alpha_init=0.5)
+    m0 = copy.deepcopy(next(model.parameters()).detach().clone())
+    c0 = copy.deepcopy([p.detach().clone() for p in ctrl.parameters() if p.requires_grad])
+    opt = torch.optim.AdamW(
+        [p for p in model.parameters() if p.requires_grad] +
+        [p for p in ctrl.parameters() if p.requires_grad], lr=1e-3)
+    opt.zero_grad()
+    loss, ent = b2_routing_step(model, ctrl, samples, clean_perm, dev, 0.3, 0.0,
+                                True, "real")
+    loss.backward(); opt.step()
+    assert np.isfinite(float(loss)) and np.isfinite(ent)
+    assert not torch.allclose(m0, next(model.parameters()).detach())   # model moved
+    moved = any(not torch.allclose(c0[i], p.detach())
+                for i, p in enumerate(p for p in ctrl.parameters() if p.requires_grad))
+    assert moved                                                        # controller moved
+
+
 def _toy_samples(M=12, seed=0):
     rng = np.random.default_rng(seed)
     samples = []

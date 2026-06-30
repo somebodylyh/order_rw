@@ -20,11 +20,15 @@ for _p in (str(ROOT), str(ROOT / "analyses")):
         sys.path.insert(0, _p)
 
 from analyses.p5_utility_controller import (   # noqa: E402
-    N, candidate_priority, priority_matrix, sigma_from_B65, order_nll,
+    N, BLOCK_LEN, candidate_priority, priority_matrix, sigma_from_B65, order_nll,
     block_b_features, BOnlyController, ScaffoldedController, _swap_perturb,
     sample_scaffold, extract_h_by_context, utility_pool, headroom_stats,
-    _split_idx,
+    block_hidden_states, _split_idx, load_p5_ckpt,
 )
+from clean_training_protocol import physical_blocks_to_model_token_order  # noqa: E402
+from analyses.canonical_reanalysis import random_reveal_orders  # noqa: E402
+from per_head_order_scan import _attn_to_A_block_loss_aligned_with_none_vec  # noqa: E402
+from none_separated_block_graph import build_none_separated_B  # noqa: E402
 
 
 # ── Task 2: normalized (cosine) candidate logits ─────────────────────────────
@@ -286,3 +290,148 @@ def run_b0_sanity(ckpt_path, M=64, layer=0, head=1, heads=None, K=6, h_layer=1,
               "_note": "B0 has NO co-adaptation; H null here is expected by construction"}
     _json.dump(result, open(out / f"{tag}.json", "w"), indent=2, default=float)
     return result
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Task 6 + 9: B2 joint online co-adaptation (model + controller trainable)
+# ════════════════════════════════════════════════════════════════════════════
+# THE experiment: continue from an early ckpt; per step extract B/H from the LIVE
+# model (no_grad), run K candidate forwards WITH model grad, route via cosine
+# soft-routing, update model + controller on Sum_k p_k L_k. detach_h=True (B2a)
+# keeps controller loss out of the model's hidden states.
+
+@torch.no_grad()
+def extract_b65_inmem(model, chunk_row, reveals, inv, layer, heads, dev):
+    """Multi-head-mean B65 from the LIVE in-memory model (no reload, no grad)."""
+    A_acc = None
+    for rev in reveals:
+        po = torch.from_numpy(rev[None, :]).to(dev)
+        _, _, attn_list = model.forward_fn(chunk_row.to(dev), po, return_attentions=True)
+        attn = torch.stack(attn_list, 0).cpu().numpy()[:, 0]      # (L,H,257,257)
+        A = _attn_to_A_block_loss_aligned_with_none_vec(attn, rev, inv)
+        A_acc = A.astype(np.float64) if A_acc is None else A_acc + A
+    A_mean = A_acc / len(reveals)
+    hs = heads if isinstance(heads, (list, tuple)) else [heads]
+    return np.mean([build_none_separated_B(A_mean[layer, h]) for h in hs], axis=0)
+
+
+def build_live_samples(model, chunks, clean_perm, dev, idxs, reveals, inv,
+                       layer, heads, h_layer, K, rng, h_context="sigma_B"):
+    """Rebuild per-text B/H/candidate scaffold from the current model (no_grad)."""
+    samples = []
+    for t in idxs:
+        B65 = extract_b65_inmem(model, chunks[t:t+1], reveals, inv, layer, heads, dev)
+        sigma_B = sigma_from_B65(B65)
+        cands = p6_candidate_pool(B65, sigma_B, rng, K=K)
+        H = extract_h_by_context(model, chunks[t:t+1], sigma_B, clean_perm, [h_layer],
+                                 dev, h_context)
+        samples.append({"B_feat": block_b_features(B65), "H": H, "cands": cands,
+                        "sigma_B": sigma_B, "idx_row": chunks[t:t+1]})
+    return samples
+
+
+def make_b2_controller(b_dim, h_dim, mode, alpha_init=0.01, device="cpu"):
+    """B-only -> BOnlyController. real/shuffle/etc -> ScaffoldedController with
+    g_B TRAINABLE (B2 co-adapts g_B too, unlike the frozen B0 residual)."""
+    if mode in ("b_only",):
+        return BOnlyController(b_dim).to(device)
+    sc = ScaffoldedController(BOnlyController(b_dim), h_dim=h_dim, alpha_init=alpha_init)
+    for p in sc.g_B.parameters():
+        p.requires_grad_(True)                                    # B2: g_B trainable
+    return sc.to(device)
+
+
+def b2_routing_step(model, controller, samples, clean_perm, dev, tau, beta_entropy,
+                    detach_h, h_mode):
+    """One joint step's loss. K candidate forwards retain model graph; controller
+    grad flows only through p_k. Returns (loss tensor, mean entropy)."""
+    use_H = h_mode not in (None, "b_only")
+    Hs = h_mode_list([s["H"] for s in samples], h_mode) if use_H else None
+    total, ents = 0.0, []
+    for i, s in enumerate(samples):
+        labels, Y = priority_matrix(s["cands"])
+        Yt = torch.as_tensor(Y, dtype=torch.float32, device=dev)
+        z = controller_scores(controller, s["B_feat"], None if Hs is None else Hs[i],
+                              detach_h=detach_h)
+        Lk = []
+        for lab in labels:
+            sigma = np.asarray(s["cands"][lab], dtype=np.int64)[None, :]
+            tok = physical_blocks_to_model_token_order(
+                torch.from_numpy(sigma), clean_perm, BLOCK_LEN).to(dev)
+            _, loss_k = model.forward_fn(s["idx_row"].to(dev), tok)   # WITH model grad
+            Lk.append(loss_k)
+        Lk = torch.stack(Lk)
+        a = cosine_logits(z, Yt, tau)
+        p = torch.softmax(a, dim=0)
+        ent = -(p * (p + 1e-12).log()).sum()
+        total = total + (p * Lk).sum() - beta_entropy * ent
+        ents.append(float(ent.detach()))
+    return total / len(samples), float(np.mean(ents))
+
+
+@torch.no_grad()
+def b2_eval_fixed_order(model, chunks, clean_perm, dev, val_idxs, sigma_fixed=None):
+    if sigma_fixed is None:
+        sigma_fixed = np.arange(N, dtype=np.int64)
+    return float(np.mean([order_nll(model, chunks[t:t+1], sigma_fixed, clean_perm, dev)
+                          for t in val_idxs]))
+
+
+def _set_trainable(model):
+    model.train()
+    for p in model.parameters():
+        p.requires_grad_(True)
+    return model
+
+
+def train_b2_arm(ckpt_path, mode, M_train=16, M_val=8, batch=4, steps=100,
+                 n_reveals=4, K=6, h_layer=1, layer=0, heads=(1, 2, 3, 4),
+                 tau=0.3, lr=1e-4, beta_entropy=0.0, detach_h=True, refresh_every=10,
+                 eval_every=25, alpha_init=0.01, device="cpu", seed=0):
+    """One B2 arm: continue training the model + controller from `ckpt_path`."""
+    rng = np.random.default_rng(seed)
+    model, chunks, clean_perm, dev = load_p5_ckpt(ckpt_path, M_train + M_val, device=device)
+    _set_trainable(model)
+    inv = clean_perm.inv_perm_model_to_phys.cpu().numpy()
+    reveals = random_reveal_orders(n_reveals, 0)
+    all_idx = np.arange(M_train + M_val)
+    tr_idx, va_idx = all_idx[:M_train], all_idx[M_train:]
+
+    b_dim = 2 * (N + 1)                                          # block_b_features width
+    h_dim = block_hidden_states(model, chunks[0:1], np.arange(N), clean_perm, h_layer,
+                                dev).shape[1]
+    controller = make_b2_controller(b_dim, h_dim, mode, alpha_init=alpha_init, device=dev)
+    params = [p for p in model.parameters() if p.requires_grad] + \
+             [p for p in controller.parameters() if p.requires_grad]
+    opt = torch.optim.AdamW(params, lr=lr)
+
+    hist = {"step": [], "loss": [], "entropy": [], "val_fixed_nll": []}
+    live = None
+    for step in range(steps):
+        if step % refresh_every == 0:
+            mb = rng.choice(tr_idx, size=min(batch, len(tr_idx)), replace=False)
+            live = build_live_samples(model, chunks, clean_perm, dev, mb, reveals, inv,
+                                      layer, list(heads), h_layer, K, rng)
+        opt.zero_grad()
+        loss, ent = b2_routing_step(model, controller, live, clean_perm, dev, tau,
+                                    beta_entropy, detach_h, mode)
+        loss.backward(); opt.step()
+        if step % eval_every == 0 or step == steps - 1:
+            vfn = b2_eval_fixed_order(model, chunks, clean_perm, dev, va_idx)
+            hist["step"].append(step); hist["loss"].append(float(loss))
+            hist["entropy"].append(ent); hist["val_fixed_nll"].append(vfn)
+            _set_trainable(model)
+    return {"mode": mode, "hist": hist}
+
+
+def run_b2_smoke(ckpt_path, arms=("b_only", "real", "shuffle"), out_dir="runs/p6/seed123/b2_smoke",
+                 tag="b2_smoke", **kw):
+    out = pathlib.Path(out_dir); out.mkdir(parents=True, exist_ok=True)
+    results = {}
+    for mode in arms:
+        results[mode] = train_b2_arm(ckpt_path, mode, **kw)
+    payload = {"ckpt": ckpt_path, "tag": tag, "config": kw, "arms": results,
+               "_note": "B2 smoke: validate joint chain (entropy/memory/loss/val), "
+                        "not a science verdict at this step count"}
+    _json.dump(payload, open(out / f"{tag}.json", "w"), indent=2, default=float)
+    return payload
