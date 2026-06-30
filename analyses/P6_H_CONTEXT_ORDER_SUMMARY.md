@@ -1,7 +1,10 @@
 # H / Context-Dependent Order — Line Summary (2026-06-30)
 
-Branch `p5-direct-nll-routing`. Closes the "does hidden state H provide a
-context-dependent (sample-specific) reveal-order signal beyond attention?" line.
+Branch `p5-direct-nll-routing`. Two outcomes: (1) the **H signal** for
+context-dependent order is closed (H = redundant position carrier); (2) but
+**context-dependent order itself is NOT closed for text** — a frame-controlled
+oracle test found large sample-specific headroom over true L2R (earlier "headroom
+≈ 0" was a weak-pool + frame-bug error, now corrected below).
 
 ## Question
 
@@ -40,30 +43,52 @@ information that improves reveal-order utility **beyond the attention scaffold B
    **CDL teacher order that converges onto physical** (cdl~phys 0.04→1.0), not H
    drifting to CDL. Physical order is the stable attractor.
 
-## Root cause — why context-dependence has no traction ON TEXT
+## Why the H signal fails — and a CORRECTION on "headroom"
 
-Not a method failure: **text has ~no context-dependent order headroom.** Physical
-/ L2R order is near-optimal for ~94% of texts (per-sample CDL headroom 0.02–0.1
-nat, in the noise floor). Even a perfect context-dependent controller has ≈0 to
-gain. We were searching for a signal (step 2) without confirming the substrate
-has per-sample headroom (step 1) — and on text step 1 ≈ 0.
+The H readout fails because the **candidate pools used everywhere (P5/A/B2) were
+weak and L2R-centric** (only good candidate = phys; rest random/noisy-B). The
+good per-sample orders were never in the pool, so routing/H could never reach
+them. B2's null = "can't beat L2R among L2R-ish candidates," NOT "no
+context-dependent order exists."
 
-## Verdict
+**CORRECTION (supersedes an earlier wrong claim that text has ~0 headroom).** That
+earlier claim was measured (a) against the weak pool and (b) with a FRAME BUG
+(model-frame `arange` ≠ physical L2R; no inv_perm applied). A frame-controlled
+oracle test (our ckpt, validated `order_nll(phys-block order, clean_perm)`,
+baseline = TRUE physical L2R = arange, M=8, hill-climb 800 steps) shows:
 
-**Context-dependent / H-conditioned order is closed for text.** Two reasons, both
-necessary: (a) the readable order signal in attention/hidden geometry is position,
-not content; (b) text offers no per-sample order headroom for content to exploit.
+| metric | value |
+|---|---|
+| per-sample best vs TRUE L2R (own_gain) | **+0.203** (8/8, 0.17–0.24) |
+| transfer (best_j applied to sample i) | **−0.131** (hurts others) |
+| specificity (own − transfer) | **+0.335** |
+| τ(best, true phys L2R) | 0.33 |
+| τ between best orders | 0.09 (per-sample different) |
 
-This does NOT prove context-dependent order is impossible in general — only that
-text is the wrong substrate and H/B geometry is a position carrier.
+→ **Real, context-dependent reveal-order headroom EXISTS on text, even over true
+L2R**, and is sample-specific (transfer HURTS → rules out a generic better fixed
+order). Consistent with the reranker history (oracle Δ huge, MLP Δ ≈ 0): headroom
+is large; **learnability/reachability is the bottleneck**, not existence.
 
-## If pursued further (different substrate)
+## Verdict (two layers)
 
-Context-dependence could exist where the per-sample-optimal order genuinely varies
-(graph / molecule / code AST / structured docs; possibly images). **Precondition
-test first (cheap):** per-sample oracle-best-order NLL vs best-fixed-order NLL —
-is the gap large AND per-sample-varying? Only chase a predicting signal if that
-headroom exists.
+1. **H as a signal is closed:** attention/hidden geometry carries position, not
+   content; H is a 0.999-redundant copy of attention. Confirmed across frozen,
+   online co-adapt (3 seeds), CDL-trained, and H-residual replication (noise).
+2. **Context-dependent order itself is NOT closed for text:** there is large,
+   sample-specific oracle headroom over true L2R. The open problems are (i) is it
+   meaningful vs a teacher-forced-NLL artifact, and (ii) is it learnable.
+
+## OPEN — decisive control not yet run (GPU-bound)
+
+The +0.20 is **not yet distinguished from sample-specific easy-first NLL-gaming**:
+teacher-forced NLL is lowered by revealing each sample's conditionally-easy blocks
+first, and block difficulty is itself per-sample → it also passes the cross-transfer
+control. **Next: greedy-easy-first comparison** — build an explicit per-sample
+greedy-easy-first order; if hill-climb best ≈ it → artifact; if best clearly beats
+it → structure beyond easy-first (real, usable). Then: is it learnable, and can an
+end-to-end architecture (controller in the forward, not routing a weak pool) reach
+these non-L2R per-sample orders?
 
 ## Code / artifacts (branch p5-direct-nll-routing)
 
