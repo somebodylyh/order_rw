@@ -13,6 +13,7 @@ import json as _json
 import pathlib, sys
 import numpy as np
 import torch
+import torch.nn as nn
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 for _p in (str(ROOT), str(ROOT / "analyses")):
@@ -66,13 +67,27 @@ def routing_loss_from_scores(z, Y, L, tau=0.3, beta_entropy=0.0):
 
 # ── Task 4 + 5: controller scoring with detach_h config ──────────────────────
 
+class HOnlyController(nn.Module):
+    """H-only controller: per-block score from hidden state alone (no attention B)."""
+    def __init__(self, h_dim, hidden=64):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(h_dim, hidden), nn.GELU(),
+                                 nn.Linear(hidden, 1))
+
+    def forward(self, H):
+        return self.net(H).squeeze(-1)
+
+
 def controller_scores(controller, B_feat, H=None, detach_h=True):
-    """z = g_B(B) [+ alpha g_H(H)].  detach_h=True stops controller-loss gradient
-    from flowing back into the model's hidden states H (the safe B2a default)."""
+    """z = g_B(B) [+ alpha g_H(H)] | g_H(H) for HOnly.  detach_h=True stops
+    controller-loss gradient flowing back into the model's hidden states H."""
     try:
         dev = next(controller.parameters()).device
     except StopIteration:
         dev = "cpu"
+    if isinstance(controller, HOnlyController):
+        Ht = torch.as_tensor(H, dtype=torch.float32, device=dev)
+        return controller(Ht.detach() if detach_h else Ht)
     B = torch.as_tensor(B_feat, dtype=torch.float32, device=dev)
     if H is None:
         return controller(B)
@@ -144,8 +159,8 @@ def build_dataset_p6(ckpt_path, M, layer=0, head=1, heads=None, n_reveals=8,
                                  dev, h_context)
         samples.append({"B_feat": block_b_features(B65), "H": H, "cands": cands,
                         "nll_by_label": dict(zip(labels, nlls)), "sigma_B": sigma_B,
-                        "idx_row": chunks[t:t+1], "clean_perm": clean_perm,
-                        "model": model, "dev": dev})
+                        "B65": np.asarray(B65), "idx_row": chunks[t:t+1],
+                        "clean_perm": clean_perm, "model": model, "dev": dev})
     return samples
 
 
@@ -170,6 +185,11 @@ def train_controller_online(samples, Y_list, L_list, mode="b_only", g_B=None,
         controller = BOnlyController(b_dim=samples[0]["B_feat"].shape[1])
         params = controller.parameters()
         Hs = None
+    elif mode == "h_only":
+        h_dim = h_dim or samples[0]["H"].shape[1]
+        controller = HOnlyController(h_dim)
+        params = controller.parameters()
+        Hs = [s["H"] for s in samples]
     else:
         assert g_B is not None, "residual modes need a pre-trained g_B"
         for p in g_B.parameters():
