@@ -25,14 +25,45 @@ from per_head_order_scan import (
     _attn_to_A_block_predictor_vec,
     _attn_to_A_block_model_vec,
     _attn_to_A_block_content_vec,
+    _attn_to_A_block_loss_aligned_with_none_model_vec,
 )
 from batch_readout.integration_hook import FrozenBetaHook
+
+
+def _attn_to_A_block_strict65_model_vec(attn, reveal_tokens, inv_perm,
+                                        seq_len=SEQ_LEN, num_blocks=N, block_len=BLOCK_LEN):
+    """Single-head strict65 model-frame block graph, EXACT training construction.
+
+    Reproduces ``uniform_label_free_v1`` g_β training input:
+        A65 = loss_aligned_with_none_model(attn, reveal)   # (num_blocks, num_blocks+1)
+        B65 = build_none_separated_B(A65)                  # (65, 65), [None] = node 0
+        B_in = B65[1:, 1:]                                 # (64, 64), [None] stripped
+
+    The [None]/BOS token is kept as a SEPARATE source node (column 0) so its
+    sink mass is isolated, then dropped — NOT folded into block 0 like the
+    ``model`` agg. ``inv_perm`` is unused (model frame); the trainer applies the
+    posthoc model->physical remap. ``FrozenBetaHook.step`` transposes the
+    returned matrix, so we return ``B65[1:,1:].T`` == ``A65[:,1:]`` to land on the
+    training-frame B after that transpose.
+    """
+    del inv_perm  # model frame: no physical remap here
+    from none_separated_block_graph import build_none_separated_B
+    A65 = _attn_to_A_block_loss_aligned_with_none_model_vec(
+        attn, reveal_tokens, seq_len=seq_len, num_blocks=num_blocks, block_len=block_len
+    )  # (..., num_blocks, num_blocks+1)
+    B65 = build_none_separated_B(A65)        # (65, 65)
+    out = B65[1:, 1:].T.astype(np.float32, copy=True)  # step() will transpose back
+    di = np.arange(num_blocks)
+    out[di, di] = 0.0
+    return out
+
 
 _AGG_FN = {"b1": _attn_to_A_block_b1_vec,
            "predictor": _attn_to_A_block_predictor_vec,
            "model": _attn_to_A_block_model_vec,
            "content": _attn_to_A_block_content_vec,
-           "loss_aligned": _attn_to_A_block_loss_aligned_content_vec}
+           "loss_aligned": _attn_to_A_block_loss_aligned_content_vec,
+           "strict65_model": _attn_to_A_block_strict65_model_vec}
 
 
 @torch.no_grad()

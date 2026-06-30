@@ -497,7 +497,7 @@ def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, 
         if hasattr(beta_provider, "_sigma"):
             beta_provider._sigma = cached_sigma
             beta_provider._last_refresh = cached_last_refresh
-        if beta_provider.none_mode in ("model", "content"):
+        if beta_provider.none_mode in ("model", "content", "strict65_model"):
             beta_model = beta_sigma  # already model frame
         else:
             beta_model = physical_blocks_to_model_blocks(beta_sigma, clean_perm)
@@ -891,8 +891,9 @@ def parse_args(default_run_kind="baseline"):
     p.add_argument("--frozen-beta-refresh", type=int, default=1,
                    help="recompute the g_β order every N steps (K-step refresh; 1 = every step). "
                         "Bounds the probe-forward overhead to ~1/N.")
-    p.add_argument("--frozen-beta-none-mode", choices=["b1", "predictor", "model", "content", "loss_aligned"], default="b1",
-                   help="block-aggregation mode for the in-loop probe extraction; must match g_β training (B1=65-node).")
+    p.add_argument("--frozen-beta-none-mode", choices=["b1", "predictor", "model", "content", "loss_aligned", "strict65_model"], default="b1",
+                   help="block-aggregation mode for the in-loop probe extraction; must match g_β training (B1=65-node). "
+                        "strict65_model = EXACT uniform_label_free_v1 frame (loss_aligned_with_none_model + build_none_separated_B, [None] isolated then stripped).")
     p.add_argument("--frozen-beta-rev", action="store_true",
                    help="reverse the frozen g_beta emitted block order, matching audition rows marked rev.")
     # --- head-gated g_beta order hook (extends frozen_beta with multi-head gate) ---
@@ -1893,7 +1894,7 @@ def main(default_run_kind="baseline"):
                     if alpha > 0.0:
                         sigma = beta_provider.physical_order(model, idx_batch, global_step).to(device)
                         # model mode: sigma is in model frame; remap to physical for mixing
-                        if args.frozen_beta_none_mode in ("model", "content"):
+                        if args.frozen_beta_none_mode in ("model", "content", "strict65_model"):
                             sigma = model_blocks_to_physical_blocks(sigma, clean_perm)
                         phys = sigma.unsqueeze(0).expand(args.batch_size, -1)
                         # Per-sample alpha mixing (same pattern as graph_rw)
