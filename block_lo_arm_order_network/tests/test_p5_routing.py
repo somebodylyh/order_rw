@@ -39,6 +39,16 @@ def test_priority_matrix_alignment():
         np.testing.assert_allclose(Y[k], candidate_priority(cands[lab], N))
 
 
+def test_priority_matrix_dedups_identical_orders():
+    # phys/local both = identity -> must collapse to one row (avoids softmax tie)
+    cands = {"phys": np.arange(N), "local": np.arange(N),
+             "rev": np.arange(N)[::-1].copy()}
+    labels, Y = priority_matrix(cands)
+    assert Y.shape == (2, N)
+    assert ("phys" in labels) ^ ("local" in labels)   # exactly one kept
+    assert "rev" in labels
+
+
 # ── loss ─────────────────────────────────────────────────────────────────────
 
 def test_routing_loss_matches_manual():

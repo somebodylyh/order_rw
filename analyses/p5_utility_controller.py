@@ -451,8 +451,20 @@ def candidate_priority(sigma, n=N):
 
 
 def priority_matrix(cands):
-    """cands: {label -> sigma}. Returns (sorted labels, Y of shape (K, N))."""
-    labels = sorted(cands)
+    """cands: {label -> sigma}. Returns (labels, Y of shape (K, N)).
+
+    Byte-identical candidate orders are deduplicated (keeping the first by sorted
+    label). Without this, e.g. candidate_orders' 'phys'/'local' (both = identity)
+    produce two equal logits and softmax floors at entropy ln(2)/max_p 0.5, pinning
+    the argmax pool selection to a degenerate tie."""
+    seen = {}
+    labels = []
+    for lab in sorted(cands):
+        key = tuple(np.asarray(cands[lab], dtype=np.int64).tolist())
+        if key in seen:
+            continue
+        seen[key] = lab
+        labels.append(lab)
     Y = np.stack([candidate_priority(cands[l]) for l in labels], axis=0)
     return labels, Y.astype(np.float32)
 
