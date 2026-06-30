@@ -66,10 +66,14 @@ def routing_loss_from_scores(z, Y, L, tau=0.3, beta_entropy=0.0):
 def controller_scores(controller, B_feat, H=None, detach_h=True):
     """z = g_B(B) [+ alpha g_H(H)].  detach_h=True stops controller-loss gradient
     from flowing back into the model's hidden states H (the safe B2a default)."""
-    B = torch.as_tensor(B_feat, dtype=torch.float32)
+    try:
+        dev = next(controller.parameters()).device
+    except StopIteration:
+        dev = "cpu"
+    B = torch.as_tensor(B_feat, dtype=torch.float32, device=dev)
     if H is None:
         return controller(B)
-    Ht = torch.as_tensor(H, dtype=torch.float32)
+    Ht = torch.as_tensor(H, dtype=torch.float32, device=dev)
     if detach_h:
         Ht = Ht.detach()
     return controller(B, Ht)
