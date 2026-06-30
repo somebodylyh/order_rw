@@ -29,6 +29,9 @@ from clean_training_protocol import physical_blocks_to_model_token_order  # noqa
 from analyses.canonical_reanalysis import random_reveal_orders  # noqa: E402
 from per_head_order_scan import _attn_to_A_block_loss_aligned_with_none_vec  # noqa: E402
 from none_separated_block_graph import build_none_separated_B  # noqa: E402
+from neural_readout.extract_b import (   # noqa: E402
+    _load_model_and_chunks, _chunks_from_continuous_stream,
+)
 
 
 # ── Task 2: normalized (cosine) candidate logits ─────────────────────────────
@@ -388,21 +391,47 @@ def _set_trainable(model):
     return model
 
 
+def _b2_setup(ckpt_path, M_val, device, data_mode, M_train, val_seed=12345):
+    """Load model + a FIXED held-out val set. For continuous ckpts also return the
+    ckpt dict so train windows can be re-sampled fresh from the memmap stream."""
+    if data_mode == "continuous":
+        # Fixed val windows from the stream at a dedicated val_seed (disjoint from
+        # the rotating training seeds -> held-out from the continuation training).
+        model, val_chunks, clean_perm, dev, _ = _load_model_and_chunks(
+            ckpt_path, M_val, seed=val_seed, device=device, split="train")
+        ckpt_dict = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        return model, val_chunks, clean_perm, dev, ckpt_dict
+    # fixed mode (tiny CPU tests): one pooled set, first M_train train / rest val
+    model, chunks, clean_perm, dev = load_p5_ckpt(ckpt_path, M_train + M_val, device=device)
+    return model, chunks, clean_perm, dev, None
+
+
 def train_b2_arm(ckpt_path, mode, M_train=16, M_val=8, batch=4, steps=100,
                  n_reveals=4, K=6, h_layer=1, layer=0, heads=(1, 2, 3, 4),
                  tau=0.3, lr=1e-4, beta_entropy=0.0, detach_h=True, refresh_every=10,
-                 eval_every=25, alpha_init=0.01, device="cpu", seed=0):
-    """One B2 arm: continue training the model + controller from `ckpt_path`."""
+                 eval_every=25, alpha_init=0.01, device="cpu", seed=0,
+                 data_mode="continuous"):
+    """One B2 arm: continue training model + controller from `ckpt_path`.
+
+    data_mode='continuous' (default): each refresh draws a FRESH batch from the
+    memmap train stream (no fixed-pool reuse -> no overfit confound); val is a
+    fixed held-out window set. 'fixed': legacy single pool (tiny CPU tests only)."""
     rng = np.random.default_rng(seed)
-    model, chunks, clean_perm, dev = load_p5_ckpt(ckpt_path, M_train + M_val, device=device)
+    model, val_chunks, clean_perm, dev, ckpt_dict = _b2_setup(
+        ckpt_path, M_val, device, data_mode, M_train)
     _set_trainable(model)
     inv = clean_perm.inv_perm_model_to_phys.cpu().numpy()
     reveals = random_reveal_orders(n_reveals, 0)
-    all_idx = np.arange(M_train + M_val)
-    tr_idx, va_idx = all_idx[:M_train], all_idx[M_train:]
+
+    if data_mode == "continuous":
+        va_chunks, va_idx = val_chunks, np.arange(min(M_val, len(val_chunks)))
+    else:
+        all_idx = np.arange(M_train + M_val)
+        va_chunks, va_idx = val_chunks, all_idx[M_train:]      # val_chunks is the pool
+        tr_idx = all_idx[:M_train]
 
     b_dim = 2 * (N + 1)                                          # block_b_features width
-    h_dim = block_hidden_states(model, chunks[0:1], np.arange(N), clean_perm, h_layer,
+    h_dim = block_hidden_states(model, va_chunks[0:1], np.arange(N), clean_perm, h_layer,
                                 dev).shape[1]
     controller = make_b2_controller(b_dim, h_dim, mode, alpha_init=alpha_init, device=dev)
     params = [p for p in model.parameters() if p.requires_grad] + \
@@ -413,15 +442,22 @@ def train_b2_arm(ckpt_path, mode, M_train=16, M_val=8, batch=4, steps=100,
     live = None
     for step in range(steps):
         if step % refresh_every == 0:
-            mb = rng.choice(tr_idx, size=min(batch, len(tr_idx)), replace=False)
-            live = build_live_samples(model, chunks, clean_perm, dev, mb, reveals, inv,
+            if data_mode == "continuous":
+                tr_chunks, _ = _chunks_from_continuous_stream(
+                    ckpt_dict, clean_perm, batch, seed=seed + 1 + step, device=device)
+                mb = np.arange(batch)
+            else:
+                tr_chunks = va_chunks
+                mb = rng.choice(tr_idx, size=min(batch, len(tr_idx)), replace=False)
+            live = build_live_samples(model, tr_chunks, clean_perm, dev, mb, reveals, inv,
                                       layer, list(heads), h_layer, K, rng)
+            _set_trainable(model)
         opt.zero_grad()
         loss, ent = b2_routing_step(model, controller, live, clean_perm, dev, tau,
                                     beta_entropy, detach_h, mode)
         loss.backward(); opt.step()
         if step % eval_every == 0 or step == steps - 1:
-            vfn = b2_eval_fixed_order(model, chunks, clean_perm, dev, va_idx)
+            vfn = b2_eval_fixed_order(model, va_chunks, clean_perm, dev, va_idx)
             hist["step"].append(step); hist["loss"].append(float(loss))
             hist["entropy"].append(ent); hist["val_fixed_nll"].append(vfn)
             _set_trainable(model)
