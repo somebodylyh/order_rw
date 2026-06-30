@@ -88,6 +88,54 @@ This is a single-ckpt null. It does not prove H *never* carries utility in
 any model/scenario, but the exhaustive sweep makes it unlikely within the
 current fixed-layout, 4-layer regime.
 
+## Version A — Direct-NLL soft-routing (2026-06-30)
+
+> Spec: `docs/superpowers/specs/2026-06-30-p5-direct-nll-soft-routing-design.md`
+
+Replaced the pairwise-teacher imitation objective with NLL-weighted candidate
+routing on the SAME frozen scaffold: `z=g_B(B)[+α g_H(H)]`, `a_k=z·y_k`,
+`p_k=softmax(a_k/τ)`, `L=Σ_k p_k·L_k` (L_k pre-computed → model not in grad path).
+Positioning: a gradient sanity-check + B-only objective comparison, NOT a new H
+claim. seed123 step10k, M=64, τ∈{0.03,0.1,0.3,1.0}.
+
+**Verdict — A1✅ routing works; A2 direct ties pairwise on pool-select but is a
+worse ranker; A3✅ H still null.**
+
+| metric (τ=0.3, main L0H1) | pairwise B-only | direct B-only | direct B+H |
+|---|---|---|---|
+| **pool-selected** regret | 0.0033 | 0.0033 | 0.0033 |
+| **free-argsort** regret | **0.138** | 0.168 | 0.193 |
+
+- **A1**: routing loss trains stably (3.78→3.65 every run). Controllers move
+  selection OFF σ_B (headroom 0.0436) onto the near-optimal candidate
+  (regret 0.0033) — capturing ~92% of pool headroom. Routing does real work.
+- **Pool-selected is degenerate-easy**: the identity/physical order is
+  near-optimal for nearly all texts, so every controller (pairwise/direct/all H
+  arms) routes to it → no discrimination on the primary metric. Consistent with
+  the project-wide "text → physical/L2R near-optimal" finding.
+- **A2 discrimination lives in free-argsort**: pairwise (dense N² constraints)
+  yields a better general ranker than direct (sparse K-candidate constraints) —
+  pairwise regret_free ~0.13 vs direct ~0.17-0.20, **consistent across all τ and
+  both scaffold configs**. As flagged in the spec: direct-NLL learns a candidate
+  *router*, not a *ranker*.
+- **A3 — H null confirmed under the cleaner objective**: `direct_bh_real` ≈
+  `direct_b_only` ≈ `direct_bh_zero` on both metrics; no consistent shuffle/mean
+  drop. The frozen-posthoc H null survives the objective change.
+
+**Watchpoints carried to Version B:**
+1. Direct routing's logit scale is unnormalized — z grows during training and
+   saturates softmax (entropy→0, max_p→1) even at τ=1.0, so τ loses control.
+   Normalize `a_k` (or constrain z) in B.
+2. Direct learns a router, not a ranker → **B should keep candidate
+   soft-routing, not a hard argsort(z) controller**.
+
+Bug fixed mid-run: `candidate_orders` has `phys`==`local` (both identity); the
+duplicate produced two equal logits → softmax floored at entropy ln(2)/max_p 0.5,
+pinning argmax to a tie. Deduplicated byte-identical orders in `priority_matrix`
+(shared `candidate_orders`/Phase-0 untouched).
+
+Outputs: `runs/p5/seed123/routing_A/{main_L0H1,control_multihead}.json`.
+
 ## Code
 
 - `analyses/p5_utility_controller.py` — full pipeline (order NLL, scaffold,
