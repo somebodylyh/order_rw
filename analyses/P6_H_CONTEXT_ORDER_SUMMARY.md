@@ -95,18 +95,25 @@ dynamic) cannot even beat L2R; hill-climb best beats it by 0.26 nat and the orde
 are anti-correlated. → **The +0.19 headroom is genuine, non-myopic, sample-specific
 order structure, NOT an easy-first teacher-forced-NLL artifact.**
 
-## Now OPEN — is the structure LEARNABLE (P7 line)?
+## Learnability probe — DONE: σ* is NOT supervised-learnable (search-only)
 
-Existence is settled; the question is whether any feature predicts σ* (hill-climb
-best order). P7 plan: (1) **predictability probe** `p7_predictability_probe.py` —
-feature→σ* learnability, frame-correct physical-block features (B/H position
-controls vs content-embedding / one-step-difficulty); (2) if a feature predicts
-σ*, train a **Plackett-Luce reveal policy** via AO-NLL policy gradient (EMA
-baseline train; L2R/B-only/greedy/oracle eval). Key constraint from above:
-structure is non-myopic + content-dependent, and (B,H) is position-only → static
-(B,H) policy likely insufficient; the bet is content features + a dynamic
-π(i|x,R_t) policy. Reranker history warns σ* may be hard to predict (oracle Δ huge,
-MLP Δ≈0) — the probe is the cheap decisive gate before any RL.
+`p7_predictability_probe.py`, seed123 10k, M=40, held-out test=12. No per-block
+feature predicts σ* well enough to beat L2R (all pred orders +0.14–0.19 WORSE than
+L2R): B τ*=0.34, H 0.24, H⊥ 0.06, **content −0.02, one-step −0.03**. Content
+embedding and local difficulty have ~zero correlation with σ*; B/H carry only a
+weak position component. → **context-dependent order exists but is search-only; the
+content-specific deviation that beats L2R is in none of the available features.**
+
+Full paired result: `analyses/P7_CONTEXT_ORDER_FINDINGS.md`.
+
+## Final experiment — P7 loss-only (in progress)
+
+Last check: can AO-NLL policy-gradient *exploration* break the probe null? Train
+the reveal MLP directly from AO-GPT NLL as a Plackett-Luce policy (EMA-baseline PG,
+frozen AO-GPT, train/test split), arms B/B+H/B+H⊥/random vs L2R/oracle.
+**Locked caveat: loss gives a training signal, not input information** — if B/H
+carry only position, PG explores but cannot generalize a content-dependent policy.
+`analyses/p7_reveal_policy.py`.
 
 ## Code / artifacts (branch p5-direct-nll-routing)
 
