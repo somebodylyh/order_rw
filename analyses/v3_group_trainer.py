@@ -12,7 +12,9 @@ from __future__ import annotations
 import inspect
 import json
 import math
+import os
 import pathlib
+import random
 import sys
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -29,14 +31,17 @@ for path in (ROOT, BLOCK_ROOT):
 
 from analyses.order_head_module import AOGPTWithOrderHead, OrderHeadModule
 from analyses.p5_utility_controller import BLOCK_LEN, N, load_p5_ckpt
-from analyses.p7_gbeta_policy import GBETA_CKPT, sample_pl
+from analyses.p7_gbeta_policy import GBETA_CKPT
 from analyses.v3_group_credit import GroupEMA, group_ids_for, group_rewards, per_sample_loss
 from batch_readout.hook_order_provider import random_probe_token_orders
 from clean_training_protocol import (
+    batch_indices_for_step,
     build_phys_to_model_token_gather,
     physical_blocks_to_model_token_order,
+    phys_to_model_idx_clean,
     sample_stream_batch,
 )
+from training_utils import load_train_chunks
 
 
 ARMS = {
@@ -78,47 +83,36 @@ class _ContinuousBatchSource:
     seed: int
     start_step: int
 
-    def __post_init__(self):
-        self._heldout_keys = {
-            row.contiguous().numpy().tobytes() for row in self.heldout.cpu()
-        }
-
-    def batch(self, local_step):
-        """Lazily sample the continuation stream; never materialize all steps."""
-        micro = 0
-        while True:
-            physical = sample_stream_batch(
-                self.stream,
-                self.batch_size,
-                self.block_size,
-                self.seed,
-                self.start_step + int(local_step),
-                micro,
-            )
-            model = physical[:, self.gather]
-            # The fixed held-out batch is never returned for training.  Exact row
-            # comparison also protects tiny synthetic streams used by tests.
-            collision = any(
-                row.contiguous().numpy().tobytes() in self._heldout_keys
-                for row in model
-            )
-            if not collision:
-                return model
-            micro += 1
-            if micro > 1024:
-                raise RuntimeError("could not draw a training batch disjoint from held-out data")
+    def batch(self, global_step, micro_step):
+        """Exact production sampler used by ``train_clean_aogpt`` continuation."""
+        physical = sample_stream_batch(
+            self.stream,
+            self.batch_size,
+            self.block_size,
+            self.seed,
+            int(global_step),
+            int(micro_step),
+        )
+        return physical[:, self.gather]
 
 
 @dataclass
-class _FiniteBatchSource:
+class _ClassicBatchSource:
     chunks: torch.Tensor
+    train_shuffle_order: np.ndarray
     heldout: torch.Tensor
     batch_size: int
+    grad_accum: int
 
-    def batch(self, local_step):
-        start = (int(local_step) * self.batch_size) % len(self.chunks)
-        ids = (torch.arange(self.batch_size) + start) % len(self.chunks)
-        return self.chunks.index_select(0, ids)
+    def batch(self, global_step, micro_step):
+        ids = batch_indices_for_step(
+            self.train_shuffle_order,
+            global_step,
+            micro_step,
+            self.batch_size,
+            self.grad_accum,
+        )
+        return self.chunks.index_select(0, torch.as_tensor(ids, dtype=torch.long))
 
 
 def _load_training_context(ckpt_path, batch_size, n_steps, device):
@@ -129,24 +123,37 @@ def _load_training_context(ckpt_path, batch_size, n_steps, device):
     Classic chunk checkpoints fall back to a bounded deterministic pool; the
     result metadata makes that fallback explicit.
     """
-    model, heldout, clean_perm, dev = load_p5_ckpt(ckpt_path, batch_size, device=device)
-    heldout = torch.stack(list(heldout)) if not isinstance(heldout, torch.Tensor) else heldout
+    model, _fallback, clean_perm, dev = load_p5_ckpt(ckpt_path, 1, device=device)
     raw = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     meta = {
         "args": raw.get("args", {}),
         "global_step": raw.get("global_step", raw.get("iter_num", 0)),
         "iter_num": raw.get("iter_num", 0),
         "optimizer": raw.get("optimizer"),
+        "clean_protocol": raw.get("clean_protocol", {}),
     }
     del raw
     args = meta.get("args", {})
     start_step = int(meta.get("global_step", meta.get("iter_num", 0)))
+    grad_accum = int(args.get("grad_accum", 1))
 
     if args.get("data_source") == "continuous":
         from clean_training_protocol import load_token_stream
 
         stream = load_token_stream(args["train_bin"])
         gather = build_phys_to_model_token_gather(clean_perm, BLOCK_LEN)
+        val_stream = load_token_stream(args["val_bin"])
+        eval_windows = sample_stream_batch(
+            val_stream,
+            int(args.get("stream_eval_windows", batch_size)),
+            N * BLOCK_LEN,
+            int(args.get("permute_seed", 0)),
+            -1,
+            0,
+        )[:, gather]
+        if eval_windows.shape[0] < batch_size:
+            raise ValueError("continuous checkpoint lacks enough fixed held-out eval windows")
+        heldout = eval_windows[:batch_size].clone()
         source = _ContinuousBatchSource(
             stream=stream,
             gather=gather,
@@ -158,14 +165,21 @@ def _load_training_context(ckpt_path, batch_size, n_steps, device):
         )
         meta["data_source_mode"] = "continuous_lazy"
     else:
-        # A bounded pool avoids an n_steps*batch_size allocation.  This path is
-        # not the Phase-1 production protocol and is identified in the result.
-        pool_size = max(batch_size, min(max(n_steps * batch_size, batch_size), 4096))
-        _, pool, _, _ = load_p5_ckpt(ckpt_path, pool_size + batch_size, device=device)
-        pool = torch.stack(list(pool)) if not isinstance(pool, torch.Tensor) else pool
-        source = _FiniteBatchSource(pool[batch_size:], pool[:batch_size], batch_size)
+        protocol = meta["clean_protocol"]
+        idx_phys = load_train_chunks(n_chunks=None)
+        idx_model = phys_to_model_idx_clean(idx_phys, clean_perm)
+        eval_ids = torch.as_tensor(protocol["eval_indices"], dtype=torch.long)
+        if eval_ids.numel() < batch_size:
+            raise ValueError("checkpoint lacks enough fixed held-out eval chunks")
+        source = _ClassicBatchSource(
+            idx_model,
+            np.asarray(protocol["train_shuffle_order"], dtype=np.int64),
+            idx_model.index_select(0, eval_ids[:batch_size]),
+            batch_size,
+            grad_accum,
+        )
         heldout = source.heldout
-        meta["data_source_mode"] = "bounded_chunk_pool"
+        meta["data_source_mode"] = "classic_exact_cursor"
     return model, source, clean_perm, dev, meta
 
 
@@ -252,9 +266,10 @@ def _build_optimizer(model, order_head, train_orderhead, meta, lr_backbone, lr_o
                 for group in optimizer.param_groups:
                     group["fused"] = False
             resume_status = "loaded"
-        except (ValueError, RuntimeError) as exc:
-            # All arms take this same path.  Never silently claim an exact resume.
-            resume_status = f"not_loaded:{type(exc).__name__}:{exc}"
+        except (KeyError, ValueError, RuntimeError) as exc:
+            raise RuntimeError(
+                "source checkpoint contains optimizer state but exact restore failed"
+            ) from exc
 
     if train_orderhead:
         optimizer.add_param_group({
@@ -270,7 +285,7 @@ def _build_optimizer(model, order_head, train_orderhead, meta, lr_backbone, lr_o
 
 def _grad_norm(parameters):
     squared = sum(
-        p.grad.detach().float().square().sum().item()
+        p.grad.detach().double().square().sum().item()
         for p in parameters
         if p.grad is not None
     )
@@ -288,8 +303,113 @@ def _parameter_delta(parameters, before):
     ))
 
 
-def _deterministic_order(scores):
-    return np.argsort(-scores.detach().cpu().numpy(), kind="stable").astype(np.int64)
+def _sample_pl_order(scores, tau):
+    """Sample a PL permutation without moving scores or selected indices to CPU."""
+    available = torch.ones(scores.shape[0], dtype=torch.bool, device=scores.device)
+    order = []
+    logp = scores.new_zeros(())
+    entropy = scores.new_zeros(())
+    for _ in range(scores.shape[0]):
+        logits = (scores / tau).masked_fill(~available, -torch.inf)
+        distribution = torch.distributions.Categorical(logits=logits)
+        selected = distribution.sample()
+        logp = logp + distribution.log_prob(selected)
+        entropy = entropy + distribution.entropy()
+        order.append(selected)
+        available[selected] = False
+    return torch.stack(order), logp, entropy
+
+
+def _atomic_json(path, value):
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    temporary.write_text(
+        json.dumps(value, indent=2, allow_nan=False), encoding="utf-8"
+    )
+    os.replace(temporary, path)
+
+
+def _atomic_torch_save(path, value):
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    torch.save(value, temporary)
+    os.replace(temporary, path)
+
+
+def _rng_state():
+    state = {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "torch": torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        state["cuda"] = torch.cuda.get_rng_state_all()
+    return state
+
+
+def _restore_rng_state(state):
+    random.setstate(state["python"])
+    np.random.set_state(state["numpy"])
+    torch.set_rng_state(state["torch"])
+    if "cuda" in state and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all(state["cuda"])
+
+
+def _finite_scalar(value):
+    return bool(torch.isfinite(value.detach()).all().item())
+
+
+def _finite_gradients(parameters):
+    return all(
+        p.grad is None or bool(torch.isfinite(p.grad.detach()).all().item())
+        for p in parameters
+    )
+
+
+def _resume_config(ckpt_path, arm, batch_size, m, grad_accum, tau, beta,
+                   ema_alpha, adv_clip, lr_backbone, lr_orderhead,
+                   policy_seed, eval_steps):
+    return {
+        "ckpt_path": str(ckpt_path),
+        "arm": arm,
+        "batch_size": int(batch_size),
+        "m": m,
+        "grad_accum": int(grad_accum),
+        "tau": float(tau),
+        "beta": float(beta),
+        "ema_alpha": float(ema_alpha),
+        "adv_clip": float(adv_clip),
+        "lr_backbone": float(lr_backbone),
+        "lr_orderhead": float(lr_orderhead),
+        "policy_seed": int(policy_seed),
+        "eval_steps": sorted(int(step) for step in eval_steps),
+    }
+
+
+def _checkpoint_payload(model, order_head, optimizer, ema, *, config,
+                        next_local_step, start_global_step, logs, evals,
+                        token_loss_contract, pg_only_backbone_grad, failure):
+    return {
+        "version": 1,
+        "backbone": model.state_dict(),
+        "orderhead": order_head.gbeta.state_dict() if order_head is not None else None,
+        "optimizer": optimizer.state_dict(),
+        "group_ema": None if ema is None or ema.b is None else ema.b.detach().cpu(),
+        "rng": _rng_state(),
+        "cursor": {
+            "next_local_step": int(next_local_step),
+            "next_global_step": int(start_global_step + next_local_step),
+            "next_micro_step": 0,
+        },
+        "config": config,
+        "log": logs,
+        "evals": evals,
+        "token_loss_contract": token_loss_contract,
+        "pg_only_backbone_grad": float(pg_only_backbone_grad),
+        "failure": failure,
+    }
 
 
 def train_arm(
@@ -310,9 +430,14 @@ def train_arm(
     tag="phase1",
     eval_steps=(),
     evaluator=None,
+    resume_from=None,
+    save_checkpoints=True,
+    allow_batch_size_override=False,
 ):
     """Train one Phase-1 arm and return a JSON-serializable result.
 
+    ``n_steps`` is the target number of completed optimizer steps relative to
+    the source checkpoint (not an additional count after ``resume_from``).
     ``eval_steps`` are 1-based local continuation steps.  Task 5's runner is
     responsible for converting its global 10k/15k/... schedule to local steps.
     """
@@ -321,12 +446,22 @@ def train_arm(
     model, source, clean_perm, dev, meta = _load_training_context(
         ckpt_path, batch_size, n_steps, device
     )
+    args = meta.get("args", {})
+    checkpoint_batch_size = int(args.get("batch_size", batch_size))
+    batch_override = checkpoint_batch_size != batch_size
+    if batch_override and not allow_batch_size_override:
+        raise ValueError(
+            f"batch_size={batch_size} conflicts with checkpoint batch_size="
+            f"{checkpoint_batch_size}; pass allow_batch_size_override=True explicitly"
+        )
+    grad_accum = int(args.get("grad_accum", 1))
+    if grad_accum <= 0:
+        raise ValueError("checkpoint grad_accum must be positive")
     model.train()
 
     order_head = None
     if cfg["use_orderhead"]:
-        order_head = OrderHeadModule(GBETA_CKPT, device=str(dev))
-        order_head.to(dev)
+        order_head = OrderHeadModule(GBETA_CKPT, device=str(dev)).to(dev)
         for parameter in order_head.gbeta.parameters():
             parameter.requires_grad_(cfg["train_orderhead"])
         wrap = AOGPTWithOrderHead(model, order_head, clean_perm, device=str(dev))
@@ -340,142 +475,253 @@ def train_arm(
     )
     backbone_params = list(model.parameters())
     orderhead_params = list(order_head.gbeta.parameters()) if order_head is not None else []
+    # These snapshots are deliberately taken from the original source checkpoint,
+    # before an optional run-resume state is loaded.
     backbone_before = _snapshot(backbone_params)
     orderhead_before = _snapshot(orderhead_params)
 
     groups = group_ids_for(batch_size, resolved_m) if cfg["use_orderhead"] else []
     ema = GroupEMA(len(groups), ema_alpha) if cfg["train_orderhead"] else None
     start_step = int(meta.get("global_step", meta.get("iter_num", 0)))
-    policy_seed = int(meta.get("args", {}).get("seed", 0))
+    policy_seed = int(args.get("seed", 0))
+    eval_step_set = {int(step) for step in eval_steps}
+    output = pathlib.Path(out_dir) / str(tag) / arm
+    checkpoint_dir = output / "checkpoints"
+    output.mkdir(parents=True, exist_ok=True)
+    config = _resume_config(
+        ckpt_path, arm, batch_size, resolved_m, grad_accum, tau, beta,
+        ema_alpha, adv_clip, base_lr, lr_orderhead, policy_seed, eval_step_set,
+    )
+
     torch.manual_seed(policy_seed)
+    np.random.seed(policy_seed)
+    random.seed(policy_seed)
     if dev.type == "cuda":
         torch.cuda.manual_seed_all(policy_seed)
-    eval_step_set = {int(step) for step in eval_steps}
     logs, evals = [], []
     pg_only_backbone_grad = 0.0
     token_loss_contract = None
+    next_local_step = 0
+    failure = None
 
-    for local_step in range(n_steps):
-        global_step = start_step + local_step
-        idx = source.batch(local_step).to(dev)
-        logps, entropies = [], []
-
-        if arm == "l2r":
-            physical = torch.arange(N, dtype=torch.long).repeat(batch_size, 1)
-            token_order = physical_blocks_to_model_token_order(
-                physical, clean_perm, BLOCK_LEN
-            ).to(dev)
+    if resume_from is not None:
+        resume = torch.load(resume_from, map_location=dev, weights_only=False)
+        if resume.get("config") != config:
+            raise ValueError("resume checkpoint config does not match requested run")
+        if resume.get("failure") is not None:
+            raise ValueError("refusing to resume a failed/non-finite checkpoint")
+        model.load_state_dict(resume["backbone"])
+        if order_head is None:
+            if resume.get("orderhead") is not None:
+                raise ValueError("resume unexpectedly contains an OrderHead")
         else:
-            model_orders = []
-            for group in groups:
-                group_index = torch.as_tensor(group, dtype=torch.long, device=dev)
-                idx_group = idx.index_select(0, group_index)
-                probe = random_probe_token_orders(
-                    len(group), 0, global_step, dev
-                )
-                scores = wrap.compute_order_logits(idx_group, probe, per_sample=False)[0]
-                # The attention extractor enters eval mode; continuation training
-                # must explicitly return to train mode before the LM forward.
-                model.train()
-                if arm == "frozen_gbeta":
-                    order = _deterministic_order(scores)
-                else:
-                    order, logp, entropy = sample_pl(scores, tau=tau)
-                    logps.append(logp)
-                    entropies.append(entropy)
-                model_orders.append(np.repeat(order[None, :], len(group), axis=0))
-            token_order = wrap.token_orders_from_model_blocks(
-                np.concatenate(model_orders, axis=0)
-            ).to(dev)
+            order_head.gbeta.load_state_dict(resume["orderhead"])
+        try:
+            optimizer.load_state_dict(resume["optimizer"])
+        except (ValueError, RuntimeError) as exc:
+            raise RuntimeError("failed to restore run optimizer exactly") from exc
+        next_local_step = int(resume["cursor"]["next_local_step"])
+        if int(resume["cursor"].get("next_micro_step", 0)) != 0:
+            raise ValueError("only optimizer-step-boundary resumes are supported")
+        if next_local_step > n_steps:
+            raise ValueError("resume cursor is beyond requested target n_steps")
+        logs = list(resume.get("log", []))
+        evals = list(resume.get("evals", []))
+        token_loss_contract = resume.get("token_loss_contract")
+        pg_only_backbone_grad = float(resume.get("pg_only_backbone_grad", 0.0))
+        if ema is not None and resume.get("group_ema") is not None:
+            ema.b = resume["group_ema"].to(dev)
+        _restore_rng_state(resume["rng"])
+        optimizer_resume = f"{optimizer_resume}+run_resume"
 
-        lm_loss, token_losses, contract = _forward_with_token_losses(
-            model, idx, token_order
+    def save_run_checkpoint(label, cursor, checkpoint_failure=None):
+        if not save_checkpoints:
+            return
+        payload = _checkpoint_payload(
+            model, order_head, optimizer, ema, config=config,
+            next_local_step=cursor, start_global_step=start_step,
+            logs=logs, evals=evals, token_loss_contract=token_loss_contract,
+            pg_only_backbone_grad=pg_only_backbone_grad,
+            failure=checkpoint_failure,
         )
-        token_loss_contract = contract
-        if cfg["train_orderhead"]:
-            logp = torch.stack(logps)
-            entropy = torch.stack(entropies)
-            # Reward and advantage are numerical feedback, never a differentiable
-            # path into AO-GPT.
-            ell_i = per_sample_loss(token_losses.detach())
-            ell_g = group_rewards(ell_i, groups)
-            baseline = ema.update(ell_g)
-            advantage = (baseline - ell_g).detach().clamp(-adv_clip, adv_clip)
-            pg = -(advantage * logp).mean() - float(beta) * entropy.mean()
-            pg_grads = torch.autograd.grad(
-                pg,
-                backbone_params,
-                retain_graph=True,
-                allow_unused=True,
-            )
-            pg_only_backbone_grad = max(
-                pg_only_backbone_grad,
-                float(sum(
-                    grad.detach().abs().sum().item()
-                    for grad in pg_grads
-                    if grad is not None
-                )),
-            )
-            total_loss = lm_loss + pg
-            entropy_value = float(entropy.detach().mean().item())
-        else:
-            pg = lm_loss.new_zeros(())
-            total_loss = lm_loss
-            entropy_value = 0.0
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        _atomic_torch_save(checkpoint_dir / f"{label}.pt", payload)
+        _atomic_torch_save(checkpoint_dir / "latest.pt", payload)
 
+    for local_step in range(next_local_step, n_steps):
+        global_step = start_step + local_step
         optimizer.zero_grad(set_to_none=True)
-        total_loss.backward()
+        lm_values, pg_values, entropy_values = [], [], []
+
+        for micro_step in range(grad_accum):
+            idx = source.batch(global_step, micro_step).to(dev)
+            logps, entropies = [], []
+
+            if arm == "l2r":
+                physical = torch.arange(N, dtype=torch.long).repeat(batch_size, 1)
+                token_order = physical_blocks_to_model_token_order(
+                    physical, clean_perm, BLOCK_LEN
+                ).to(dev)
+            else:
+                probe_step = global_step * grad_accum + micro_step
+                probe = random_probe_token_orders(batch_size, 0, probe_step, dev)
+                selected_A = wrap.extract_B(idx, probe).detach()
+                model.train()
+                model_orders = []
+                for group in groups:
+                    group_index = torch.as_tensor(group, dtype=torch.long, device=dev)
+                    group_A = selected_A.index_select(0, group_index)
+                    scores = order_head.scores(group_A, per_sample=False)[0]
+                    if arm == "frozen_gbeta":
+                        order = torch.argsort(scores.detach(), descending=True, stable=True)
+                    else:
+                        order, logp, entropy = _sample_pl_order(scores, tau=tau)
+                        logps.append(logp)
+                        entropies.append(entropy)
+                    model_orders.append(order.unsqueeze(0).expand(len(group), -1))
+                order_model = torch.cat(model_orders, dim=0)
+                inv_perm = clean_perm.inv_perm_model_to_phys.to(dev)
+                order_phys = inv_perm[order_model]
+                token_order = physical_blocks_to_model_token_order(
+                    order_phys, clean_perm, BLOCK_LEN
+                ).to(dev)
+
+            lm_loss, token_losses, contract = _forward_with_token_losses(
+                model, idx, token_order
+            )
+            token_loss_contract = contract
+            if not _finite_scalar(lm_loss):
+                failure = {
+                    "component": "lm_loss", "global_step": global_step,
+                    "local_step": local_step, "micro_step": micro_step,
+                }
+                break
+
+            if cfg["train_orderhead"]:
+                logp = torch.stack(logps)
+                entropy = torch.stack(entropies)
+                ell_i = per_sample_loss(token_losses.detach())
+                ell_g = group_rewards(ell_i, groups)
+                baseline = ema.update(ell_g)
+                advantage = (baseline - ell_g).detach().clamp(-adv_clip, adv_clip)
+                pg = -(advantage * logp).mean() - float(beta) * entropy.mean()
+                if not _finite_scalar(pg):
+                    failure = {
+                        "component": "pg", "global_step": global_step,
+                        "local_step": local_step, "micro_step": micro_step,
+                    }
+                    break
+                pg_grads = torch.autograd.grad(
+                    pg, backbone_params, retain_graph=True, allow_unused=True
+                )
+                pg_only_backbone_grad = max(
+                    pg_only_backbone_grad,
+                    float(sum(
+                        grad.detach().abs().sum().item()
+                        for grad in pg_grads if grad is not None
+                    )),
+                )
+                entropy_value = float(entropy.detach().mean().item())
+            else:
+                pg = lm_loss.new_zeros(())
+                entropy_value = 0.0
+
+            total_loss = lm_loss + pg
+            if not _finite_scalar(total_loss):
+                failure = {
+                    "component": "total_loss", "global_step": global_step,
+                    "local_step": local_step, "micro_step": micro_step,
+                }
+                break
+            (total_loss / grad_accum).backward()
+            lm_values.append(float(lm_loss.detach().item()))
+            pg_values.append(float(pg.detach().item()))
+            entropy_values.append(entropy_value)
+
+        if failure is not None:
+            optimizer.zero_grad(set_to_none=True)
+            break
+        if not _finite_gradients(backbone_params + orderhead_params):
+            failure = {
+                "component": "gradients", "global_step": global_step,
+                "local_step": local_step, "micro_step": grad_accum - 1,
+            }
+            optimizer.zero_grad(set_to_none=True)
+            break
+
         backbone_grad_norm = _grad_norm(backbone_params)
         orderhead_grad_norm = _grad_norm(orderhead_params)
-        grad_clip = float(meta.get("args", {}).get("grad_clip", 0.0))
+        grad_clip = float(args.get("grad_clip", 0.0))
         if grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(backbone_params, grad_clip)
-        lr = _scheduled_lr(global_step, meta.get("args", {}), base_lr)
+        lr = _scheduled_lr(global_step, args, base_lr)
         for param_group in optimizer.param_groups:
             param_group["lr"] = (
                 float(lr_orderhead) if param_group.get("is_orderhead") else lr
             )
         optimizer.step()
+        next_local_step = local_step + 1
 
         entry = {
-            "step": local_step + 1,
+            "step": next_local_step,
             "global_step": global_step + 1,
-            "lm_loss": float(lm_loss.detach().item()),
-            "pg": float(pg.detach().item()),
-            "entropy": entropy_value,
+            "lm_loss": float(np.mean(lm_values)),
+            "pg": float(np.mean(pg_values)),
+            "entropy": float(np.mean(entropy_values)),
             "orderhead_grad_norm": orderhead_grad_norm,
             "backbone_grad_norm": backbone_grad_norm,
             "lr_backbone": float(lr),
         }
         logs.append(entry)
 
-        callback_step = local_step + 1
-        if evaluator is not None and callback_step in eval_step_set:
+        if evaluator is not None and next_local_step in eval_step_set:
             model.eval()
             try:
-                metrics = evaluator(callback_step, model, wrap)
+                metrics = evaluator(next_local_step, model, wrap)
+                if not isinstance(metrics, dict):
+                    raise TypeError("evaluator must return a dict")
+            except Exception as exc:
+                model.train()
+                evaluator_failure = {
+                    "component": "evaluator_exception",
+                    "global_step": global_step + 1,
+                    "local_step": next_local_step,
+                    "micro_step": 0,
+                    "exception_type": type(exc).__name__,
+                }
+                _atomic_json(output / "failure.json", evaluator_failure)
+                save_run_checkpoint(
+                    f"failure_step_{global_step + 1}", next_local_step,
+                    evaluator_failure,
+                )
+                raise
             finally:
                 model.train()
-            if not isinstance(metrics, dict):
-                raise TypeError("evaluator must return a dict")
-            evals.append({"step": callback_step, **metrics})
+            evals.append({"step": next_local_step, **metrics})
+            save_run_checkpoint(f"step_{global_step + 1}", next_local_step)
+
+    if failure is not None:
+        _atomic_json(output / "failure.json", failure)
+        save_run_checkpoint(
+            f"failure_step_{failure['global_step']}", next_local_step, failure
+        )
+    else:
+        save_run_checkpoint(
+            f"step_{start_step + next_local_step}", next_local_step
+        )
 
     orderhead_delta = _parameter_delta(orderhead_params, orderhead_before)
     backbone_delta = _parameter_delta(backbone_params, backbone_before)
-    numeric_log_keys = (
-        "lm_loss", "pg", "entropy", "orderhead_grad_norm", "backbone_grad_norm"
-    )
-    nan = any(
-        not math.isfinite(float(entry[key]))
-        for entry in logs
-        for key in numeric_log_keys
-    )
     result = {
         "ckpt_path": str(ckpt_path),
         "arm": arm,
         "m": resolved_m,
         "n_steps": int(n_steps),
+        "completed_steps": int(next_local_step),
         "batch_size": int(batch_size),
+        "checkpoint_batch_size": checkpoint_batch_size,
+        "batch_size_override": bool(batch_override),
+        "grad_accum": grad_accum,
         "start_global_step": start_step,
         "policy_seed": policy_seed,
         "tau": float(tau),
@@ -484,7 +730,8 @@ def train_arm(
         "adv_clip": float(adv_clip),
         "lr_backbone_base": float(base_lr),
         "lr_orderhead": float(lr_orderhead),
-        "nan": bool(nan),
+        "nan": failure is not None,
+        "failure": failure,
         "orderhead_param_delta": orderhead_delta,
         "backbone_param_delta": backbone_delta,
         "pg_only_backbone_grad": float(pg_only_backbone_grad),
@@ -494,11 +741,7 @@ def train_arm(
         "log": logs,
         "evals": evals,
     }
-    output = pathlib.Path(out_dir) / str(tag) / arm
-    output.mkdir(parents=True, exist_ok=True)
-    (output / "train.json").write_text(
-        json.dumps(result, indent=2, allow_nan=False), encoding="utf-8"
-    )
+    _atomic_json(output / "train.json", result)
     return result
 
 
