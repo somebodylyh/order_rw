@@ -48,3 +48,43 @@ class OrderHeadModule(nn.Module):
             o, lp, e = sample_pl(z[r], tau)
             orders.append(o); logps.append(lp); ents.append(e)
         return np.stack(orders), torch.stack(logps), torch.stack(ents)
+
+
+# ── Task 2: AOGPTWithOrderHead wrapper ───────────────────────────────────────
+
+from batch_readout.hook_order_provider import (  # noqa: E402
+    extract_selected_head_A_for_batch, random_probe_token_orders,  # noqa: F401
+)
+from analyses.p7_gbeta_policy import HEAD, NONE_MODE  # noqa: E402
+from analyses.p5_utility_controller import BLOCK_LEN, N  # noqa: E402, F401
+from clean_training_protocol import physical_blocks_to_model_token_order  # noqa: E402
+
+
+class AOGPTWithOrderHead(nn.Module):
+    """Backbone + internal OrderHead. B is detached before the OrderHead so no
+    policy gradient reaches the backbone (implicit co-adaptation)."""
+
+    def __init__(self, backbone, order_head, clean_perm, device="cpu"):
+        super().__init__()
+        self.backbone = backbone
+        self.order_head = order_head
+        self.clean_perm = clean_perm
+        self.inv_perm = clean_perm.inv_perm_model_to_phys.cpu().numpy()  # [model]=phys
+        self.device = device
+
+    def extract_B(self, idx_batch, probe):
+        A = extract_selected_head_A_for_batch(
+            self.backbone, idx_batch.to(self.device), HEAD, self.clean_perm,
+            self.device, probe, none_mode=NONE_MODE)
+        return A.to(self.device).float()
+
+    def compute_order_logits(self, idx_batch, probe, per_sample):
+        A = self.extract_B(idx_batch, probe).detach()   # DETACH — no grad to backbone
+        return self.order_head.scores(A, per_sample)     # grad on order_head only
+
+    def token_orders_from_model_blocks(self, order_model_BN):
+        phys = self.inv_perm[np.asarray(order_model_BN, dtype=np.int64)]   # (Bs,N) model->phys
+        toks = [physical_blocks_to_model_token_order(
+                    torch.from_numpy(phys[r:r + 1]), self.clean_perm, BLOCK_LEN)[0]
+                for r in range(phys.shape[0])]
+        return torch.stack(toks)                                             # (Bs,T)
