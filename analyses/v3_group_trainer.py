@@ -45,10 +45,11 @@ from training_utils import load_train_chunks
 
 
 ARMS = {
-    "l2r": {"default_m": None, "use_orderhead": False, "train_orderhead": False},
-    "frozen_gbeta": {"default_m": 64, "use_orderhead": True, "train_orderhead": False},
-    "joint_group": {"default_m": 16, "use_orderhead": True, "train_orderhead": True},
-    "joint_batch": {"default_m": 64, "use_orderhead": True, "train_orderhead": True},
+    "l2r":           {"default_m": None, "use_orderhead": False, "train_orderhead": False, "freeze_backbone": False},
+    "frozen_gbeta":  {"default_m": 64,  "use_orderhead": True,  "train_orderhead": False, "freeze_backbone": False},
+    "joint_group":   {"default_m": 16,  "use_orderhead": True,  "train_orderhead": True,  "freeze_backbone": False},
+    "joint_batch":   {"default_m": 64,  "use_orderhead": True,  "train_orderhead": True,  "freeze_backbone": False},
+    "train_gbeta":   {"default_m": 16,  "use_orderhead": True,  "train_orderhead": True,  "freeze_backbone": True},
 }
 
 
@@ -240,36 +241,61 @@ def _scheduled_lr(global_step, args, base_lr):
     return min_lr + coeff * (base_lr - min_lr)
 
 
-def _build_optimizer(model, order_head, train_orderhead, meta, lr_backbone, lr_orderhead, dev):
+def _build_optimizer(model, order_head, train_orderhead, meta, lr_backbone, lr_orderhead,
+                     dev, freeze_backbone=False):
     args = meta.get("args", {})
     base_lr = float(args.get("lr", 1e-4) if lr_backbone is None else lr_backbone)
     weight_decay = float(args.get("weight_decay", 0.1))
     betas = (float(args.get("beta1", 0.9)), float(args.get("beta2", 0.99)))
-    if hasattr(model, "configure_optimizers"):
+
+    if freeze_backbone:
+        # Backbone frozen — only OrderHead params in the optimizer.
+        for p in model.parameters():
+            p.requires_grad_(False)
+        oh_params = list(order_head.gbeta.parameters()) if order_head is not None else []
+        optimizer = torch.optim.AdamW(oh_params, lr=float(lr_orderhead),
+                                      weight_decay=0.0, betas=betas)
+        for group in optimizer.param_groups:
+            group["is_orderhead"] = True
+        resume_status = "backbone_frozen"
+        return optimizer, float(lr_orderhead), resume_status
+    elif hasattr(model, "configure_optimizers"):
         optimizer = model.configure_optimizers(
             weight_decay=weight_decay,
             learning_rate=base_lr,
             betas=betas,
             device_type=dev.type,
         )
+        resume_status = "checkpoint_has_no_optimizer"
+        state = meta.pop("optimizer", None)
+        if state is not None:
+            try:
+                optimizer.load_state_dict(state)
+                if dev.type != "cuda":
+                    for group in optimizer.param_groups:
+                        group["fused"] = False
+                resume_status = "loaded"
+            except (KeyError, ValueError, RuntimeError) as exc:
+                raise RuntimeError(
+                    "source checkpoint contains optimizer state but exact restore failed"
+                ) from exc
     else:
         optimizer = torch.optim.AdamW(
             model.parameters(), lr=base_lr, weight_decay=weight_decay, betas=betas
         )
-
-    resume_status = "checkpoint_has_no_optimizer"
-    state = meta.pop("optimizer", None)
-    if state is not None:
-        try:
-            optimizer.load_state_dict(state)
-            if dev.type != "cuda":
-                for group in optimizer.param_groups:
-                    group["fused"] = False
-            resume_status = "loaded"
-        except (KeyError, ValueError, RuntimeError) as exc:
-            raise RuntimeError(
-                "source checkpoint contains optimizer state but exact restore failed"
-            ) from exc
+        resume_status = "checkpoint_has_no_optimizer"
+        state = meta.pop("optimizer", None)
+        if state is not None:
+            try:
+                optimizer.load_state_dict(state)
+                if dev.type != "cuda":
+                    for group in optimizer.param_groups:
+                        group["fused"] = False
+                resume_status = "loaded"
+            except (KeyError, ValueError, RuntimeError) as exc:
+                raise RuntimeError(
+                    "source checkpoint contains optimizer state but exact restore failed"
+                ) from exc
 
     if train_orderhead:
         optimizer.add_param_group({
@@ -433,6 +459,7 @@ def train_arm(
     resume_from=None,
     save_checkpoints=True,
     allow_batch_size_override=False,
+    gbeta_ckpt=None,
 ):
     """Train one Phase-1 arm and return a JSON-serializable result.
 
@@ -440,9 +467,12 @@ def train_arm(
     the source checkpoint (not an additional count after ``resume_from``).
     ``eval_steps`` are 1-based local continuation steps.  Task 5's runner is
     responsible for converting its global 10k/15k/... schedule to local steps.
+    ``gbeta_ckpt`` overrides the default P7 gβ checkpoint (used by
+    ``frozen_gbeta`` to deploy a Phase-A-trained OrderHead).
     """
     resolved_m = _validate_request(arm, n_steps, batch_size, m, tau)
     cfg = ARMS[arm]
+    freeze_backbone = bool(cfg.get("freeze_backbone", False))
     model, source, clean_perm, dev, meta = _load_training_context(
         ckpt_path, batch_size, n_steps, device
     )
@@ -457,11 +487,16 @@ def train_arm(
     grad_accum = int(args.get("grad_accum", 1))
     if grad_accum <= 0:
         raise ValueError("checkpoint grad_accum must be positive")
-    model.train()
+
+    if freeze_backbone:
+        model.eval()
+    else:
+        model.train()
 
     order_head = None
+    _gbeta_src = gbeta_ckpt if gbeta_ckpt is not None else GBETA_CKPT
     if cfg["use_orderhead"]:
-        order_head = OrderHeadModule(GBETA_CKPT, device=str(dev)).to(dev)
+        order_head = OrderHeadModule(_gbeta_src, device=str(dev)).to(dev)
         for parameter in order_head.gbeta.parameters():
             parameter.requires_grad_(cfg["train_orderhead"])
         wrap = AOGPTWithOrderHead(model, order_head, clean_perm, device=str(dev))
@@ -471,7 +506,7 @@ def train_arm(
 
     optimizer, base_lr, optimizer_resume = _build_optimizer(
         model, order_head, cfg["train_orderhead"], meta,
-        lr_backbone, lr_orderhead, dev,
+        lr_backbone, lr_orderhead, dev, freeze_backbone=freeze_backbone,
     )
     backbone_params = list(model.parameters())
     orderhead_params = list(order_head.gbeta.parameters()) if order_head is not None else []
@@ -572,7 +607,8 @@ def train_arm(
                 probe_step = global_step * grad_accum + micro_step
                 probe = random_probe_token_orders(batch_size, 0, probe_step, dev)
                 selected_A = wrap.extract_B(idx, probe).detach()
-                model.train()
+                if not freeze_backbone:
+                    model.train()
                 model_orders = []
                 for group in groups:
                     group_index = torch.as_tensor(group, dtype=torch.long, device=dev)
@@ -617,22 +653,26 @@ def train_arm(
                         "local_step": local_step, "micro_step": micro_step,
                     }
                     break
-                pg_grads = torch.autograd.grad(
-                    pg, backbone_params, retain_graph=True, allow_unused=True
-                )
-                pg_only_backbone_grad = max(
-                    pg_only_backbone_grad,
-                    float(sum(
-                        grad.detach().abs().sum().item()
-                        for grad in pg_grads if grad is not None
-                    )),
-                )
+                if not freeze_backbone:
+                    pg_grads = torch.autograd.grad(
+                        pg, backbone_params, retain_graph=True, allow_unused=True
+                    )
+                    pg_only_backbone_grad = max(
+                        pg_only_backbone_grad,
+                        float(sum(
+                            grad.detach().abs().sum().item()
+                            for grad in pg_grads if grad is not None
+                        )),
+                    )
                 entropy_value = float(entropy.detach().mean().item())
             else:
                 pg = lm_loss.new_zeros(())
                 entropy_value = 0.0
 
-            total_loss = lm_loss + pg
+            if freeze_backbone:
+                total_loss = pg  # backbone frozen — LM loss not backprop'd
+            else:
+                total_loss = lm_loss + pg
             if not _finite_scalar(total_loss):
                 failure = {
                     "component": "total_loss", "global_step": global_step,
@@ -758,6 +798,20 @@ def train_arm(
         "evals": evals,
     }
     _atomic_json(output / "train.json", result)
+
+    # After a successful train_gbeta run, export the trained gβ for Phase B.
+    # Save in FrozenBetaHook-compatible format: {"model": state_dict, "config": {...}}.
+    if cfg["train_orderhead"] and failure is None and order_head is not None:
+        import torch as _torch
+        _src = _torch.load(_gbeta_src, map_location="cpu", weights_only=False)
+        gbeta_out = output / "gbeta_trained.pt"
+        _atomic_torch_save(gbeta_out, {
+            "model": {k: v.cpu() for k, v in order_head.gbeta.state_dict().items()},
+            "config": _src.get("config", {}),
+        })
+        del _src
+        result["gbeta_ckpt"] = str(gbeta_out)
+
     return result
 
 
