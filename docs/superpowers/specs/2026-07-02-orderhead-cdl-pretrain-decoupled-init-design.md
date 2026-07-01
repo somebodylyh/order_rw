@@ -144,15 +144,29 @@ backward compatible). On a `frozen_beta` run, once `global_step >= unfreeze_at`:
   `σ ~ PL(scores, τ)` sequentially — at each step sample the next block from
   `softmax(scores/τ)` over the remaining blocks, accumulating `logp` and
   `entropy`. τ→0 recovers argsort, so the switch is continuous.
-- **grad-enabled gβ forward**: recompute `scores = gβ(B)` with grad, where `B` is
-  the same batch-mean 8-head strict65 tensor but **detached** (no PG grad into
+- **grad-enabled gβ forward**: recompute `scores = gβ(B_det)` with grad, where
+  `B_det` is the batch-mean 8-head strict65 tensor **detached** (no PG grad into
   the backbone). This is a new grad-enabled path parallel to the provider's
   `@torch.no_grad()` `model_frame_token_order`.
-- reward = downstream **LM-NLL**; PG uses the v3 group-credit machinery
-  (`analyses/v3_group_credit.py`: `group_ids_for`, `group_rewards`,
-  `per_sample_loss`, `GroupEMA`) — reused, not rebuilt:
-  `advantage = (baseline − ell_g).detach().clamp(±adv_clip)`,
-  `L_PG = −(advantage · logp).mean() − β·entropy.mean()`.
+- **B-source invariant (hard):** `B_det` must be constructed **identically** to
+  the frozen provider's `B` — same `batch_mean_probes`, same 8 heads, same
+  strict65 shape, `none_mode='model'`, same model-frame convention, same
+  diagonal/block slicing, same probe orders/seed protocol. The ONLY difference
+  from Stage 2 is grad-enabled vs `no_grad`. Formally `B_PG == B_frozen-provider`.
+  (Test: frozen no_grad scores vs new grad scores on the same batch are
+  `allclose` and yield identical argsort *before* unfreeze.)
+- **batch-level order (production path):** L0DynamicGBeta stays a batch-mean
+  provider — **one** sampled order `σ_batch` per step, hence **one** `logp`. The
+  m=16 group-credit machinery (`analyses/v3_group_credit.py`: `group_ids_for`,
+  `group_rewards`, `per_sample_loss`, `GroupEMA`) computes per-group losses and
+  EMA baselines, then **aggregates group advantages into a scalar** for the
+  single batch order:
+  `A_batch = mean_g( baseline_g − ell_g ).detach().clamp(±adv_clip)`,
+  `L_PG = −A_batch · logp(σ_batch) − β·entropy`.
+  Here groups serve **baseline variance reduction / diagnostics only** — with one
+  action there is no per-order credit to assign. True group-level orders (one
+  `B_g` and one `σ_g` per group) are deferred to a later `--orderhead-scope group`
+  variant.
 - **CDL never appears.**
 
 **Weight continuity (hard):** θ at the start of Phase B == θ at the end of
@@ -182,12 +196,19 @@ Invariants (tested): before unfreeze, zero `is_orderhead` groups and no gβ para
 ```
 idx ─► backbone.forward_fn(return_attentions) ─► attn ─► 8-head strict65 B
         (batch-mean over probes; none_mode='model')  ─(detach)─► B_det
-B_det ─► gβ(B_det) [GRAD] ─► scores ─► PL sample(scores,τ) ─► σ, logp, entropy
-σ ─► token_order ─► backbone.forward_fn(idx, token_order) ─► per-token CE ─► ell_i
-ell_g = group_rewards(ell_i);  advantage = (baseline − ell_g).detach()
-L_PG = −(advantage·logp).mean() − β·entropy.mean()
+B_det ─► gβ(B_det) [GRAD] ─► scores(model-frame) ─► PL sample(scores,τ)
+        ─► σ_batch (model-frame block order), logp, entropy
+σ_batch ─► token_order ─► backbone.forward_fn(idx, token_order) ─► per-token CE ─► ell_i
+ell_g = group_rewards(ell_i);  A_batch = mean_g(baseline_g − ell_g).detach().clamp(±clip)
+L_PG = −A_batch · logp − β·entropy
 L_total = L_LM + λ_PG · L_PG      # L_LM updates backbone; L_PG updates gβ only
 ```
+
+**Order-frame invariant (hard):** PL returns a **model-frame** block order
+(`scores` are model-frame). `token_order` construction MUST reuse the *same*
+model-frame-block → token-order conversion used by
+`FrozenGBetaModelFrameBlockProvider`. Do **not** introduce the physical-frame
+`order_nll` remap here — that belongs to P7 eval, not production training.
 
 `λ_PG` (`--lam-pg`, default `1.0`): Phase A `L_PG` not constructed (≡ 0);
 Phase B `λ_PG > 0`. Per-token CE reuses the `compute_token_ce` contract
@@ -204,18 +225,29 @@ Phase B `λ_PG > 0`. Per-token CE reuses the `compute_token_ce` contract
 - `--pg-group-m INT` (default `16`) — group size for group-credit advantage.
 - `--pg-beta FLOAT` (default `3e-3`) — entropy bonus.
 - `--pg-adv-clip FLOAT` (default `0.3`).
-- `--cdl-pretrain` (flag): if set and `--frozen-beta-ckpt` absent, run
-  `pretrain_gbeta_cdl(...)` from `--cdl-source-ckpt` (default 10k ckpt) and use
-  its output. `--frozen-beta-ckpt` always overrides (reuse/debug).
+- `--cdl-pretrain` (flag) + `--cdl-source-ckpt` (default 10k ckpt). Resolution
+  (explicit, no accidental expensive producer):
+  - `--frozen-beta-ckpt <path>` present → **always** load it, skip the producer
+    (reuse/debug/reproduction), regardless of `--cdl-pretrain`.
+  - `--cdl-pretrain` set **and** `--frozen-beta-ckpt` absent → run
+    `pretrain_gbeta_cdl(--cdl-source-ckpt, ...)` **before** the training loop and
+    load its output.
+  - neither present → error (do **not** silently trigger the producer on a
+    forgotten ckpt).
 
 ---
 
 ## Red lines (enforced by tests)
 
-1. **No CDL after Stage 1** — the `train_clean_aogpt` loop imports/executes no
-   CDL symbol (`build_dynamic_teacher`, `cdl_rollout_*`, `soft_pairwise_bce_loss`,
-   `build_l0_dynamic_gbeta_dataset`, `train_l0_dynamic_gbeta`). CDL lives only in
-   `pretrain_gbeta_cdl`.
+1. **No CDL after Stage 1** — the training loop (after Stage 1, once the
+   optimizer/loop has started) calls no CDL builder/trainer/teacher function.
+   CDL symbols (`build_dynamic_teacher`, `cdl_rollout_*`, `soft_pairwise_bce_loss`,
+   `build_l0_dynamic_gbeta_dataset`, `train_l0_dynamic_gbeta`) may be imported
+   only inside `pretrain_gbeta_cdl` or behind the `--cdl-pretrain` branch that
+   runs **before** training begins. The red line is enforced by *behavior*, not a
+   whole-file grep: `cdl_calls` does not increase during the loop,
+   `training_loop_cdl_enabled == false`, the producer runs strictly before the
+   optimizer loop, and no `cdl_loss` is ever finite.
 2. **B detached** before the grad-enabled gβ forward (no PG grad into backbone).
 3. **PG advantage detached.**
 4. **PG cannot update the backbone** — assert `∂L_PG/∂backbone ≈ 0`.
@@ -239,10 +271,13 @@ Run-level: `producer_ckpt`, `producer_stage_finished`,
 **Producer (`pretrain_gbeta_cdl`)**
 1. Loadability/shape: output `g_beta_best.pt` loads via
    `FrozenGBetaModelFrameBlockProvider`; `model(B_t)[0]` shape `(Bsz, 64)`, finite.
-2. Learning sanity (primary `pairwise_acc`, secondary τ; soft smoke thresholds):
-   on tiny M, **primary** `pairwise_acc(gβ, CDL) > 0.55`; **secondary**
-   `τ(gβ, CDL) > 0.2`; passing either is acceptable, both reported. Hard `τ>0`
-   rejected.
+2. Learning sanity (primary `pairwise_acc`, secondary τ; soft smoke thresholds).
+   **Teacher source (explicit):** read `teacher_pairwise` (Y_ij in [0,1]) from the
+   Stage-1 `.npz`. Define
+   `pairwise_acc = mean[ sign(score_i − score_j) == sign(teacher_pairwise_ij − 0.5) ]`;
+   if `teacher_weights` present, report both weighted and unweighted. **Primary**
+   `pairwise_acc(gβ, CDL) > 0.55`; **secondary** `τ(gβ order, teacher_consensus_order) > 0.2`.
+   Passing either is acceptable on tiny M, both reported. Hard `τ>0` rejected.
 3. Provenance: `gbeta_provenance.json` records producer + source ckpt + loss_type.
 
 **Schedule (`--unfreeze-orderhead-at-step`)**
@@ -259,6 +294,11 @@ Run-level: `producer_ckpt`, `producer_stage_finished`,
     absent, `frozen_beta` behaves exactly as today (no gβ group, argsort, gβ
     frozen). At most a fixed-seed 1-step smoke comparing `order`, `pg_active`,
     `param_groups`.
+11. **B-source + order-frame invariant:** on the same batch/seed, the frozen
+    provider's `no_grad` scores and the new grad scorer's scores on `B_det` are
+    `allclose`, and their argsort is identical (before unfreeze) — proving Stage 3
+    unfreezes the *same* gβ over the *same* B distribution, and that the
+    model-frame → token-order conversion matches the provider's.
 
 ---
 
@@ -300,3 +340,14 @@ Run-level: `producer_ckpt`, `producer_stage_finished`,
   override.
 - Stage-3 reuses `v3_group_credit` + PL sampling (not rebuilt); `λ_PG` weighting;
   CDL only at init; weight continuity + single param-group insertion invariants.
+- **Stage-3 is batch-level:** one `σ_batch`/`logp` per step; m=16 groups aggregate
+  to a scalar `A_batch` (baseline variance reduction only, no per-order credit).
+  True group-level orders deferred to a later `--orderhead-scope group` variant.
+- `B_PG == B_frozen-provider` (only grad-enabled differs); PL order is model-frame,
+  reusing the provider's model-frame→token conversion (no physical remap).
+- `--cdl-pretrain` never auto-triggers; `--frozen-beta-ckpt` always overrides;
+  neither present is an error.
+- no-CDL red line enforced by behavior (`cdl_calls`, logs, producer-before-loop),
+  not a whole-file import grep.
+- producer `pairwise_acc` uses `teacher_pairwise` from the `.npz`, weighted +
+  unweighted.
