@@ -15,6 +15,12 @@ sys.path.insert(0, str(ROOT))  # import analyses.* as a namespace package
 SEED2_CKPT = str(ROOT / "runs/handoff_overnight/seed2/ckpt_step10000.pt")
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "slow: opt-in tests needing the 10k ckpt / GPU (run with -m slow)"
+    )
+
+
 @pytest.fixture(scope="session")
 def seed2_bundle():
     """(model, chunks, seed) for seed2 step-10000 on CPU."""
