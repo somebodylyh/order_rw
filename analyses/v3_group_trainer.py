@@ -504,6 +504,12 @@ def train_arm(
     next_local_step = 0
     failure = None
 
+    print(
+        f"[{arm}] starting {n_steps} steps, batch_size={batch_size}, "
+        f"m={resolved_m}, grad_accum={grad_accum}, device={dev}",
+        flush=True,
+    )
+
     if resume_from is not None:
         resume = torch.load(resume_from, map_location=dev, weights_only=False)
         if resume.get("config") != config:
@@ -661,6 +667,16 @@ def train_arm(
             )
         optimizer.step()
         next_local_step = local_step + 1
+
+        if next_local_step <= 10 or next_local_step % 500 == 0:
+            print(
+                f"[{arm}] step {next_local_step}/{n_steps} "
+                f"(global {global_step + 1}) "
+                f"lm={float(np.mean(lm_values)):.4f} "
+                f"pg={float(np.mean(pg_values)):.4f} "
+                f"entropy={float(np.mean(entropy_values)):.3f}",
+                flush=True,
+            )
 
         entry = {
             "step": next_local_step,
