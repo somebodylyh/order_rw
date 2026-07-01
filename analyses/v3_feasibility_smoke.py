@@ -2,7 +2,10 @@
 per_sample arm = V3 headline config ([B,T] orders); batch_level arm = broadcast
 sanity/diagnostic. Feasibility sign checks only — NOT a scientific verdict."""
 import sys, json, pathlib
-sys.path.insert(0, "block_lo_arm_order_network")
+_ROOT = pathlib.Path(__file__).resolve().parents[1]
+for _p in (str(_ROOT), str(_ROOT / "block_lo_arm_order_network")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 import numpy as np
 import torch
 from scipy.stats import kendalltau
