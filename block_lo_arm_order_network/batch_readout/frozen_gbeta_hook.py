@@ -243,6 +243,15 @@ class FrozenGBetaModelFrameBlockProvider:
         self._sigma = None
         self._last_refresh = None
 
+    @property
+    def gbeta_module(self):
+        """The underlying L0DynamicGBeta (for Stage-3 freeze/unfreeze + optimizer).
+
+        FrozenGBetaModelFrameBlockProvider wraps FrozenGBetaModelFrameProvider as
+        ``self._provider``, which builds the readout as ``.model``.
+        """
+        return self._provider.model
+
     @torch.no_grad()
     def physical_order(self, model, idx_batch, global_step):
         """Return **model-frame** block order (N,) int64.

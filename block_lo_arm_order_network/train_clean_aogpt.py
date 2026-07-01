@@ -1925,9 +1925,31 @@ def main(default_run_kind="baseline"):
     if args.track_head_maps and start_step % int(args.track_head_map_interval) == 0:
         _track_head_maps_raw(model, start_step)
 
+    # ── Stage-3 setup: gβ stays frozen through Phase A; unfreeze fires in-loop ──
+    pg_state = None
+    unfreeze_state = {"unfrozen": False}
+    if args.run_kind == "frozen_beta" and args.unfreeze_orderhead_at_step is not None:
+        if not hasattr(beta_provider, "gbeta_module"):
+            raise ValueError(
+                "--unfreeze-orderhead-at-step requires the batch-mean multi-head "
+                "gβ provider (use --batch-mean-probes >1); the current "
+                f"{type(beta_provider).__name__} exposes no gbeta_module.")
+        from analyses.v3_group_credit import group_ids_for, GroupEMA
+        _gb = beta_provider.gbeta_module
+        for _p in _gb.parameters():
+            _p.requires_grad_(False)  # frozen through Phase A
+        _groups = group_ids_for(args.batch_size, args.pg_group_m)
+        pg_state = {"gbeta": _gb, "groups": _groups,
+                    "ema": GroupEMA(len(_groups), 0.9)}
+        log(f"[stage3] unfreeze gβ at step {args.unfreeze_orderhead_at_step}; "
+            f"lam_pg={args.lam_pg} pg_tau={args.pg_tau} group_m={args.pg_group_m}")
+
     for global_step in range(start_step, args.max_steps):
         alpha = alpha_for_step(global_step, start_step, args)
         total_loss = 0.0
+        if pg_state is not None:
+            maybe_unfreeze_orderhead(optimizer, pg_state["gbeta"], global_step,
+                                     args, unfreeze_state)
         optimizer.zero_grad(set_to_none=True)
 
         for micro_step in range(args.grad_accum):
@@ -1956,7 +1978,45 @@ def main(default_run_kind="baseline"):
                 if args.run_kind in {"baseline", "random_continuation"}:
                     loss = order_loss(model, idx_batch, random_phys, clean_perm, device)
                 elif args.run_kind == "frozen_beta":
-                    if alpha > 0.0:
+                    pg_on = (pg_state is not None
+                             and unfreeze_state["unfrozen"] and alpha > 0.0)
+                    if pg_on:
+                        # ── Phase B: PL sample + LM-NLL policy gradient (batch-level) ──
+                        # CDL never appears here — pure LM-NLL + PG (spec red line).
+                        from batch_readout.orderhead_pg import (
+                            gbeta_scores_with_grad, batch_advantage)
+                        from batch_readout.frozen_gbeta_hook import (
+                            extract_probe_averaged_model_frame_strict65)
+                        from analyses.p7_gbeta_policy import sample_pl
+                        B_all = extract_probe_averaged_model_frame_strict65(
+                            model, idx_batch, global_step=global_step,
+                            seed=args.seed, batch_mean_probes=args.batch_mean_probes,
+                            device=device)
+                        # B_PG == B_frozen: the provider uses SAMPLE 0's B
+                        # (token_order[0]) as the batch order — mirror it exactly
+                        # (not a batch-mean). Detach: no PG grad into the backbone.
+                        B_det = B_all[0:1].detach()
+                        scores = gbeta_scores_with_grad(pg_state["gbeta"], B_det)
+                        sigma_model, logp, entropy = sample_pl(scores, tau=args.pg_tau)
+                        sigma_model = torch.as_tensor(sigma_model, device=device,
+                                                      dtype=torch.long)
+                        sigma_phys = model_blocks_to_physical_blocks(sigma_model, clean_perm)
+                        phys = sigma_phys.unsqueeze(0).expand(args.batch_size, -1)
+                        token_orders = physical_blocks_to_model_token_order(
+                            phys, clean_perm, BLOCK_LEN).to(device)
+                        token_losses, _ = compute_token_ce(
+                            model, idx_batch, token_orders, device)
+                        A_batch, _ell = batch_advantage(
+                            token_losses, pg_state["groups"], pg_state["ema"],
+                            args.pg_adv_clip)
+                        lm_loss = token_losses.mean()
+                        L_pg = -(A_batch * logp) - args.pg_beta * entropy
+                        loss = lm_loss + args.lam_pg * L_pg
+                        unfreeze_state["last_pg"] = float(L_pg.detach())
+                        unfreeze_state["last_entropy"] = float(entropy.detach())
+                        unfreeze_state["last_adv"] = float(A_batch.detach())
+                    elif alpha > 0.0:
+                        # ── Phase A: existing frozen argsort behavior (unchanged) ──
                         sigma = beta_provider.physical_order(model, idx_batch, global_step).to(device)
                         # model mode: sigma is in model frame; remap to physical for mixing
                         if args.frozen_beta_none_mode in ("model", "content", "strict65_model"):
@@ -2088,16 +2148,33 @@ def main(default_run_kind="baseline"):
             steps_left = args.max_steps - global_step
             eta = s_per_step * steps_left
             eta_str = f"{eta/60:.0f}m" if eta < 3600 else f"{eta/3600:.1f}h"
+            pg_active = pg_state is not None and unfreeze_state.get("unfrozen", False)
+            pg_suffix = ""
+            if pg_active:
+                pg_suffix = (
+                    f" | pg={unfreeze_state.get('last_pg', 0.0):.4f}"
+                    f" adv={unfreeze_state.get('last_adv', 0.0):+.4f}"
+                    f" H={unfreeze_state.get('last_entropy', 0.0):.3f}"
+                    f" orderhead_trainable=True cdl_loss=None cdl_calls=0"
+                )
             log(
                 f"step {global_step:5d}->{next_step:5d}/{args.max_steps} | "
                 f"loss={avg_loss:.4f} | alpha={alpha:.3f} | lr={lr:.2e} | "
                 f"{s_per_step:.2f}s/step | ETA {eta_str} | total {elapsed:.0f}s"
+                f"{pg_suffix}"
             )
             if wandb_run is not None:
-                wandb_run.log(
-                    wandb_train_payload(next_step, avg_loss, alpha, lr),
-                    step=int(next_step),
-                )
+                payload = wandb_train_payload(next_step, avg_loss, alpha, lr)
+                if pg_active:
+                    payload.update({
+                        "train/pg": unfreeze_state.get("last_pg", 0.0),
+                        "train/pg_advantage": unfreeze_state.get("last_adv", 0.0),
+                        "train/pg_entropy": unfreeze_state.get("last_entropy", 0.0),
+                        "train/pg_active": 1.0,
+                        "train/orderhead_trainable": 1.0,
+                        "train/training_loop_cdl_enabled": 0.0,
+                    })
+                wandb_run.log(payload, step=int(next_step))
             last_log_time = now
 
         if next_step % args.eval_interval == 0 or next_step in save_steps or next_step == args.max_steps:
