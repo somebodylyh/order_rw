@@ -5,6 +5,14 @@ from numbers import Integral
 import numpy as np
 import torch
 
+_INTEGER_INDEX_DTYPES = {
+    torch.uint8,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+}
+
 
 def per_sample_loss(token_losses):
     """Reduce ``(batch, tokens)`` token losses to one mean per sample."""
@@ -33,9 +41,15 @@ def group_rewards(per_sample_ell, groups):
 
     rewards = []
     for group in groups:
-        indices = torch.as_tensor(group, dtype=torch.long, device=per_sample_ell.device)
-        if indices.ndim != 1 or indices.numel() == 0:
+        try:
+            raw_indices = torch.as_tensor(group)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            raise ValueError("each group must be an integer index collection") from exc
+        if raw_indices.ndim != 1 or raw_indices.numel() == 0:
             raise ValueError("each group must be a non-empty rank-1 index collection")
+        if raw_indices.dtype not in _INTEGER_INDEX_DTYPES:
+            raise ValueError("group indices must have an integer dtype (bool is not allowed)")
+        indices = raw_indices.to(device=per_sample_ell.device, dtype=torch.long)
         if torch.any(indices < 0) or torch.any(indices >= per_sample_ell.numel()):
             raise ValueError("group index is outside per_sample_ell")
         rewards.append(per_sample_ell.index_select(0, indices).mean())

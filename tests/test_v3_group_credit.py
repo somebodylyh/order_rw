@@ -50,6 +50,24 @@ def test_group_ids_rejects_invalid_grouping(batch_size, m, message):
         group_ids_for(batch_size, m)
 
 
+@pytest.mark.parametrize(
+    "invalid_group",
+    [np.array([0.5, 1.0]), np.array([True, False])],
+)
+def test_group_rewards_rejects_non_integer_indices(invalid_group):
+    with pytest.raises(ValueError, match="integer"):
+        group_rewards(torch.arange(4.0), [invalid_group])
+
+
+@pytest.mark.parametrize(
+    "invalid_group",
+    [np.array([[0, 1]]), np.array([-1, 0]), np.array([0, 4])],
+)
+def test_group_rewards_rejects_malformed_or_out_of_range_indices(invalid_group):
+    with pytest.raises(ValueError):
+        group_rewards(torch.arange(4.0), [invalid_group])
+
+
 def test_group_ema_returns_pre_update_baseline_and_moves_state():
     ema = GroupEMA(2, alpha=0.5)
 
