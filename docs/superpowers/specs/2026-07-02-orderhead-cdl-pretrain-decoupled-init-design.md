@@ -1,356 +1,302 @@
-# OrderHead CDL-Pretrain → Frozen Warmup → PG Unfreeze (Decoupled Init)
+# OrderHead CDL-Pretrain → Frozen Warmup → PG Unfreeze (Decoupled Init) — production path
 
-**Date:** 2026-07-02
+**Date:** 2026-07-02 (rewritten after code verification; supersedes the v3_group_trainer draft)
 **Branch:** `v3-joint-orderhead-phase1`
 **Status:** design — awaiting user review before writing implementation plan
 
 ## Purpose
 
-Decouple OrderHead **initialization** from downstream AO-NLL **fine-tuning**.
+Decouple the OrderHead's **initialization** from its downstream **fine-tuning**,
+on the production training path (`block_lo_arm_order_network/train_clean_aogpt.py`).
 
-Today the V3 trainer (`analyses/v3_group_trainer.py`) couples the OrderHead's
-update signal to the LM-NLL policy-gradient path (`reward="lm"`), and gβ is
-either fully frozen (`frozen_gbeta`) or trained by PG from step 0
-(`joint_group`/`joint_batch`). There is no clean way to say: *first give the
-OrderHead a stable CDL teacher initialization, then let AO-GPT loss take over,
-with CDL and PG never mixed in the same loss.*
-
-This spec introduces a single, clean three-part pipeline that shares **one** gβ
-parameter tensor:
+One gβ parameter set flows through three stages, and CDL and downstream PG never
+meet in a single loss:
 
 ```
-Stage 1  CDL pretrain (offline producer)   ── CDL appears ONLY here
-   ↓ produces gβ ckpt (FrozenBetaHook / OrderHeadModule compatible)
-Stage 2  frozen curriculum warmup          ── gβ frozen, argsort, NO PG
-   ↓ at unfreeze_orderhead_at_step
-Stage 3  AO-NLL PG unfreeze fine-tune       ── LM-NLL + PG only, NO CDL
+Stage 1  CDL pretrain (offline producer)     ── CDL appears ONLY here
+   ↓ produces g_beta_best.pt (L0DynamicGBeta)
+Stage 2  frozen curriculum warmup            ── gβ frozen, argsort, NO PG
+   ↓ at --unfreeze-orderhead-at-step
+Stage 3  AO-NLL PG unfreeze fine-tune         ── LM-NLL + PG only, NO CDL
 ```
 
-The narrative claim this enables:
+Core principle (locked):
 
-> CDL provides a readout **initialization**; after training starts, the
-> controller is optimized **only** by AO-GPT downstream loss. The
-> CDL-pretrained OrderHead is produced by the *same* readout-training path as
-> the deployed gβ, only rewrapped for V3.
+> **CDL initializes gβ ⇒ frozen argsort curriculum ⇒ LM-NLL PG fine-tuning.**
+> CDL provides a readout initialization; once training starts, the controller is
+> optimized **only** by AO-GPT downstream loss.
 
-**Scope for this spec: `analyses/v3_group_trainer.py` + one new producer module.**
-Wiring the internal MLP into the production `train_clean_aogpt` loop is an
-explicit *later* step (validate here first). The producer and the embedded
-OrderHead are designed to be reusable so they can later drop into production.
+## Verified ground truth (why this rewrite exists)
+
+The earlier draft targeted `analyses/v3_group_trainer.py` and assumed the
+embedded gβ was a `NodewiseReadout` produced by `stage_bc_train_readout`. Code
+verification refuted that. The corrected facts (all read from code):
+
+- The production gβ is **`L0DynamicGBeta`** (`batch_readout/l0_dynamic_gbeta.py`),
+  input `B_raw (batch, H=8, 65, 65)`, output `(scores (B,64), aux)`.
+- It is deployed by `train_clean_aogpt.py --run-kind frozen_beta
+  --batch-mean-probes 4`, which selects
+  `FrozenGBetaModelFrameBlockProvider` (`batch_readout/frozen_gbeta_hook.py`):
+  8-head strict65 B, batch-mean over N probe forwards, `none_mode='model'`,
+  `scores, _ = model(B_t, apply_head_dropout=False)` then
+  `sigma_model = scores.argsort(descending=True)` — all under `@torch.no_grad()`.
+  ("Single head" refers to the upstream head-selection that builds the CDL
+  teacher, **not** the gβ input, which is 8-head.)
+- It is CDL-pretrained by a **two-step** offline pipeline:
+  1. `analyses/build_l0_dynamic_gbeta_dataset.py::build_l0_dynamic_gbeta_dataset(
+     ckpt_path, ...)` → `.npz` with `B_raw` + CDL dynamic teacher
+     (`teacher_pairwise`, `teacher_consensus_order`, `teacher_ranks`, weights)
+     via `build_dynamic_teacher` (the shared CDL machinery).
+  2. `batch_readout/train_l0_dynamic_gbeta.py::train(dataset_path, ...,
+     loss_type="pairwise_bce", heads=8)` → trains `L0DynamicGBeta`, selects by
+     val pairwise_acc, saves `{"model_state_dict", "config"}` → `g_beta_best.pt`.
+- `--loss-type` default is `pairwise_bce` (internally `soft_pairwise_bce_loss`);
+  `listmle` / `rank_kl` also exist.
+- The canonical source backbone is the 10k ckpt
+  `block_lo_arm_order_network/probe_results/overnight_20260625_random_baseline/ckpt_step10000.pt`.
 
 ## Non-goals
 
-- Do **not** reimplement CDL. Reuse the legacy producer verbatim.
-- Do **not** touch the production `train_clean_aogpt` loop in this spec.
-- Do **not** combine CDL and PG in a single loss anywhere, ever.
-- Do **not** change the existing `frozen_gbeta` / `joint_*` arm semantics when
-  `unfreeze_orderhead_at_step is None` (backward compatible default).
+- Do **not** reimplement CDL. Reuse `build_l0_dynamic_gbeta_dataset` +
+  `train_l0_dynamic_gbeta` verbatim.
+- Do **not** combine CDL and PG in a single loss, ever.
+- Do **not** change existing `frozen_beta` behavior when the new
+  `--unfreeze-orderhead-at-step` flag is absent (backward compatible default).
+- `listmle` / `rank_kl` remain optional ablations, not the canonical pipeline.
 
 ---
 
-## Stage 1 — CDL pretrain producer
+## Stage 1 — CDL pretrain producer (offline, two steps)
 
-New module: `analyses/gbeta_cdl_pretrain.py`
+Canonical: **do not** pick from the pool of old `g_beta_best.pt`. Produce gβ from
+the *same* 10k parent as the Stage-2/3 backbone, so the causal chain is clean.
+
+New thin orchestrator: `analyses/gbeta_cdl_pretrain.py`
 
 ```python
 def pretrain_gbeta_cdl(
-    ckpt_10k,
+    ckpt_10k,               # default: overnight_20260625_random_baseline/ckpt_step10000.pt
     *,
-    out_ckpt,
-    cluster_heads=None,   # default reproduces the deployed gβ head config
-    M=1000,
-    batch_size=8,
-    n_reveal=4,
+    out_dir,                # writes <out_dir>/g_beta_best.pt (+ dataset .npz + metadata)
+    loss_type="pairwise_bce",
+    M=2000,
+    heads=8,
     epochs=40,
-    lr=3e-4,
     seed=0,
     device="cpu",
-) -> str:                 # returns str(out_ckpt)
+    dataset_path=None,      # if given, skip the build step and reuse this .npz
+) -> str:                   # returns str(<out_dir>/g_beta_best.pt)
     ...
 ```
 
 **Requirements (reuse, do not rewrite):**
-
-- Reuse `analyses.uniform_label_free_v1.stage_bc_train_readout` — the *original*
-  producer of `reports/uniform_label_free_v1/nodewise_K1000.pt` (the deployed
-  `GBETA_CKPT`). Its objective is the legacy path:
-  `B → per-sample CDL soft pairwise Y → binary_cross_entropy_with_logits → gβ`.
-- This module is a **thin wrapper**: call `stage_bc_train_readout(...)`, then
-  ensure the result is written in `FrozenBetaHook` / `OrderHeadModule`-loadable
-  format (the same format `nodewise_K1000.pt` already uses — compatibility is
-  established by construction, since that ckpt was produced by this path and is
-  loaded by `FrozenBetaHook`).
-- Save a metadata sidecar recording provenance:
+1. Call `build_l0_dynamic_gbeta_dataset(ckpt_path=ckpt_10k, M=M, ...)` → `.npz`
+   (skipped if `dataset_path` is supplied).
+2. Call `train_l0_dynamic_gbeta.train(dataset_path=<npz>, out_dir=out_dir,
+   loss_type=loss_type, heads=heads, epochs=epochs, seed=seed, device=device)`.
+3. The produced `g_beta_best.pt` is already `FrozenGBetaModelFrameBlockProvider`-
+   loadable (`{"model_state_dict", "config"}`) — no reformatting.
+4. Write a metadata sidecar `<out_dir>/gbeta_provenance.json`:
 
 ```json
 {
-  "producer": "stage_bc_train_readout",
+  "producer": "build_l0_dynamic_gbeta_dataset + train_l0_dynamic_gbeta",
   "source_ckpt": "<ckpt_10k>",
-  "cluster_heads": [[1, 7]],
-  "M": 1000,
-  "n_reveal": 4,
-  "epochs": 40,
-  "lr": 3e-4,
-  "seed": 0
+  "loss_type": "pairwise_bce",
+  "M": 2000, "heads": 8, "epochs": 40, "seed": 0,
+  "dataset_path": "<npz>"
 }
 ```
 
-**Claim locked by this design:** *CDL-pretrained OrderHead is produced by the
-same readout-training path as the deployed gβ, only rewrapped for V3.*
-
-If `cluster_heads is None`, the producer resolves the deployed head config
-(single head `L1H7 = (1, 7)`, matching `p7_gbeta_policy.HEAD`) so a re-run
-reproduces the deployed gβ rather than inventing a new cluster.
+**Claim locked:** *The CDL-pretrained OrderHead is produced by the exact
+existing L0DynamicGBeta CDL pipeline; only orchestrated + provenance-tagged.*
 
 ---
 
-## Stage 2 / 3 — single-run freeze → unfreeze schedule
+## Stage 2 — frozen curriculum warmup (existing, unchanged)
 
-Extend `train_arm(...)` with three arguments (all default to current behavior):
+Already supported: `train_clean_aogpt.py --run-kind frozen_beta
+--frozen-beta-ckpt <g_beta_best.pt> --batch-mean-probes 4` with gβ frozen.
+Order each step = `argsort(-gβ(B))` via `FrozenGBetaModelFrameBlockProvider`
+(no_grad). Backbone trains on LM-NLL under that order.
 
-```python
-train_arm(
-    ...,
-    gbeta_init="load",               # "load" | "cdl_pretrain"
-    gbeta_ckpt=None,                 # custom ckpt path (see constraint 2)
-    unfreeze_orderhead_at_step=None, # None | int (local step)
-    lam_pg=1.0,                      # PG loss weight λ_PG (new; see Data flow)
-)
-```
+New default wiring for the canonical pipeline (see CLI below): if
+`--frozen-beta-ckpt` is omitted **and** Stage-1 is requested, the trainer runs
+`pretrain_gbeta_cdl(...)` first and loads its output. `--frozen-beta-ckpt <path>`
+remains a full override for reuse/debug/reproduction.
 
-### `gbeta_init`
+---
 
-| value | behavior |
-|-------|----------|
-| `"load"` (default) | load `gbeta_ckpt`; if `gbeta_ckpt is None`, default to `GBETA_CKPT` (`nodewise_K1000.pt`). Custom paths ARE allowed so a previously-pretrained ckpt can be reused without re-running CDL. |
-| `"cdl_pretrain"` | call `pretrain_gbeta_cdl(...)` → `out_ckpt`, then load `out_ckpt`. |
+## Stage 3 — AO-NLL PG unfreeze fine-tune (new)
 
-There is intentionally **no** separate `"path"` mode — `"load"` with a custom
-`gbeta_ckpt` covers it.
+New flag `--unfreeze-orderhead-at-step INT` (default unset → pure Stage-2, fully
+backward compatible). On a `frozen_beta` run, once `global_step >= unfreeze_at`:
 
-### `unfreeze_orderhead_at_step`
+**Phase A — `global_step < unfreeze_at` (frozen warmup):**
+- gβ `requires_grad=False`, not in the optimizer.
+- order = deterministic `argsort(-gβ(B))` — from the **same L0DynamicGBeta
+  instance** that will be unfrozen (not a reload, not a different head mode).
+- no PG term (`λ_PG = 0`).
 
-`None` → preserve today's per-arm static behavior exactly (backward compatible).
+**Phase B — `global_step >= unfreeze_at` (PG unfreeze):**
+- gβ `requires_grad=True`; one-time optimizer param-group insertion.
+- order policy switches argsort → **Plackett-Luce sampling**:
+  `σ ~ PL(scores, τ)` sequentially — at each step sample the next block from
+  `softmax(scores/τ)` over the remaining blocks, accumulating `logp` and
+  `entropy`. τ→0 recovers argsort, so the switch is continuous.
+- **grad-enabled gβ forward**: recompute `scores = gβ(B)` with grad, where `B` is
+  the same batch-mean 8-head strict65 tensor but **detached** (no PG grad into
+  the backbone). This is a new grad-enabled path parallel to the provider's
+  `@torch.no_grad()` `model_frame_token_order`.
+- reward = downstream **LM-NLL**; PG uses the v3 group-credit machinery
+  (`analyses/v3_group_credit.py`: `group_ids_for`, `group_rewards`,
+  `per_sample_loss`, `GroupEMA`) — reused, not rebuilt:
+  `advantage = (baseline − ell_g).detach().clamp(±adv_clip)`,
+  `L_PG = −(advantage · logp).mean() − β·entropy.mean()`.
+- **CDL never appears.**
 
-`int` is valid only for an arm with `train_orderhead=True` (e.g. `joint_group`).
-When set, Phase A suppresses the OrderHead exactly as `frozen_gbeta` does —
-regardless of the arm's nominal `train_orderhead` — and Phase B restores the
-arm's joint behavior. This gives a single run with two phases:
+**Weight continuity (hard):** θ at the start of Phase B == θ at the end of
+Phase A. Unfreeze is a `requires_grad` flip + param-group insertion, never a
+reload/re-init.
 
-**Phase A — `local_step < unfreeze_at` (frozen curriculum warmup):**
-- gβ `requires_grad = False`
-- gβ params are **NOT** in any optimizer param group
-- order policy: deterministic `σ = argsort(g_θ(B))` — **from the same OrderHead
-  instance that will later be unfrozen**. `θ` is the Stage-1
-  post-pretrain parameter set. Explicitly **not**: fixed L2R, the old default
-  `GBETA_CKPT`, a re-loaded `frozen_gβ`, or a cached static order.
-  > Phase A uses deterministic argsort from the same initialized OrderHead
-  > instance that will later be unfrozen.
-- **no PG term** (no PL sampling, no advantage, no entropy bonus); equivalently
-  `λ_PG = 0` (see Data flow)
-- backbone trains on LM-NLL as usual
-
-**Phase B — `local_step >= unfreeze_at` (AO-NLL PG unfreeze):**
-- gβ `requires_grad = True`
-- order policy: PL sampling + PG (joint behavior)
-- **CDL never appears**
-
-**Weight continuity (hard):**
-
-θ at the start of Phase B == θ at the end of Phase A. Unfreeze is a
-`requires_grad` flip + optimizer param-group insertion, **never** a re-load or
-re-init of the OrderHead. Formally: `θ_unfreeze_start = θ_after_frozen_warmup`.
-
-**Optimizer param-group insertion (hard):**
-
-`_build_optimizer` currently decides the OrderHead param group once at startup.
-Change: when `unfreeze_orderhead_at_step is not None`, the backbone optimizer is
-built **without** the OrderHead group; at exactly the unfreeze step the trainer
-does, once:
+**Optimizer param-group insertion (hard):** the backbone optimizer
+(`model.configure_optimizers(...)`) is built without gβ; at exactly `unfreeze_at`,
+once:
 
 ```python
-order_head.gbeta.requires_grad_(True)
+gbeta_module.requires_grad_(True)
 optimizer.add_param_group({
-    "params": list(order_head.gbeta.parameters()),
-    "lr": float(lr_orderhead),
-    "weight_decay": 0.0,
-    "is_orderhead": True,
+    "params": list(gbeta_module.parameters()),
+    "lr": args.orderhead_lr, "weight_decay": 0.0, "is_orderhead": True,
 })
 ```
 
-Invariants asserted in code/tests:
-- **before** unfreeze: zero param groups with `is_orderhead=True`; no OrderHead
-  param id appears in any `optimizer.param_groups`.
-- **after** unfreeze: exactly one `is_orderhead=True` group; each OrderHead param
-  id appears in exactly one param group (no double-insertion → no parameter
-  optimized twice). Checked via a param-`id()` set.
+Invariants (tested): before unfreeze, zero `is_orderhead` groups and no gβ param
+`id()` in any group; after, exactly one `is_orderhead` group and each gβ param
+`id()` in exactly one group (no double-insertion).
 
 ---
 
-## Data flow (per micro-step, Phase B)
-
-Unchanged from today's joint path, restated to fix the red lines:
+## Data flow (per step, Phase B)
 
 ```
-idx ─► backbone ─► A ─(detach)─► B = bmatrix_from_A(A) ─► gβ ─► scores
-                                                              │
-                                        PL sample(scores,τ) ──┤─► order, logp, entropy
-                                                              │
-order ─► token_order ─► backbone.forward ─► token_losses ─► ell_i
-                                                              │
-ell_g = group_rewards(ell_i);  advantage = (baseline - ell_g).detach()
-pg = -(advantage * logp).mean() - β * entropy.mean()
-total = lm_loss + λ_PG * pg   # lm_loss updates backbone; pg updates gβ only
+idx ─► backbone.forward_fn(return_attentions) ─► attn ─► 8-head strict65 B
+        (batch-mean over probes; none_mode='model')  ─(detach)─► B_det
+B_det ─► gβ(B_det) [GRAD] ─► scores ─► PL sample(scores,τ) ─► σ, logp, entropy
+σ ─► token_order ─► backbone.forward_fn(idx, token_order) ─► per-token CE ─► ell_i
+ell_g = group_rewards(ell_i);  advantage = (baseline − ell_g).detach()
+L_PG = −(advantage·logp).mean() − β·entropy.mean()
+L_total = L_LM + λ_PG · L_PG      # L_LM updates backbone; L_PG updates gβ only
 ```
 
-**`λ_PG`:** introduce a new `lam_pg` argument to `train_arm`
-(default `1.0` → preserves today's `lm_loss + pg`). Phase weighting:
-- Phase A: `pg` is **not constructed** (≡ `λ_PG = 0`) — no PL sampling at all.
-- Phase B: `λ_PG = lam_pg > 0`.
-
-This is a *new* parameter (today's trainer hard-codes `lm_loss + pg`); it exists
-so the PG term can be scaled/swept and so Phase A/B weighting is explicit.
+`λ_PG` (`--lam-pg`, default `1.0`): Phase A `L_PG` not constructed (≡ 0);
+Phase B `λ_PG > 0`. Per-token CE reuses the `compute_token_ce` contract
+(`logits, _ = forward_fn(idx, token_order); targets = idx.gather(1, token_order)`).
 
 ---
 
-## Red lines (all enforced by tests)
+## CLI additions to `train_clean_aogpt.py`
 
-1. **No CDL after Stage 1** — the freeze/unfreeze training loop calls no CDL
-   teacher, no CDL rollout, no CDL loss. Post-train objective is strictly
-   `LM-NLL + PG`.
-2. **B detached** before the OrderHead (no PG grad path into the backbone via B).
-3. **PG advantage detached**.
-4. **PG cannot update the backbone** — `pg_only_backbone_grad` guard stays.
-5. **LM loss updates the backbone** (Phase A and Phase B).
-6. **No OrderHead optimizer group before unfreeze.**
-7. **No repeated param-group insertion** (param-`id()` set invariant).
-8. **Weight continuity** — no OrderHead re-init/re-load at unfreeze.
+- `--unfreeze-orderhead-at-step INT` (default: unset → Stage-2 only).
+- `--orderhead-lr FLOAT` (default `3e-4`) — gβ param-group LR after unfreeze.
+- `--lam-pg FLOAT` (default `1.0`) — PG weight λ_PG.
+- `--pg-tau FLOAT` (default `1.0`) — PL temperature.
+- `--pg-group-m INT` (default `16`) — group size for group-credit advantage.
+- `--pg-beta FLOAT` (default `3e-3`) — entropy bonus.
+- `--pg-adv-clip FLOAT` (default `0.3`).
+- `--cdl-pretrain` (flag): if set and `--frozen-beta-ckpt` absent, run
+  `pretrain_gbeta_cdl(...)` from `--cdl-source-ckpt` (default 10k ckpt) and use
+  its output. `--frozen-beta-ckpt` always overrides (reuse/debug).
+
+---
+
+## Red lines (enforced by tests)
+
+1. **No CDL after Stage 1** — the `train_clean_aogpt` loop imports/executes no
+   CDL symbol (`build_dynamic_teacher`, `cdl_rollout_*`, `soft_pairwise_bce_loss`,
+   `build_l0_dynamic_gbeta_dataset`, `train_l0_dynamic_gbeta`). CDL lives only in
+   `pretrain_gbeta_cdl`.
+2. **B detached** before the grad-enabled gβ forward (no PG grad into backbone).
+3. **PG advantage detached.**
+4. **PG cannot update the backbone** — assert `∂L_PG/∂backbone ≈ 0`.
+5. **LM loss updates the backbone** (Phase A and B).
+6. **No gβ optimizer group before unfreeze; exactly one after; no duplicate**
+   (param-`id()` set invariant).
+7. **Weight continuity** — no gβ reload/re-init at unfreeze.
 
 ### Observability
 
-The `cdl_calls` process counter is a **guard**, but a process-level counter
-alone is fragile (test processes, subprocesses, import reload). So config + logs
-carry the **evidence**; the counter is a secondary check.
-
-Run-level fields recorded in the result JSON:
-
-```json
-{
-  "producer_ckpt": "<stage-1 ckpt path or null>",
-  "producer_stage_finished": true,
-  "training_loop_cdl_enabled": false
-}
-```
-
-Each logged step records:
-
-```json
-{
-  "cdl_loss": null,
-  "cdl_teacher": null,
-  "cdl_calls": 0,
-  "pg_active": true,
-  "orderhead_trainable": true
-}
-```
-
-**No-import rule (hard):** the freeze/unfreeze training loop imports/executes no
-CDL symbol — not `stage_bc_train_readout`, not `cdl_rollout_with_standardized_margin`,
-not any CDL teacher/rollout/loss. CDL lives strictly inside `pretrain_gbeta_cdl`.
-
-Evidence checked by tests during the `train_arm` loop:
-- no `cdl_loss` key ever holds a finite value (always `null`)
-- `cdl_calls_before == cdl_calls_after` across the whole loop
-- the run's `reward == "lm"` and `training_loop_cdl_enabled == false`
+Run-level: `producer_ckpt`, `producer_stage_finished`,
+`training_loop_cdl_enabled=false`. Per-step (Phase B): `pg_active`,
+`orderhead_trainable`, `cdl_loss=null`, `cdl_calls=0`, `pg`, `entropy`,
+`orderhead_grad_norm`, `backbone_grad_norm`. Evidence beats the counter:
+`cdl_calls_before == cdl_calls_after` across the loop, plus the no-import rule.
 
 ---
 
 ## Testing (TDD)
 
-### Producer tests (`gbeta_cdl_pretrain`)
+**Producer (`pretrain_gbeta_cdl`)**
+1. Loadability/shape: output `g_beta_best.pt` loads via
+   `FrozenGBetaModelFrameBlockProvider`; `model(B_t)[0]` shape `(Bsz, 64)`, finite.
+2. Learning sanity (primary `pairwise_acc`, secondary τ; soft smoke thresholds):
+   on tiny M, **primary** `pairwise_acc(gβ, CDL) > 0.55`; **secondary**
+   `τ(gβ, CDL) > 0.2`; passing either is acceptable, both reported. Hard `τ>0`
+   rejected.
+3. Provenance: `gbeta_provenance.json` records producer + source ckpt + loss_type.
 
-1. **Loadability / shape:** `pretrain_gbeta_cdl(...)` on a tiny M produces a
-   ckpt that `OrderHeadModule(out_ckpt)` loads; `scores(A, per_sample=False)`
-   returns shape `[rows, 64]` with finite, grad-enabled values.
-2. **Learning sanity (two metrics; pairwise_acc is primary — constraint 4):**
-   on a small-M smoke, the produced gβ agrees with its CDL teacher above a
-   random baseline. The CDL teacher is a pairwise soft teacher, so `pairwise_acc`
-   is the **primary** metric (Kendall τ is unstable under small M / ties /
-   near-L2R). Report **both**:
-   - **Primary:** `pairwise_acc(gβ, CDL) > 0.55`
-   - **Secondary:** `tau(gβ order, CDL order) > 0.2`
-
-   Passing **either** is acceptable for a tiny smoke, but both are reported.
-   Thresholds are smoke-level (small M is noisy); a hard `τ > 0` is explicitly
-   rejected as too weak.
-3. **Provenance:** metadata sidecar records `producer="stage_bc_train_readout"`
-   and the source ckpt + hyperparameters.
-
-### Schedule tests (`train_arm` with `unfreeze_orderhead_at_step`)
-
-4. **Frozen phase invariants:** across Phase A, `orderhead_param_delta == 0`,
-   `pg == 0`, and no `is_orderhead` group exists in the optimizer.
-5. **Unfreeze transition:** after the unfreeze step, exactly one `is_orderhead`
-   group exists; OrderHead param ids form a set with no duplicates across groups.
-6. **Learning after unfreeze:** over Phase B, `orderhead_param_delta > 0`.
-7. **Weight continuity:** OrderHead state_dict at the unfreeze boundary is
-   bit-identical before/after the requires_grad flip (no re-init).
-8. **No-CDL red line:** `cdl_calls` counter does not increase during the
-   freeze/unfreeze loop; the trainer imports/executes no CDL symbol in the loop.
-9. **Backbone grad routing:** `pg_only_backbone_grad ≈ 0` (PG does not reach
-   backbone) — reuse the existing guard.
-10. **Backward compatibility (interface, not bit-identical curves — constraint 5):**
-    with `unfreeze_orderhead_at_step=None` (and `lam_pg=1.0`), assert *interface*
-    compatibility, not an identical loss curve (randomness / optimizer ordering /
-    added log keys make bit-identical curves unrealistic):
-    - `frozen_gbeta`: no `is_orderhead` param group, no PG, argsort path.
-    - `joint_*`: `is_orderhead` param group exists at startup, PG active from
-      step 0.
-    - all previously-required metrics / log keys still present.
-
-    If a numeric check is wanted, use at most a fixed-seed **1-step** smoke
-    comparing `order`, `pg_active`, and `param_groups` — not a full curve.
+**Schedule (`--unfreeze-orderhead-at-step`)**
+4. Frozen phase: across Phase A, gβ param delta == 0, `pg == 0`, no `is_orderhead`
+   group.
+5. Unfreeze transition: after `unfreeze_at`, exactly one `is_orderhead` group; gβ
+   param `id()`s unique across groups.
+6. Learning after unfreeze: over Phase B, gβ param delta > 0.
+7. Weight continuity: gβ state_dict identical across the unfreeze boundary.
+8. No-CDL red line: `cdl_calls` non-increasing during the loop; no CDL import in
+   the loop.
+9. Grad routing: `∂L_PG/∂backbone ≈ 0`; `∂L_LM/∂backbone` normal.
+10. Backward compatibility (interface, not bit-identical curves): with the flag
+    absent, `frozen_beta` behaves exactly as today (no gβ group, argsort, gβ
+    frozen). At most a fixed-seed 1-step smoke comparing `order`, `pg_active`,
+    `param_groups`.
 
 ---
 
 ## Files touched
 
-- **new** `analyses/gbeta_cdl_pretrain.py` — thin wrapper over
-  `stage_bc_train_readout`, FrozenBetaHook-format output + metadata.
-- **edit** `analyses/v3_group_trainer.py`:
-  - `train_arm(..., gbeta_init, gbeta_ckpt, unfreeze_orderhead_at_step, lam_pg)`
-  - `_build_optimizer` — support deferred OrderHead group when a schedule is set.
-  - main loop — per-step frozen/unfrozen branch, one-time unfreeze insertion,
-    `λ_PG`-weighted PG, `producer_ckpt`/`training_loop_cdl_enabled` run fields,
-    `cdl_loss`/`cdl_teacher`/`cdl_calls`/`pg_active`/`orderhead_trainable`
-    step logging, invariants, and the **no-CDL-import** rule in the loop.
-- **new** tests under `tests/` for producer + schedule + red lines.
+- **new** `analyses/gbeta_cdl_pretrain.py` — orchestrates
+  `build_l0_dynamic_gbeta_dataset` + `train_l0_dynamic_gbeta`; provenance sidecar.
+- **edit** `block_lo_arm_order_network/train_clean_aogpt.py`:
+  - new CLI flags (above);
+  - optional Stage-1 auto-produce when `--cdl-pretrain` and no `--frozen-beta-ckpt`;
+  - a grad-enabled gβ scorer usable in the training step (parallel to the
+    provider's no_grad `model_frame_token_order`);
+  - Phase-A/Phase-B branch in the step: argsort vs PL+PG; one-time unfreeze +
+    param-group insertion; `λ_PG`-weighted PG via `v3_group_credit`;
+    run/step logging; the no-CDL-import rule.
+- **new** tests under `block_lo_arm_order_network/tests/` (or `tests/`) for
+  producer + schedule + red lines.
 
 ## Implementation plan task structure (for writing-plans)
 
-- **Task 1 — CDL producer wrapper:** new `analyses/gbeta_cdl_pretrain.py`; call
-  `stage_bc_train_readout`; save ckpt + metadata sidecar; tests for
-  loadability / shape / provenance / pairwise sanity (primary) + τ (secondary).
-- **Task 2 — trainer init path:** `gbeta_init` + custom `gbeta_ckpt`;
-  `"cdl_pretrain"` runs producer then loads; `"load"` default/custom; test
-  custom-ckpt reuse does not re-run pretrain.
-- **Task 3 — freeze→unfreeze schedule:** `unfreeze_orderhead_at_step` + `lam_pg`;
-  Phase A same OrderHead / frozen argsort / no PG / no optimizer group; Phase B
-  requires_grad flip + one-time param-group insertion + PL+PG; tests for
-  param-id invariant / weight continuity / delta before-after.
-- **Task 4 — red-line tests and logging:** PG→backbone grad ≈ 0; LM→backbone
-  grad normal; `cdl_calls` non-increasing + no-import; log fields
-  (`pg_active`, `orderhead_trainable`, `cdl_loss=null`, `cdl_calls=0`,
-  `training_loop_cdl_enabled=false`); backward-compat interface checks for
-  `unfreeze_orderhead_at_step=None`.
+- **Task 1 — CDL producer orchestrator:** `analyses/gbeta_cdl_pretrain.py` wrapping
+  the two existing steps + provenance; tests 1–3.
+- **Task 2 — grad-enabled gβ scorer + CLI:** add the grad path and the new flags;
+  `--cdl-pretrain`/override resolution; smoke that a `frozen_beta` run still works
+  unchanged (test 10).
+- **Task 3 — freeze→unfreeze schedule:** Phase-A/B branch, one-time param-group
+  insertion, argsort→PL switch, weight continuity; tests 4–7.
+- **Task 4 — PG wiring + red lines:** `v3_group_credit` advantage + `λ_PG`;
+  grad-routing guards, no-CDL invariants, observability fields; tests 8–9 + the
+  red-line asserts.
 
-## Open items resolved in this design
+## Open items resolved
 
-- Stage-1 mechanism: **reuse** `stage_bc_train_readout`.
-- `gbeta_init` values + custom `gbeta_ckpt` reuse.
-- Weight continuity guarantee across the unfreeze boundary.
-- Deferred single param-group insertion + id-set invariant.
-- CDL absence scoped to Stage 3 + observability fields + no-import rule.
-- Two-metric producer smoke (pairwise_acc primary, τ secondary), soft thresholds.
-- `λ_PG` (`lam_pg`) weighting; Phase A `λ_PG=0`, Phase B `λ_PG>0`.
-- Backward compatibility asserted at the *interface* level, not bit-identical curves.
+- Target = production `train_clean_aogpt.py` (not `v3_group_trainer.py`).
+- gβ = `L0DynamicGBeta`, 8-head batch-mean deploy via
+  `FrozenGBetaModelFrameBlockProvider`.
+- Stage-1 = `build_l0_dynamic_gbeta_dataset` + `train_l0_dynamic_gbeta`, loss
+  `pairwise_bce`, from the 10k parent; default fresh-produce, `--frozen-beta-ckpt`
+  override.
+- Stage-3 reuses `v3_group_credit` + PL sampling (not rebuilt); `λ_PG` weighting;
+  CDL only at init; weight continuity + single param-group insertion invariants.
