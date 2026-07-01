@@ -86,19 +86,38 @@ beats frozen-gβ / L2R.
 | arm | backbone | OrderHead | purpose |
 |---|---|---|---|
 | L2R | train | none (fixed L2R) | hand-designed baseline |
-| frozen-gβ | train | frozen global | Phase-1 curriculum baseline (**primary control**) |
-| **joint-group m=16** | train | train, per-group reward | **main scientific arm** |
-| joint-batch-level m=64 | train | train, global reward | distinguishes "just global co-adapt" from group signal |
+| frozen-gβ | train | **internal**, frozen (m=64, G=1) | Phase-1 curriculum baseline (**primary control**) |
+| **joint-group m=16** | train | trainable (m=16, G=4), per-group reward | **main scientific arm** |
+| joint-batch-level m=64 | train | trainable (m=64, G=1), global reward | distinguishes "just global co-adapt" from group signal |
+
+**Arm definitions (avoid implementation-path / trainability confounds):**
+- **frozen-gβ** uses the **internal `OrderHeadModule` in deterministic/frozen mode**
+  (`argsort(z)`, params NOT updated) — *not* the old external `FrozenBetaHook`, so
+  the comparison is `joint OrderHead` vs `frozen internal OrderHead` with no
+  implementation-path confound. (The external hook may be used only for a debugging
+  bit-match, never as this arm.)
+- **joint-batch-level m=64** has a **trainable** OrderHead over one global group
+  (G=1): `B̄_batch → g_θ → σ_batch`, trained by the batch/global reward. Its
+  difference from frozen-gβ is that the OrderHead *updates* (but can only learn a
+  global order); its difference from joint-group m=16 is G=1 vs G=4 (one order vs
+  four per batch). This three-way contrast — frozen (no update) / global-trainable /
+  group-trainable — is what isolates "manufactured non-global signal."
 
 **Start:** 10k parent (headroom is largest there; at 20k L2R is near-optimal so
 there is almost nothing to manufacture). **Train:** 10k→30k (20k steps).
+
+**Controlled comparison (identical everything except order policy):** all four arms
+use the **same data stream, batch size, backbone optimizer + LR schedule, eval set,
+and eval cadence**. The joint arms add an OrderHead PG loss on a **separate optimizer
+param group**; adding the OrderHead must NOT change the backbone's LR schedule. This
+keeps the only variable the order policy.
 
 ## Metrics
 
 ### Mechanism — group-level probe (the headline measurement)
 
-On a fixed held-out set, group the samples (m=16), compute each group's OrderHead
-order σ_g, and measure:
+On a **fixed held-out set with a fixed grouping** (m=16), compute each group's
+OrderHead order σ_g, and measure:
 
 ```
 Δ_probe^group = E_g[ ℓ(X_g, σ_g) − ℓ(X_g, σ_L2R) ]
@@ -107,12 +126,20 @@ order σ_g, and measure:
 where ℓ(X_g, σ_g) is the group order applied to the group's held-out samples,
 mean NLL. Δ_probe^group < 0 means the manufactured group order beats L2R.
 
+**Fixed held-out grouping (removes probe noise):** the held-out set, the group size
+m=16, and the **group ids are fixed across all checkpoints and all arms**, with the
+same `clean_perm` / model→physical remap. Otherwise different checkpoints regroup
+samples and group-order differences get confounded with data variance.
+
 **Guards against false positives (a Δ improvement that is really just reverting to
 the global/L2R order, not new signal):**
 - `τ(σ_g, σ_L2R)` and `τ(σ_g, σ_frozen-gβ)` — if Δ improves only because σ_g moved
   toward L2R (τ→1), that is not signal manufacturing.
-- **real-B vs shuffle/zero/noise-B** — the group order must beat its own shuffled/
-  zeroed-B controls; otherwise the "signal" is a position shortcut, not read from B.
+- **real-B vs control-B (minimal three variants for Phase-1):** `real-B`,
+  `shuffle-B` (row/col- or sample-shuffled), `zero-B`. `noise-B` is optional.
+  Criterion: `Δ_probe^real < min(Δ_probe^shuffle, Δ_probe^zero)` — at least in trend,
+  real-B must beat both. If `real ≈ zero`, the OrderHead is riding a bias/position
+  prior, not reading B.
 - `τ_consensus` across group orders (are groups producing *different* orders?).
 
 Per-sample Δ_probe is deferred to the Phase-2 stretch arm (it does not match the
@@ -135,8 +162,10 @@ attractor later masks).
 
 **Tier 1 — Hard health gate (all required):**
 - no NaN; entropy healthy (no collapse, no explosion); OrderHead params move;
-- joint-group PPL not catastrophically worse than frozen-gβ:
-  `PPL_joint ≤ PPL_frozen-gβ + ε`.
+- joint-group not catastrophically worse than frozen-gβ. **Gate on loss** (more
+  precise), report PPL for readability: `Δloss = loss_joint − loss_frozen-gβ ≤
+  ε_loss`, default **ε_loss = 0.01 nat** (equivalently ≈ **ε = 0.3 PPL** near a
+  base PPL ~27). Use the loss form for the actual decision.
 
 **Tier 2 — Life-sign gate (any one, under the real-B guard):**
 1. **Mechanism life:** Δ_probe^group vs frozen-gβ improves at the best checkpoint,
