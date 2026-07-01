@@ -69,7 +69,7 @@ def pretrain_gbeta_cdl(
     ...
 ```
 
-**Requirements (constraint 1 — reuse, do not rewrite):**
+**Requirements (reuse, do not rewrite):**
 
 - Reuse `analyses.uniform_label_free_v1.stage_bc_train_readout` — the *original*
   producer of `reports/uniform_label_free_v1/nodewise_K1000.pt` (the deployed
@@ -111,13 +111,14 @@ Extend `train_arm(...)` with three arguments (all default to current behavior):
 ```python
 train_arm(
     ...,
-    gbeta_init="load",              # "load" | "cdl_pretrain"
-    gbeta_ckpt=None,                # custom ckpt path (see constraint 2)
-    unfreeze_orderhead_at_step=None # None | int (local step)
+    gbeta_init="load",               # "load" | "cdl_pretrain"
+    gbeta_ckpt=None,                 # custom ckpt path (see constraint 2)
+    unfreeze_orderhead_at_step=None, # None | int (local step)
+    lam_pg=1.0,                      # PG loss weight λ_PG (new; see Data flow)
 )
 ```
 
-### `gbeta_init` (constraint 2)
+### `gbeta_init`
 
 | value | behavior |
 |-------|----------|
@@ -127,7 +128,7 @@ train_arm(
 There is intentionally **no** separate `"path"` mode — `"load"` with a custom
 `gbeta_ckpt` covers it.
 
-### `unfreeze_orderhead_at_step` (constraints 3 & 4)
+### `unfreeze_orderhead_at_step`
 
 `None` → preserve today's per-arm static behavior exactly (backward compatible).
 
@@ -139,22 +140,28 @@ arm's joint behavior. This gives a single run with two phases:
 **Phase A — `local_step < unfreeze_at` (frozen curriculum warmup):**
 - gβ `requires_grad = False`
 - gβ params are **NOT** in any optimizer param group
-- order policy: deterministic `argsort(scores)` (frozen_gbeta behavior)
-- **no PG term** (no PL sampling, no advantage, no entropy bonus)
+- order policy: deterministic `σ = argsort(g_θ(B))` — **from the same OrderHead
+  instance that will later be unfrozen**. `θ` is the Stage-1
+  post-pretrain parameter set. Explicitly **not**: fixed L2R, the old default
+  `GBETA_CKPT`, a re-loaded `frozen_gβ`, or a cached static order.
+  > Phase A uses deterministic argsort from the same initialized OrderHead
+  > instance that will later be unfrozen.
+- **no PG term** (no PL sampling, no advantage, no entropy bonus); equivalently
+  `λ_PG = 0` (see Data flow)
 - backbone trains on LM-NLL as usual
 
 **Phase B — `local_step >= unfreeze_at` (AO-NLL PG unfreeze):**
 - gβ `requires_grad = True`
 - order policy: PL sampling + PG (joint behavior)
-- **CDL never appears** (constraint 5)
+- **CDL never appears**
 
-**Weight continuity (constraint 3, hard):**
+**Weight continuity (hard):**
 
 θ at the start of Phase B == θ at the end of Phase A. Unfreeze is a
 `requires_grad` flip + optimizer param-group insertion, **never** a re-load or
 re-init of the OrderHead. Formally: `θ_unfreeze_start = θ_after_frozen_warmup`.
 
-**Optimizer param-group insertion (constraint 4, hard):**
+**Optimizer param-group insertion (hard):**
 
 `_build_optimizer` currently decides the OrderHead param group once at startup.
 Change: when `unfreeze_orderhead_at_step is not None`, the backbone optimizer is
@@ -193,8 +200,16 @@ order ─► token_order ─► backbone.forward ─► token_losses ─► ell_
                                                               │
 ell_g = group_rewards(ell_i);  advantage = (baseline - ell_g).detach()
 pg = -(advantage * logp).mean() - β * entropy.mean()
-total = lm_loss + pg      # lm_loss updates backbone; pg updates gβ only
+total = lm_loss + λ_PG * pg   # lm_loss updates backbone; pg updates gβ only
 ```
+
+**`λ_PG`:** introduce a new `lam_pg` argument to `train_arm`
+(default `1.0` → preserves today's `lm_loss + pg`). Phase weighting:
+- Phase A: `pg` is **not constructed** (≡ `λ_PG = 0`) — no PL sampling at all.
+- Phase B: `λ_PG = lam_pg > 0`.
+
+This is a *new* parameter (today's trainer hard-codes `lm_loss + pg`); it exists
+so the PG term can be scaled/swept and so Phase A/B weighting is explicit.
 
 ---
 
@@ -211,22 +226,42 @@ total = lm_loss + pg      # lm_loss updates backbone; pg updates gβ only
 7. **No repeated param-group insertion** (param-`id()` set invariant).
 8. **Weight continuity** — no OrderHead re-init/re-load at unfreeze.
 
-### Observability (constraint 5)
+### Observability
 
-Each logged step records, so a reviewer can see CDL is absent post-init:
+The `cdl_calls` process counter is a **guard**, but a process-level counter
+alone is fragile (test processes, subprocesses, import reload). So config + logs
+carry the **evidence**; the counter is a secondary check.
+
+Run-level fields recorded in the result JSON:
+
+```json
+{
+  "producer_ckpt": "<stage-1 ckpt path or null>",
+  "producer_stage_finished": true,
+  "training_loop_cdl_enabled": false
+}
+```
+
+Each logged step records:
 
 ```json
 {
   "cdl_loss": null,
+  "cdl_teacher": null,
   "cdl_calls": 0,
   "pg_active": true,
   "orderhead_trainable": true
 }
 ```
 
-`cdl_calls` is a process-level counter incremented only inside
-`pretrain_gbeta_cdl`; the trainer asserts it does not increase across the
-freeze/unfreeze loop.
+**No-import rule (hard):** the freeze/unfreeze training loop imports/executes no
+CDL symbol — not `stage_bc_train_readout`, not `cdl_rollout_with_standardized_margin`,
+not any CDL teacher/rollout/loss. CDL lives strictly inside `pretrain_gbeta_cdl`.
+
+Evidence checked by tests during the `train_arm` loop:
+- no `cdl_loss` key ever holds a finite value (always `null`)
+- `cdl_calls_before == cdl_calls_after` across the whole loop
+- the run's `reward == "lm"` and `training_loop_cdl_enabled == false`
 
 ---
 
@@ -237,12 +272,15 @@ freeze/unfreeze loop.
 1. **Loadability / shape:** `pretrain_gbeta_cdl(...)` on a tiny M produces a
    ckpt that `OrderHeadModule(out_ckpt)` loads; `scores(A, per_sample=False)`
    returns shape `[rows, 64]` with finite, grad-enabled values.
-2. **Learning sanity (constraint 6 — two metrics, soft smoke thresholds):**
+2. **Learning sanity (two metrics; pairwise_acc is primary — constraint 4):**
    on a small-M smoke, the produced gβ agrees with its CDL teacher above a
-   random baseline. Use **both**:
-   - `tau(gβ order, CDL order) > 0.2`, **or**
-   - `pairwise_acc(gβ, CDL) > 0.55`.
+   random baseline. The CDL teacher is a pairwise soft teacher, so `pairwise_acc`
+   is the **primary** metric (Kendall τ is unstable under small M / ties /
+   near-L2R). Report **both**:
+   - **Primary:** `pairwise_acc(gβ, CDL) > 0.55`
+   - **Secondary:** `tau(gβ order, CDL order) > 0.2`
 
+   Passing **either** is acceptable for a tiny smoke, but both are reported.
    Thresholds are smoke-level (small M is noisy); a hard `τ > 0` is explicitly
    rejected as too weak.
 3. **Provenance:** metadata sidecar records `producer="stage_bc_train_readout"`
@@ -261,8 +299,17 @@ freeze/unfreeze loop.
    freeze/unfreeze loop; the trainer imports/executes no CDL symbol in the loop.
 9. **Backbone grad routing:** `pg_only_backbone_grad ≈ 0` (PG does not reach
    backbone) — reuse the existing guard.
-10. **Backward compatibility:** with `unfreeze_orderhead_at_step=None`, existing
-    `frozen_gbeta` and `joint_*` arms produce identical behavior to today.
+10. **Backward compatibility (interface, not bit-identical curves — constraint 5):**
+    with `unfreeze_orderhead_at_step=None` (and `lam_pg=1.0`), assert *interface*
+    compatibility, not an identical loss curve (randomness / optimizer ordering /
+    added log keys make bit-identical curves unrealistic):
+    - `frozen_gbeta`: no `is_orderhead` param group, no PG, argsort path.
+    - `joint_*`: `is_orderhead` param group exists at startup, PG active from
+      step 0.
+    - all previously-required metrics / log keys still present.
+
+    If a numeric check is wanted, use at most a fixed-seed **1-step** smoke
+    comparing `order`, `pg_active`, and `param_groups` — not a full curve.
 
 ---
 
@@ -271,17 +318,39 @@ freeze/unfreeze loop.
 - **new** `analyses/gbeta_cdl_pretrain.py` — thin wrapper over
   `stage_bc_train_readout`, FrozenBetaHook-format output + metadata.
 - **edit** `analyses/v3_group_trainer.py`:
-  - `train_arm(..., gbeta_init, gbeta_ckpt, unfreeze_orderhead_at_step)`
+  - `train_arm(..., gbeta_init, gbeta_ckpt, unfreeze_orderhead_at_step, lam_pg)`
   - `_build_optimizer` — support deferred OrderHead group when a schedule is set.
   - main loop — per-step frozen/unfrozen branch, one-time unfreeze insertion,
-    `cdl_calls`/`pg_active` logging, invariants.
-- **new** tests under `tests/` for producer + schedule.
+    `λ_PG`-weighted PG, `producer_ckpt`/`training_loop_cdl_enabled` run fields,
+    `cdl_loss`/`cdl_teacher`/`cdl_calls`/`pg_active`/`orderhead_trainable`
+    step logging, invariants, and the **no-CDL-import** rule in the loop.
+- **new** tests under `tests/` for producer + schedule + red lines.
+
+## Implementation plan task structure (for writing-plans)
+
+- **Task 1 — CDL producer wrapper:** new `analyses/gbeta_cdl_pretrain.py`; call
+  `stage_bc_train_readout`; save ckpt + metadata sidecar; tests for
+  loadability / shape / provenance / pairwise sanity (primary) + τ (secondary).
+- **Task 2 — trainer init path:** `gbeta_init` + custom `gbeta_ckpt`;
+  `"cdl_pretrain"` runs producer then loads; `"load"` default/custom; test
+  custom-ckpt reuse does not re-run pretrain.
+- **Task 3 — freeze→unfreeze schedule:** `unfreeze_orderhead_at_step` + `lam_pg`;
+  Phase A same OrderHead / frozen argsort / no PG / no optimizer group; Phase B
+  requires_grad flip + one-time param-group insertion + PL+PG; tests for
+  param-id invariant / weight continuity / delta before-after.
+- **Task 4 — red-line tests and logging:** PG→backbone grad ≈ 0; LM→backbone
+  grad normal; `cdl_calls` non-increasing + no-import; log fields
+  (`pg_active`, `orderhead_trainable`, `cdl_loss=null`, `cdl_calls=0`,
+  `training_loop_cdl_enabled=false`); backward-compat interface checks for
+  `unfreeze_orderhead_at_step=None`.
 
 ## Open items resolved in this design
 
-- Stage-1 mechanism: **reuse** `stage_bc_train_readout` (constraint 1).
-- `gbeta_init` values + custom `gbeta_ckpt` reuse (constraint 2).
-- Weight continuity guarantee (constraint 3).
-- Deferred single param-group insertion + id-set invariant (constraint 4).
-- CDL absence scoped to Stage 3 + observability fields (constraint 5).
-- Two-metric producer smoke with soft thresholds (constraint 6).
+- Stage-1 mechanism: **reuse** `stage_bc_train_readout`.
+- `gbeta_init` values + custom `gbeta_ckpt` reuse.
+- Weight continuity guarantee across the unfreeze boundary.
+- Deferred single param-group insertion + id-set invariant.
+- CDL absence scoped to Stage 3 + observability fields + no-import rule.
+- Two-metric producer smoke (pairwise_acc primary, τ secondary), soft thresholds.
+- `λ_PG` (`lam_pg`) weighting; Phase A `λ_PG=0`, Phase B `λ_PG>0`.
+- Backward compatibility asserted at the *interface* level, not bit-identical curves.
