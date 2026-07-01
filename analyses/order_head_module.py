@@ -31,7 +31,13 @@ class OrderHeadModule(nn.Module):
         super().__init__()
         hook = FrozenBetaHook(gbeta_ckpt, mode="argsort", device=device)
         self.gbeta = hook.model        # nn.Module, MODEL-frame scores; params ARE gβ
-        self.device = device
+        self._requested_device = device
+        self.gbeta.to(device)
+
+    @property
+    def device(self):
+        """Current gβ device, including moves made through ``module.to(...)``."""
+        return next(self.gbeta.parameters()).device
 
     def scores(self, A, per_sample):
         B = bmatrix_from_A(A.to(self.device).float(), per_sample)
