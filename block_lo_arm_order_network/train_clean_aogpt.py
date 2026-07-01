@@ -258,6 +258,31 @@ def alpha_for_step(global_step, start_step, args):
     return float(args.alpha_start + frac * (args.alpha_target - args.alpha_start))
 
 
+def maybe_unfreeze_orderhead(optimizer, gbeta_module, global_step, args, state):
+    """Idempotently unfreeze gβ and insert ONE optimizer param group at the
+    scheduled step (Stage 2 → Stage 3 handoff).
+
+    Weight continuity: this only flips ``requires_grad`` and adds a param group;
+    it never reloads or re-inits the OrderHead. Returns True exactly on the
+    firing step, else False.
+    """
+    at = getattr(args, "unfreeze_orderhead_at_step", None)
+    if at is None or state.get("unfrozen") or int(global_step) < int(at):
+        return False
+    for p in gbeta_module.parameters():
+        p.requires_grad_(True)
+    assert not any(g.get("is_orderhead") for g in optimizer.param_groups), \
+        "an is_orderhead param group already exists before unfreeze"
+    optimizer.add_param_group({
+        "params": [p for p in gbeta_module.parameters()],
+        "lr": float(args.orderhead_lr),
+        "weight_decay": 0.0,
+        "is_orderhead": True,
+    })
+    state["unfrozen"] = True
+    return True
+
+
 def clean_model_args(args):
     return {
         "n_layer": int(args.n_layer),
@@ -909,6 +934,28 @@ def parse_args(default_run_kind="baseline"):
     p.add_argument("--batch-mean-probes", type=int, default=1,
                    help="number of probe forward passes to average B over "
                         "(>1 activates model-frame FrozenGBetaModelFrameBlockProvider).")
+    # --- decoupled OrderHead: CDL-pretrain init → frozen warmup → PG unfreeze ---
+    p.add_argument("--unfreeze-orderhead-at-step", type=int, default=None,
+                   help="frozen_beta: global step at which gβ is unfrozen and "
+                        "LM-NLL policy-gradient fine-tuning begins (Stage 3). "
+                        "Unset = frozen warmup only (backward compatible).")
+    p.add_argument("--orderhead-lr", type=float, default=3e-4,
+                   help="LR for the gβ param group inserted at unfreeze.")
+    p.add_argument("--lam-pg", type=float, default=1.0,
+                   help="weight λ_PG on the PG loss term (Phase B only).")
+    p.add_argument("--pg-tau", type=float, default=1.0,
+                   help="Plackett-Luce sampling temperature (Phase B).")
+    p.add_argument("--pg-group-m", type=int, default=16,
+                   help="group size for group-credit baseline (variance reduction).")
+    p.add_argument("--pg-beta", type=float, default=3e-3,
+                   help="entropy bonus coefficient on the PG loss.")
+    p.add_argument("--pg-adv-clip", type=float, default=0.3,
+                   help="clamp on the scalar batch advantage.")
+    p.add_argument("--cdl-pretrain", action="store_true",
+                   help="if set and --frozen-beta-ckpt absent, CDL-pretrain gβ "
+                        "from --cdl-source-ckpt before training (Stage 1).")
+    p.add_argument("--cdl-source-ckpt", type=str, default=None,
+                   help="backbone ckpt for --cdl-pretrain (default: 10k parent).")
     # --- direct model-frame strict65 policies ---
     p.add_argument(
         "--direct-policy",
@@ -1750,7 +1797,25 @@ def main(default_run_kind="baseline"):
         save_ckpt(0, metrics0)
     if args.run_kind == "frozen_beta":
         if not args.frozen_beta_ckpt:
-            raise ValueError("run-kind=frozen_beta requires --frozen-beta-ckpt")
+            # Stage-1 resolution (explicit, no accidental expensive producer):
+            #   --frozen-beta-ckpt present  -> always load it (handled above)
+            #   --cdl-pretrain (ckpt absent) -> produce gβ from --cdl-source-ckpt
+            #   neither                      -> error
+            # The producer runs strictly BEFORE the optimizer/training loop, so
+            # no CDL symbol is executed inside the loop (spec red line).
+            if args.cdl_pretrain:
+                from analyses.gbeta_cdl_pretrain import (
+                    pretrain_gbeta_cdl, DEFAULT_SOURCE_CKPT,
+                )
+                src = args.cdl_source_ckpt or DEFAULT_SOURCE_CKPT
+                args.frozen_beta_ckpt = pretrain_gbeta_cdl(
+                    src, out_dir=str(Path(args.output_dir) / "gbeta_cdl"),
+                    device=str(device))
+                log(f"[stage1] CDL-pretrained gβ -> {args.frozen_beta_ckpt}")
+            else:
+                raise ValueError(
+                    "run-kind=frozen_beta requires --frozen-beta-ckpt "
+                    "or --cdl-pretrain")
         if args.gbeta_input_mode == "all_layers":
             # All-layer head-gated: extract ALL heads from ALL layers, gate across L*H heads
             from batch_readout.hook_order_provider import AllLayerHeadGatedHookOrderProvider
