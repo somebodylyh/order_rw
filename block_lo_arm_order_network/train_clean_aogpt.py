@@ -1368,8 +1368,10 @@ def main(default_run_kind="baseline"):
     # group only exists after gβ is built (below), so DEFER loading the optimizer
     # state until the group is reconstructed (see restore_orderhead_on_resume).
     _defer_optimizer_resume = bool(ckpt is not None and ckpt.get("orderhead_unfrozen"))
+    _optimizer_resume_done = False
     if ckpt is not None and "optimizer" in ckpt and not _defer_optimizer_resume:
         optimizer.load_state_dict(ckpt["optimizer"])
+        _optimizer_resume_done = True
         log("Resumed optimizer state.")
 
     write_config(output_dir, args, split, clean_perm, rw_policy, rw_params)
@@ -2010,6 +2012,16 @@ def main(default_run_kind="baseline"):
                 "that exposes gbeta_module.")
         from analyses.v3_group_credit import group_ids_for, GroupEMA
         _gb = beta_provider.gbeta_module
+        # P3 (none_mode footgun): the single-head canonical gβ (nodewise_K1000)
+        # was CDL-trained on strict65_model B. Feeding a different none_mode gives
+        # the readout an OOD B distribution (B_PG==B_frozen still holds, but the
+        # scores are off-distribution). Warn so the operator sets it explicitly.
+        if (args.gbeta_input_mode == "single_head"
+                and args.frozen_beta_none_mode != "strict65_model"):
+            log(f"[stage3][WARN] --frozen-beta-none-mode={args.frozen_beta_none_mode} "
+                f"but the single-head NodewiseReadout gβ is typically CDL-trained on "
+                f"'strict65_model'. Pass --frozen-beta-none-mode strict65_model unless "
+                f"this gβ was trained on a different none_mode.")
         for _p in _gb.parameters():
             _p.requires_grad_(False)  # frozen through Phase A
         _groups = group_ids_for(args.batch_size, args.pg_group_m)
@@ -2022,11 +2034,24 @@ def main(default_run_kind="baseline"):
             ckpt, optimizer, pg_state, unfreeze_state, args)
         if _defer_optimizer_resume and "optimizer" in ckpt:
             optimizer.load_state_dict(ckpt["optimizer"])
+            _optimizer_resume_done = True
             log(f"Resumed optimizer state (Phase-B, orderhead group "
                 f"reinserted={reinserted}).")
         log(f"[stage3] unfreeze gβ at step {args.unfreeze_orderhead_at_step}; "
             f"lam_pg={args.lam_pg} pg_tau={args.pg_tau} group_m={args.pg_group_m} "
             f"resume_unfrozen={unfreeze_state['unfrozen']}")
+
+    # P2 guard: a Phase-B ckpt (orderhead_unfrozen) deferred its optimizer load
+    # until the gβ group was reconstructed above. If that reconstruction path was
+    # NOT taken (e.g. --unfreeze-orderhead-at-step omitted, or run_kind changed),
+    # the optimizer state would be silently dropped — fail loudly instead.
+    if _defer_optimizer_resume and not _optimizer_resume_done:
+        raise ValueError(
+            "Resuming a Phase-B checkpoint (orderhead_unfrozen=True) requires "
+            "run-kind=frozen_beta AND --unfreeze-orderhead-at-step so the OrderHead "
+            "optimizer param group is reconstructed before the optimizer state is "
+            "loaded. Otherwise the backbone optimizer state (and gβ weights) would "
+            "be silently discarded.")
 
     for global_step in range(start_step, args.max_steps):
         alpha = alpha_for_step(global_step, start_step, args)
