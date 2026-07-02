@@ -1025,6 +1025,12 @@ def parse_args(default_run_kind="baseline"):
                         "log P(σ)=Σ_t log π(σ_t) (~-250 for N=64); 'length' = mean "
                         "(1/N)Σ_t, i.e. gradient rescaled by 1/N — a pure scale "
                         "stabilization (equivalent to λ_PG/N), reward unchanged.")
+    p.add_argument("--pg-update", choices=["reinforce", "grpo"], default="reinforce",
+                   help="PG update rule: 'reinforce' (Phase-1 EMA-baseline, default) "
+                        "or 'grpo' (multi-sample within-state normalized advantage).")
+    p.add_argument("--pg-k", type=int, default=4,
+                   help="number of sampled orders per state for --pg-update grpo "
+                        "(K LM reward forwards, stacked into one batched no-grad pass).")
     p.add_argument("--cdl-pretrain", action="store_true",
                    help="if set and --frozen-beta-ckpt absent, CDL-pretrain gβ "
                         "from --cdl-source-ckpt before training (Stage 1).")
@@ -2129,10 +2135,11 @@ def main(default_run_kind="baseline"):
                         # A → B = A.T.mean(batch), diag=0), only grad-enabled + PL.
                         # This guarantees B_PG == B_frozen by construction.
                         from batch_readout.orderhead_pg import (
-                            gbeta_scores_with_grad, batch_advantage)
+                            gbeta_scores_with_grad, batch_advantage, grpo_advantage)
                         from batch_readout.hook_order_provider import (
                             extract_selected_head_A_for_batch, random_probe_token_orders)
                         from analyses.p7_gbeta_policy import sample_pl
+                        from batch_readout.pl_sampling import pl_argsort
                         probe = random_probe_token_orders(
                             idx_batch.shape[0], args.seed, global_step, device)
                         A = extract_selected_head_A_for_batch(
@@ -2143,29 +2150,103 @@ def main(default_run_kind="baseline"):
                         _d = torch.arange(B.shape[-1], device=B.device)
                         B[:, _d, _d] = 0.0
                         B_det = B.detach()                          # no PG grad to backbone
-                        scores = gbeta_scores_with_grad(pg_state["gbeta"], B_det)
-                        sigma_model, logp, entropy = sample_pl(scores, tau=args.pg_tau)
-                        if args.pg_logp_normalize == "length":
-                            # length-normalize: sum log P(σ) -> mean over N steps.
-                            # Pure gradient rescale by 1/N (≡ λ_PG/N); reward unchanged.
-                            logp = logp / float(scores.shape[0])
-                        sigma_model = torch.as_tensor(sigma_model, device=device,
-                                                      dtype=torch.long)
-                        sigma_phys = model_blocks_to_physical_blocks(sigma_model, clean_perm)
-                        phys = sigma_phys.unsqueeze(0).expand(args.batch_size, -1)
-                        token_orders = physical_blocks_to_model_token_order(
-                            phys, clean_perm, BLOCK_LEN).to(device)
-                        token_losses, _ = compute_token_ce(
-                            model, idx_batch, token_orders, device)
-                        A_batch, _ell = batch_advantage(
-                            token_losses, pg_state["groups"], pg_state["ema"],
-                            args.pg_adv_clip)
-                        lm_loss = token_losses.mean()
-                        L_pg = -(A_batch * logp) - args.pg_beta * entropy
-                        loss = lm_loss + args.lam_pg * L_pg
-                        unfreeze_state["last_pg"] = float(L_pg.detach())
-                        unfreeze_state["last_entropy"] = float(entropy.detach())
-                        unfreeze_state["last_adv"] = float(A_batch.detach())
+                        scores = gbeta_scores_with_grad(pg_state["gbeta"], B_det)  # (N,) with grad
+
+                        if args.pg_update == "grpo":
+                            # ═══ GRPO: K samples, within-group normalized advantage ═══
+                            K = args.pg_k
+                            logps, entropies = [], []
+                            sigma_models = []
+
+                            for _k in range(K):
+                                sm, lp, ent = sample_pl(scores, tau=args.pg_tau)
+                                sigma_models.append(sm)      # each (N,) int64
+                                if args.pg_logp_normalize == "length":
+                                    N = float(scores.shape[0])
+                                    lp = lp / N
+                                    ent = ent / N
+                                logps.append(lp)             # each scalar with grad
+                                entropies.append(ent)        # each scalar with grad
+
+                            # Stacked no-grad reward evaluation: one LM forward for all K.
+                            with torch.no_grad():
+                                all_token_orders = []
+                                for sm in sigma_models:
+                                    sm_t = torch.as_tensor(sm, device=device,
+                                                           dtype=torch.long)
+                                    sp = model_blocks_to_physical_blocks(sm_t, clean_perm)
+                                    phys = sp.unsqueeze(0).expand(args.batch_size, -1)
+                                    tok = physical_blocks_to_model_token_order(
+                                        phys, clean_perm, BLOCK_LEN).to(device)
+                                    all_token_orders.append(tok)
+                                # (K*B, SL)
+                                stacked_orders = torch.cat(all_token_orders, dim=0)
+                                stacked_idx = idx_batch.repeat(K, 1)
+                                stacked_losses, _ = compute_token_ce(
+                                    model, stacked_idx, stacked_orders, device)
+                                # (K*B, SL) → per-sample mean → (K*B,) → (K, B) → (K,)
+                                per_sample = stacked_losses.reshape(
+                                    K, args.batch_size, -1).mean(dim=-1)
+                                rewards = -per_sample.mean(dim=-1)  # (K,), higher=better
+                                del stacked_losses, stacked_idx, stacked_orders
+                                del all_token_orders, per_sample
+
+                            A_k = grpo_advantage(rewards)  # (K,) detached
+
+                            logp_stack = torch.stack(logps)         # (K,) with grad
+                            entropy_stack = torch.stack(entropies) # (K,) with grad
+
+                            L_pg = -(A_k * logp_stack).mean() - args.pg_beta * entropy_stack.mean()
+
+                            # Greedy backbone order (decoupled from exploration).
+                            greedy_sigma = pl_argsort(
+                                scores.detach().unsqueeze(0)).squeeze(0)  # (N,) int64
+                            sigma_phys_g = model_blocks_to_physical_blocks(
+                                greedy_sigma, clean_perm)
+                            phys_g = sigma_phys_g.unsqueeze(0).expand(args.batch_size, -1)
+                            token_orders_g = physical_blocks_to_model_token_order(
+                                phys_g, clean_perm, BLOCK_LEN).to(device)
+                            token_losses_g, _ = compute_token_ce(
+                                model, idx_batch, token_orders_g, device)
+                            lm_loss = token_losses_g.mean()
+
+                            loss = lm_loss + args.lam_pg * L_pg
+
+                            unfreeze_state["last_pg"] = float(L_pg.detach())
+                            unfreeze_state["last_entropy"] = float(entropy_stack.mean().detach())
+                            unfreeze_state["last_adv"] = float(A_k.mean().detach())
+                            unfreeze_state["last_grpo_diag"] = {
+                                "std_k_reward": float(rewards.std()),
+                                "best_of_k": float(rewards.max()),
+                                "mean_k_reward": float(rewards.mean()),
+                                "worst_of_k": float(rewards.min()),
+                                "adv_k_mean": float(A_k.mean()),
+                                "adv_k_std": float(A_k.std()),
+                                "adv_k_max_abs": float(A_k.abs().max()),
+                            }
+
+                        else:
+                            # ═══ REINFORCE: Phase-1 EMA-baseline (unchanged) ═══
+                            sigma_model, logp, entropy = sample_pl(scores, tau=args.pg_tau)
+                            if args.pg_logp_normalize == "length":
+                                logp = logp / float(scores.shape[0])
+                            sigma_model = torch.as_tensor(sigma_model, device=device,
+                                                          dtype=torch.long)
+                            sigma_phys = model_blocks_to_physical_blocks(sigma_model, clean_perm)
+                            phys = sigma_phys.unsqueeze(0).expand(args.batch_size, -1)
+                            token_orders = physical_blocks_to_model_token_order(
+                                phys, clean_perm, BLOCK_LEN).to(device)
+                            token_losses, _ = compute_token_ce(
+                                model, idx_batch, token_orders, device)
+                            A_batch, _ell = batch_advantage(
+                                token_losses, pg_state["groups"], pg_state["ema"],
+                                args.pg_adv_clip)
+                            lm_loss = token_losses.mean()
+                            L_pg = -(A_batch * logp) - args.pg_beta * entropy
+                            loss = lm_loss + args.lam_pg * L_pg
+                            unfreeze_state["last_pg"] = float(L_pg.detach())
+                            unfreeze_state["last_entropy"] = float(entropy.detach())
+                            unfreeze_state["last_adv"] = float(A_batch.detach())
                     elif alpha > 0.0:
                         # ── Phase A: existing frozen argsort behavior (unchanged) ──
                         sigma = beta_provider.physical_order(model, idx_batch, global_step).to(device)
@@ -2308,8 +2389,15 @@ def main(default_run_kind="baseline"):
                     f" | pg={unfreeze_state.get('last_pg', 0.0):.4f}"
                     f" adv={unfreeze_state.get('last_adv', 0.0):+.4f}"
                     f" H={unfreeze_state.get('last_entropy', 0.0):.3f}"
-                    f" orderhead_trainable=True cdl_loss=None cdl_calls=0"
                 )
+                grpo_diag = unfreeze_state.get("last_grpo_diag")
+                if grpo_diag is not None:
+                    pg_suffix += (
+                        f" std_k_r={grpo_diag['std_k_reward']:.4f}"
+                        f" best_k={grpo_diag['best_of_k']:.4f}"
+                        f" |Â|_max={grpo_diag['adv_k_max_abs']:.3f}"
+                    )
+                pg_suffix += " orderhead_trainable=True cdl_loss=None cdl_calls=0"
             log(
                 f"step {global_step:5d}->{next_step:5d}/{args.max_steps} | "
                 f"loss={avg_loss:.4f} | alpha={alpha:.3f} | lr={lr:.2e} | "
@@ -2327,6 +2415,14 @@ def main(default_run_kind="baseline"):
                         "train/orderhead_trainable": 1.0,
                         "train/training_loop_cdl_enabled": 0.0,
                     })
+                    grpo_diag = unfreeze_state.get("last_grpo_diag")
+                    if grpo_diag is not None:
+                        payload.update({
+                            "train/std_k_reward": grpo_diag["std_k_reward"],
+                            "train/best_of_k_reward": grpo_diag["best_of_k"],
+                            "train/mean_k_reward": grpo_diag["mean_k_reward"],
+                            "train/adv_k_max_abs": grpo_diag["adv_k_max_abs"],
+                        })
                 wandb_run.log(payload, step=int(next_step))
             last_log_time = now
 
