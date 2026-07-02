@@ -559,9 +559,23 @@ def evaluate_orders(model, idx_eval_model, clean_perm, B, rw_policy, rw_params, 
                     alpha_dep=float(rw_params.get("alpha_dep", 0.5)),
                 ).cpu().long()
         else:
-            rw_rows = [sample_order(B, rw_policy, rw_params, seed=int(seed) * 10000 + seq_idx)[0]
-                       for seq_idx in range(n_eval)]
-            rw_phys = torch.tensor(np.stack(rw_rows), dtype=torch.long)
+            try:
+                rw_rows = [sample_order(B, rw_policy, rw_params, seed=int(seed) * 10000 + seq_idx)[0]
+                           for seq_idx in range(n_eval)]
+                rw_phys = torch.tensor(np.stack(rw_rows), dtype=torch.long)
+            except (ValueError, IndexError) as exc:
+                # Graph-RW baseline sampling can fail on some directed-graph shapes
+                # (e.g. numpy "p must be 1-dimensional"). It is NOT a main metric
+                # for OrderHead / frozen_beta runs, and it must not block eval +
+                # checkpoint save. Fall back to the random (unstructured) order so
+                # val_rw_order simply mirrors val_unstructured_order.
+                if not getattr(evaluate_orders, "_rw_guard_warned", False):
+                    print(f"[eval][WARN] graph-RW order sampling failed "
+                          f"({type(exc).__name__}: {exc}); val_rw_order falls back "
+                          f"to unstructured/random (rw_policy={rw_policy}).",
+                          flush=True)
+                    evaluate_orders._rw_guard_warned = True
+                rw_phys = unstructured_phys
         unstructured_model_orders.append(physical_blocks_to_model_blocks(unstructured_phys, clean_perm))
         rw_model_orders.append(physical_blocks_to_model_blocks(rw_phys, clean_perm))
 
