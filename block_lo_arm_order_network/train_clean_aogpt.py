@@ -10,6 +10,15 @@ import sys
 import time
 from pathlib import Path
 
+# Make repo-root packages (analyses.*, scripts/) importable when this file is run
+# as a script (python block_lo_arm_order_network/train_clean_aogpt.py) — the
+# script dir is on sys.path but the repo root is not. Needed by the decoupled
+# OrderHead path (analyses.v3_group_credit, analyses.gbeta_cdl_pretrain, the
+# single-head producer in scripts/).
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")

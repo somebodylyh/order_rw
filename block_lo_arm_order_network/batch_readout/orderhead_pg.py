@@ -19,10 +19,13 @@ def gbeta_scores_with_grad(gbeta_model, B_det):
 
     Returns the model-frame score vector (64,) with grad on gβ params.
     """
-    try:
-        out = gbeta_model(B_det, apply_head_dropout=False)
-    except TypeError:
-        out = gbeta_model(B_det)                 # NodewiseReadout: no dropout kwarg
+    import inspect
+    dev = next(gbeta_model.parameters()).device
+    B_det = B_det.to(dev)                         # align B to the gβ's device
+    if "apply_head_dropout" in inspect.signature(gbeta_model.forward).parameters:
+        out = gbeta_model(B_det, apply_head_dropout=False)  # L0DynamicGBeta
+    else:
+        out = gbeta_model(B_det)                  # NodewiseReadout (no such kwarg)
     scores = out[0] if isinstance(out, tuple) else out  # (1, 64)
     return scores[0]
 
