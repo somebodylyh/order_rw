@@ -25,11 +25,15 @@
 > - **P2-4** unfreeze fires only when PG actually runs (`alpha>0`), keeping
 >   unfreeze / PG branch / `pg_active` log consistent.
 >
-> **Deferred (explicit follow-up):** `scripts/train_nodewise_gbeta.py` — a
-> reproducible single-head NodewiseReadout producer (extract L1H7 B → bootstrap
-> K=1000 m=8 batch-mean + CDL teacher → NodewiseReadout pairwise-BCE 40ep). Not
-> written yet: it must be validated against `nodewise_K1000.pt` in a checkout that
-> has the 10k ckpt. The experiment is NOT blocked — it loads the existing ckpt.
+> **Single-head reproduce-producer — DONE:** `scripts/train_nodewise_gbeta.py`
+> implements the recipe (extract L1H7 B → bootstrap K=1000 m=8 batch-mean + CDL
+> teacher → NodewiseReadout pairwise-BCE 40ep → FrozenBetaHook-format save).
+> Factored into unit-tested pure functions (`bootstrap_cdl_dataset`,
+> `train_readout_on_dataset`, `save_gbeta`) + a `@slow` reproduce test. Validated
+> end-to-end against the real 10k ckpt (M=128/K=64/8ep smoke: val pairwise-acc
+> 0.61, loads as NodewiseReadout). `--cdl-pretrain` now routes single_head to it;
+> the multi-head `gbeta_cdl_pretrain` remains the L0DynamicGBeta variant. The
+> experiment can still just load the existing `nodewise_K1000.pt`.
 
 **Goal:** On the production `train_clean_aogpt.py` path, decouple the OrderHead's CDL initialization from its downstream fine-tuning: CDL-pretrain gβ (L0DynamicGBeta) offline, warm the backbone up with gβ frozen (argsort), then at a scheduled step unfreeze gβ and fine-tune it with LM-NLL policy gradient — CDL and PG never in the same loss.
 

@@ -1861,27 +1861,30 @@ def main(default_run_kind="baseline"):
             # The producer runs strictly BEFORE the optimizer/training loop, so
             # no CDL symbol is executed inside the loop (spec red line).
             if args.cdl_pretrain:
-                # The canonical (label-free-selected) gβ is single-head L1H7 +
-                # NodewiseReadout. Its reproduce-producer is a SEPARATE deliverable
-                # (scripts/train_nodewise_gbeta.py, pending real-ckpt validation).
-                # gbeta_cdl_pretrain only produces the multi-head L0DynamicGBeta
-                # variant, which the single-head deploy path cannot load — so guard.
                 if args.gbeta_input_mode == "single_head":
-                    raise NotImplementedError(
-                        "--cdl-pretrain for the single-head NodewiseReadout path is "
-                        "not wired yet. Pass --frozen-beta-ckpt "
-                        "reports/uniform_label_free_v1/nodewise_K1000.pt "
-                        "(label-free-selected L1H7, acc 0.94). The reproduce-producer "
-                        "scripts/train_nodewise_gbeta.py is a pending follow-up.")
-                from analyses.gbeta_cdl_pretrain import (
-                    pretrain_gbeta_cdl, DEFAULT_SOURCE_CKPT,
-                )
-                src = args.cdl_source_ckpt or DEFAULT_SOURCE_CKPT
-                args.frozen_beta_ckpt = pretrain_gbeta_cdl(
-                    src, out_dir=str(Path(args.output_dir) / "gbeta_cdl"),
-                    device=str(device))
-                log(f"[stage1] CDL-pretrained (multi-head L0DynamicGBeta) gβ -> "
-                    f"{args.frozen_beta_ckpt}")
+                    # Canonical: single-head L1H7 → NodewiseReadout producer.
+                    import sys as _sys
+                    _scripts = str(Path(__file__).resolve().parents[1] / "scripts")
+                    if _scripts not in _sys.path:
+                        _sys.path.insert(0, _scripts)
+                    import train_nodewise_gbeta as _prod  # noqa: E402
+                    src = args.cdl_source_ckpt or _prod.DEFAULT_SOURCE_CKPT
+                    args.frozen_beta_ckpt = _prod.train_nodewise_gbeta(
+                        src, out_dir=str(Path(args.output_dir) / "gbeta_cdl"),
+                        head=tuple(args.frozen_beta_head), device=str(device))
+                    log(f"[stage1] CDL-pretrained (single-head NodewiseReadout) gβ "
+                        f"-> {args.frozen_beta_ckpt}")
+                else:
+                    # Multi-head L0DynamicGBeta variant.
+                    from analyses.gbeta_cdl_pretrain import (
+                        pretrain_gbeta_cdl, DEFAULT_SOURCE_CKPT,
+                    )
+                    src = args.cdl_source_ckpt or DEFAULT_SOURCE_CKPT
+                    args.frozen_beta_ckpt = pretrain_gbeta_cdl(
+                        src, out_dir=str(Path(args.output_dir) / "gbeta_cdl"),
+                        device=str(device))
+                    log(f"[stage1] CDL-pretrained (multi-head L0DynamicGBeta) gβ "
+                        f"-> {args.frozen_beta_ckpt}")
             else:
                 raise ValueError(
                     "run-kind=frozen_beta requires --frozen-beta-ckpt "
