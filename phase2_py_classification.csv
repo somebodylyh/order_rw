@@ -1,0 +1,518 @@
+file,label,referenced_by,import_risk,suggested_action,reason
+analyses/add_consensus_order_to_gbeta_dataset.py,MAINLINE,py:1;sh:1;doc:2,MED,KEEP,imported_by=test_add_consensus_order_to_gbeta_dataset.py
+analyses/analyze_handoff_circuit.py,MAINLINE,py:2;doc:1,MED,KEEP,"imported_by=handoff_signature.py,test_analyze_handoff_circuit.py"
+analyses/block_granularity_scan.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+analyses/build_gbeta_headset_dataset.py,UNKNOWN,py:0;doc:2,NONE,HUMAN REVIEW,no refs found
+analyses/build_l0_dynamic_gbeta_dataset.py,MAINLINE,py:4;sh:1;doc:5,HIGH,KEEP,"imported_by=add_consensus_order_to_gbeta_dataset.py,test_build_l0_dynamic_gbeta_dataset.py,test_eval_l0_dynamic_gbeta.py..."
+analyses/canonical_reanalysis.py,MAINLINE,py:12;doc:9,HIGH,KEEP,"imported_by=label_free_pipeline.py,layout_ood_eval.py,p3prime_causal_verify.py..."
+analyses/causal_layer_ablation.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+analyses/cdl_teacher_ablation.py,MAINLINE,py:1;doc:1,MED,KEEP,imported_by=cdl_teacher_ablation_image.py
+analyses/cdl_teacher_ablation_image.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,image-line
+analyses/cdl_teacher_ablation_image_viz.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,image-line
+analyses/characterize_l0_dynamic_gbeta.py,DIAGNOSTIC,py:0;doc:4,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/diag_hook_vs_offline_b.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/diag_model_frame_feedback.py,DIAGNOSTIC,py:0;sh:1;doc:2,LOW-SH,-> scripts|analyses/diagnostics (Phase 2B),sh=queue_model_frame_feedback_diag.sh; diag-name
+analyses/diag_shuffled_ar_model_frame_order.py,DIAGNOSTIC,py:0;sh:1;doc:1,LOW-SH,-> scripts|analyses/diagnostics (Phase 2B),sh=queue_shuffled_ar_model_frame_diag.sh; diag-name
+analyses/diag_shuffled_l2r_cdl.py,DIAGNOSTIC,py:0;doc:4,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/diagnose_readout_collapse.py,DIAGNOSTIC,py:0;doc:1,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/emergence_characterization.py,MAINLINE,py:9;doc:4,HIGH,KEEP,"imported_by=plot_emergence.py,position_prior_decomp.py,test_emergence_a1.py..."
+analyses/eval_frozen_readout_cross_ckpt.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/eval_head_gated_audition.py,DIAGNOSTIC,py:0;sh:1;doc:2,LOW-SH,-> scripts|analyses/diagnostics (Phase 2B),sh=run_head_gated_audition.sh; diag-name
+analyses/eval_head_gated_gbeta.py,DIAGNOSTIC,py:0;sh:1;doc:2,LOW-SH,-> scripts|analyses/diagnostics (Phase 2B),sh=run_head_gated_gbeta_distill_full.sh; diag-name
+analyses/eval_l0_dynamic_gbeta.py,MAINLINE,py:2;sh:1;doc:5,MED,KEEP,"imported_by=test_eval_l0_dynamic_gbeta.py,test_eval_l0_dynamic_gbeta_losses.py"
+analyses/gbeta_input_sanity_final.py,MAINLINE,py:1;doc:27,MED,KEEP,imported_by=run_gbeta_sanity_save_json.py
+analyses/graph_diversity_20260521/analyze_diversity.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+analyses/graph_diversity_20260521/extract_per_sample_gB.py,UNKNOWN,py:0;doc:3,NONE,HUMAN REVIEW,no refs found
+analyses/handoff_carrier_config.py,MAINLINE,py:3;doc:3,HIGH,KEEP,"imported_by=emergence_characterization.py,path_patch_handoff.py,test_handoff_carrier_config.py"
+analyses/handoff_signature.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+analyses/head_drift_diagnostic.py,LAUNCH_HELPER,py:0;sh:1,LOW-SH,KEEP (launcher dep),sh=queue_head_gated_gbeta_joint.sh
+analyses/head_stability_seed2.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+analyses/label_free_pipeline.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+analyses/layout_ood_eval.py,MAINLINE,py:1;doc:1,MED,KEEP,imported_by=test_layout_ood_eval.py
+analyses/order_eval_ladder.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+analyses/order_head_module.py,MAINLINE,py:4;doc:4,HIGH,KEEP,"imported_by=v3_feasibility_smoke.py,test_aogpt_with_orderhead.py,test_order_head_module.py..."
+analyses/p3prime_causal_verify.py,MAINLINE,py:10;doc:3,HIGH,KEEP,"imported_by=test_p3prime_a0.py,test_p3prime_a1_local.py,test_p3prime_a1_loko.py..."
+analyses/p5_ood_layout.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+analyses/p5_utility_controller.py,MAINLINE,py:29;doc:10,HIGH,KEEP,"imported_by=order_head_module.py,p5_ood_layout.py,p6_cdl_sanity.py..."
+analyses/p6_cdl_sanity.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+analyses/p6_cdl_sanity_v2.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+analyses/p6_easy_first_control.py,MAINLINE,py:1;doc:2,MED,KEEP,imported_by=p7_predictability_probe.py
+analyses/p6_h_order_evolution.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+analyses/p6_h_residual_modulation.py,MAINLINE,py:2;doc:1,MED,KEEP,"imported_by=test_p6_h_residual.py,run_p6_hres_replication.py"
+analyses/p6_online_controller.py,MAINLINE,py:7;doc:2,HIGH,KEEP,"imported_by=p6_cdl_sanity.py,p6_cdl_sanity_v2.py,p6_h_order_evolution.py..."
+analyses/p6_oracle_headroom.py,MAINLINE,py:4;doc:1,HIGH,KEEP,"imported_by=p6_easy_first_control.py,p7_gbeta_policy.py,p7_predictability_probe.py..."
+analyses/p6_what_h_encodes.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+analyses/p7_gbeta_policy.py,MAINLINE,py:5;doc:6,HIGH,KEEP,"imported_by=order_head_module.py,v3_feasibility_smoke.py,test_aogpt_with_orderhead.py..."
+analyses/p7_predictability_probe.py,MAINLINE,py:1;doc:3,MED,KEEP,imported_by=p7_reveal_policy.py
+analyses/p7_reveal_policy.py,UNKNOWN,py:0;doc:3,NONE,HUMAN REVIEW,no refs found
+analyses/path_patch_handoff.py,MAINLINE,py:13;doc:11,HIGH,KEEP,"imported_by=canonical_reanalysis.py,emergence_characterization.py,p5_utility_controller.py...; image-line"
+analyses/phase1_5_aggregation_knee.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+analyses/phase1_5_per_head.py,UNKNOWN,py:0;doc:2,NONE,HUMAN REVIEW,no refs found
+analyses/physical_signal_source.py,MAINLINE,py:15;doc:7,HIGH,KEEP,"imported_by=p3prime_causal_verify.py,p5_ood_layout.py,p5_utility_controller.py..."
+analyses/plot_B_diagnostics.py,DIAGNOSTIC,py:0;doc:1,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/plot_attention_heatmaps.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/plot_attn_diagnostic_heatmap.py,DIAGNOSTIC,py:0;doc:1,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/plot_attn_map_b1.py,DIAGNOSTIC,py:0;doc:2,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/plot_b_heatmaps.py,DIAGNOSTIC,py:0;doc:1,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/plot_canonical_reanalysis.py,MAINLINE,py:2;doc:2,MED,KEEP,"imported_by=test_canon_emergence_curves.py,test_canon_plot.py"
+analyses/plot_cdl_gbeta_comprehensive.py,DIAGNOSTIC,py:0;doc:1,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/plot_cdl_gbeta_matched.py,MAINLINE,py:2;sh:1;doc:1,MED,KEEP,"imported_by=plot_cdl_gbeta_comprehensive.py,test_plot_cdl_gbeta_matched.py"
+analyses/plot_emergence.py,MAINLINE,py:2;doc:3,MED,KEEP,"imported_by=test_emergence_a4_render.py,test_plot_emergence.py"
+analyses/plot_handoff_path_patch.py,DIAGNOSTIC,py:0;doc:1,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name; image-line
+analyses/plot_head_gated_gbeta.py,DIAGNOSTIC,py:0;doc:2,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/plot_multistart_separate_seeds.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/plot_old_gbeta_comparison.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/plot_old_gbeta_per_seed.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/plot_p3prime_causal.py,MAINLINE,py:1;doc:2,MED,KEEP,imported_by=test_p3prime_driver.py
+analyses/plot_p5.py,MAINLINE,py:1;doc:2,MED,KEEP,imported_by=test_p5_driver.py
+analyses/plot_physical_signal_source.py,MAINLINE,py:1;doc:3,MED,KEEP,imported_by=test_pss_plot.py
+analyses/plot_position_prior.py,MAINLINE,py:1;doc:3,MED,KEEP,imported_by=test_pp_plot_part2.py
+analyses/plot_wall_clock_overlay.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/position_prior_decomp.py,MAINLINE,py:14;doc:6,HIGH,KEEP,"imported_by=layout_ood_eval.py,p3prime_causal_verify.py,physical_signal_source.py..."
+analyses/run_gbeta_sanity_save_json.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+analyses/scan_collab_32heads.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/scan_seed1_10k_heads.py,DIAGNOSTIC,py:0;doc:1,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/smoke_head_gated_gbeta.py,UNKNOWN,py:0;doc:2,NONE,HUMAN REVIEW,no refs found
+analyses/summarize_gbeta_feedback_final.py,MAINLINE,py:1,MED,KEEP,imported_by=test_summarize_gbeta_feedback_final.py
+analyses/summarize_gbeta_loss_comparison.py,MAINLINE,py:1;sh:1;doc:1,MED,KEEP,imported_by=test_summarize_gbeta_loss_comparison.py
+analyses/summarize_head_gated_drift.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/uniform_label_free_v1.py,MAINLINE,py:2;doc:2,MED,KEEP,"imported_by=diagnose_readout_collapse.py,eval_frozen_readout_cross_ckpt.py"
+analyses/v3_feasibility_smoke.py,MAINLINE,py:1;doc:2,MED,KEEP,imported_by=test_v3_feasibility_smoke.py
+analyses/validate_gbeta_unsupervised_selector.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/validate_selector_cross_ckpt.py,DIAGNOSTIC,py:0;doc:1,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/validate_selector_random_ckpts.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/validate_unsupervised_selector.py,DIAGNOSTIC,py:0;doc:1,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+analyses/wall_clock_saving.py,UNKNOWN,py:0;doc:3,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/__init__.py,MAINLINE,py:0;doc:12,NONE,KEEP,no refs found
+block_lo_arm_order_network/analyses/diag_content_teacher.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+block_lo_arm_order_network/analyses/scan_content_heads.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+block_lo_arm_order_network/aogpt_ych.py,MAINLINE,py:2,MED,KEEP,"imported_by=extract_real_attention.py,test_aogpt_ych_attention_export.py"
+block_lo_arm_order_network/attention_curriculum_orders.py,MAINLINE,py:3;doc:1,HIGH,KEEP,"imported_by=nn_paths_mp.py,nn_paths_n64.py,test_attention_curriculum_orders.py"
+block_lo_arm_order_network/attention_extractor.py,MAINLINE,py:5,HIGH,KEEP,"imported_by=eval_on.py,extract_real_attention.py,test_dp_solver.py..."
+block_lo_arm_order_network/attention_trajectory.py,MAINLINE,py:6;sh:3;doc:7,HIGH,KEEP,"imported_by=causal_layer_ablation.py,emergence_characterization.py,path_patch_handoff.py..."
+block_lo_arm_order_network/attn_order_diagnostics.py,MAINLINE,py:2,MED,KEEP,"imported_by=test_attn_order.py,run_attn_order_phase1_5_rollout_diagnostic.py"
+block_lo_arm_order_network/attn_order_distill.py,MAINLINE,py:5;doc:3,HIGH,KEEP,"imported_by=test_attn_order_alternating.py,test_vq64_alternating.py,train_attn_order_mlp.py..."
+block_lo_arm_order_network/attn_order_features.py,MAINLINE,py:6;doc:4,HIGH,KEEP,"imported_by=attn_order_diagnostics.py,attn_order_mlp_policy.py,test_attn_order.py..."
+block_lo_arm_order_network/attn_order_image_diag.py,MAINLINE,py:2;doc:1,MED,KEEP,"imported_by=test_vq64_alternating.py,train_vq64_alternating.py; image-line"
+block_lo_arm_order_network/attn_order_mlp_policy.py,MAINLINE,py:18;doc:7,HIGH,KEEP,"imported_by=attn_order_distill.py,attn_order_image_diag.py,teacher_labels.py..."
+block_lo_arm_order_network/attn_order_teacher.py,MAINLINE,py:31;doc:14,HIGH,KEEP,"imported_by=build_gbeta_headset_dataset.py,cdl_teacher_ablation.py,cdl_teacher_ablation_image.py..."
+block_lo_arm_order_network/batch_level_graph_diagnostic.py,LAUNCH_HELPER,py:0;sh:1,LOW-SH,KEEP (launcher dep),sh=run_overnight_p0_p1_p2.sh
+block_lo_arm_order_network/batch_readout/__init__.py,MAINLINE,py:0;doc:12,NONE,KEEP,no refs found
+block_lo_arm_order_network/batch_readout/attn_composition.py,MAINLINE,py:2;doc:2,MED,KEEP,"imported_by=attention_trajectory.py,test_attn_composition.py"
+block_lo_arm_order_network/batch_readout/cdl_order_provider.py,MAINLINE,py:2;doc:5,MED,KEEP,"imported_by=audition_heads.py,train_clean_aogpt.py"
+block_lo_arm_order_network/batch_readout/cheap_teacher.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/batch_readout/dataset_batch.py,MAINLINE,py:4;sh:2;doc:3,HIGH,KEEP,"imported_by=eval_frozen_phase2.py,selected_head_dataset.py,train_offline.py..."
+block_lo_arm_order_network/batch_readout/direct_order_provider.py,MAINLINE,py:2;doc:3,MED,KEEP,"imported_by=test_direct_order_provider.py,train_clean_aogpt.py"
+block_lo_arm_order_network/batch_readout/diversity_batch.py,MAINLINE,py:10;sh:2;doc:2,HIGH,KEEP,"imported_by=block_granularity_scan.py,head_stability_seed2.py,diag_content_teacher.py..."
+block_lo_arm_order_network/batch_readout/eval_frozen_phase2.py,MAINLINE,py:2;sh:1;doc:1,MED,KEEP,"imported_by=label_free_pipeline.py,run_phase33_gbeta.py"
+block_lo_arm_order_network/batch_readout/eval_metrics.py,MAINLINE,py:13;sh:1;doc:4,HIGH,KEEP,"imported_by=block_granularity_scan.py,label_free_pipeline.py,train_offline.py..."
+block_lo_arm_order_network/batch_readout/extract_b_batch.py,MAINLINE,py:3;doc:1,HIGH,KEEP,"imported_by=gbeta_input_sanity_final.py,dataset_batch.py,test_batch_readout_extract.py"
+block_lo_arm_order_network/batch_readout/frozen_gbeta_hook.py,MAINLINE,py:8;doc:5,HIGH,KEEP,"imported_by=direct_order_provider.py,test_frozen_gbeta_hook.py,train_clean_aogpt.py..."
+block_lo_arm_order_network/batch_readout/head_gated_gbeta.py,MAINLINE,py:6;doc:1,HIGH,KEEP,"imported_by=diag_model_frame_feedback.py,head_drift_diagnostic.py,smoke_head_gated_gbeta.py..."
+block_lo_arm_order_network/batch_readout/hook_order_provider.py,MAINLINE,py:10;doc:13,HIGH,KEEP,"imported_by=diag_hook_vs_offline_b.py,head_drift_diagnostic.py,order_head_module.py..."
+block_lo_arm_order_network/batch_readout/integration_hook.py,MAINLINE,py:10;doc:7,HIGH,KEEP,"imported_by=label_free_pipeline.py,order_eval_ladder.py,order_head_module.py..."
+block_lo_arm_order_network/batch_readout/l0_dynamic_gbeta.py,MAINLINE,py:8;doc:4,HIGH,KEEP,"imported_by=characterize_l0_dynamic_gbeta.py,eval_l0_dynamic_gbeta.py,frozen_gbeta_hook.py..."
+block_lo_arm_order_network/batch_readout/l0_strict65.py,MAINLINE,py:12;doc:7,HIGH,KEEP,"imported_by=build_l0_dynamic_gbeta_dataset.py,position_prior_decomp.py,attention_trajectory.py..."
+block_lo_arm_order_network/batch_readout/label_free_cdl_teacher.py,MAINLINE,py:11;doc:4,HIGH,KEEP,"imported_by=build_l0_dynamic_gbeta_dataset.py,characterize_l0_dynamic_gbeta.py,eval_l0_dynamic_gbeta.py..."
+block_lo_arm_order_network/batch_readout/loss.py,MAINLINE,py:5;sh:5;doc:108,HIGH,KEEP,"imported_by=train_offline.py,train_nr1.py,test_batch_readout_loss.py..."
+block_lo_arm_order_network/batch_readout/model.py,MAINLINE,py:14;sh:16;doc:155,HIGH,KEEP,"imported_by=diagnose_readout_collapse.py,eval_frozen_readout_cross_ckpt.py,gbeta_input_sanity_final.py..."
+block_lo_arm_order_network/batch_readout/order_distillation_losses.py,MAINLINE,py:3;doc:2,HIGH,KEEP,"imported_by=order_distillation_metrics.py,train_l0_dynamic_gbeta.py,test_order_distillation_losses.py"
+block_lo_arm_order_network/batch_readout/order_distillation_metrics.py,MAINLINE,py:2;doc:1,MED,KEEP,"imported_by=eval_l0_dynamic_gbeta.py,test_order_distillation_metrics.py"
+block_lo_arm_order_network/batch_readout/order_tau_readout.py,MAINLINE,py:6;doc:6,HIGH,KEEP,"imported_by=causal_layer_ablation.py,path_patch_handoff.py,plot_emergence.py..."
+block_lo_arm_order_network/batch_readout/pl_sampling.py,MAINLINE,py:7;doc:4,HIGH,KEEP,"imported_by=order_head_module.py,eval_frozen_phase2.py,hook_order_provider.py..."
+block_lo_arm_order_network/batch_readout/selected_head_dataset.py,MAINLINE,py:2;doc:7,MED,KEEP,"imported_by=run_phase33_gbeta.py,test_selected_head_dataset.py"
+block_lo_arm_order_network/batch_readout/soft_pairwise.py,MAINLINE,py:3;doc:5,HIGH,KEEP,"imported_by=eval_l0_dynamic_gbeta.py,train_l0_dynamic_gbeta.py,test_soft_pairwise.py"
+block_lo_arm_order_network/batch_readout/train_l0_dynamic_gbeta.py,MAINLINE,py:5;sh:2;doc:5,HIGH,KEEP,"imported_by=characterize_l0_dynamic_gbeta.py,eval_l0_dynamic_gbeta.py,test_eval_l0_dynamic_gbeta.py..."
+block_lo_arm_order_network/batch_readout/train_offline.py,MAINLINE,py:3;sh:2;doc:4,HIGH,KEEP,"imported_by=label_free_pipeline.py,run_phase33_gbeta.py,test_batch_readout_train_overfit.py"
+block_lo_arm_order_network/causal_hidden_rollout.py,MAINLINE,py:2;doc:2,MED,KEEP,"imported_by=test_causal_hidden_rollout.py,run_causal_hidden_probe.py"
+block_lo_arm_order_network/cem_readout_search.py,UNKNOWN,py:0;doc:2,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/cheap_layer_screen_image.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,image-line
+block_lo_arm_order_network/clean_training_protocol.py,MAINLINE,py:53;sh:1;doc:12,HIGH,KEEP,"imported_by=block_granularity_scan.py,build_gbeta_headset_dataset.py,build_l0_dynamic_gbeta_dataset.py..."
+block_lo_arm_order_network/compare_modes.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/compare_on_versions.py,LAUNCH_HELPER,py:0;sh:1,LOW-SH,KEEP (launcher dep),sh=run_step0_on_round3.sh
+block_lo_arm_order_network/config.py,MAINLINE,py:25;sh:6;doc:64,HIGH,KEEP,"imported_by=attention_extractor.py,debug_mlp_steps.py,diagnose_labels.py..."
+block_lo_arm_order_network/configs/image/cifar_patch_baseline10k.py,CONFIG,py:0;doc:1,NONE,KEEP (exec'd config),image-line
+block_lo_arm_order_network/configs/image/cifar_patch_graph_rw_stage2.py,CONFIG,py:0,NONE,KEEP (exec'd config),image-line
+block_lo_arm_order_network/configs/image/imagenet32_patch_baseline10k.py,CONFIG,py:0;doc:1,NONE,KEEP (exec'd config),image-line
+block_lo_arm_order_network/configs/image_large/imagenet64_l8h8e512_baseline.py,CONFIG,py:0,NONE,KEEP (exec'd config),image-line
+block_lo_arm_order_network/configs/image_large/imagenet64_l8h8e512_patch2x2.py,CONFIG,py:0,NONE,KEEP (exec'd config),image-line
+block_lo_arm_order_network/configs/image_large/imagenet64_l8h8e512_patch2x2_full.py,CONFIG,py:0,NONE,KEEP (exec'd config),image-line
+block_lo_arm_order_network/configs/image_large/imagenet64_l8h8e512_patch2x2_full_50k.py,CONFIG,py:0;sh:1,LOW-SH,KEEP (exec'd config),sh=run_overnight_p0_p1_p2.sh; image-line
+block_lo_arm_order_network/configs/image_large/imagenet64_l8h8e512_patch2x2_smoke.py,CONFIG,py:0,NONE,KEEP (exec'd config),dated/one-off; image-line
+block_lo_arm_order_network/configs/image_large/imagenet64_l8h8e512_random_base.py,CONFIG,py:0;doc:2,NONE,KEEP (exec'd config),image-line
+block_lo_arm_order_network/configs/image_large/imagenet64_l8h8e512_smoke.py,CONFIG,py:0,NONE,KEEP (exec'd config),dated/one-off; image-line
+block_lo_arm_order_network/configs/text/wikitext103_seq256_block64_l2r_reference.py,CONFIG,py:0;doc:2,NONE,KEEP (exec'd config),no refs found
+block_lo_arm_order_network/configs/text/wikitext103_seq256_block64_random_base.py,CONFIG,py:0;doc:2,NONE,KEEP (exec'd config),no refs found
+block_lo_arm_order_network/configs/text/wikitext103_seq256_block64_v3_no_readiness.py,CONFIG,py:0;doc:1,NONE,KEEP (exec'd config),no refs found
+block_lo_arm_order_network/configs/text/wikitext103_seq256_block64_v3_readiness.py,CONFIG,py:0;doc:4,NONE,KEEP (exec'd config),no refs found
+block_lo_arm_order_network/consensus_order_diagnostic.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/cotrain_aogpt_on.py,MAINLINE,py:1;sh:1;doc:1,MED,KEEP,imported_by=debug_eval_mismatch_common.py
+block_lo_arm_order_network/cotrain_sampling.py,MAINLINE,py:2;doc:1,MED,KEEP,"imported_by=test_cotrain_sampling.py,train_aogpt_cotrain.py"
+block_lo_arm_order_network/data/Imagenet32VQ_f4_800k_seq64/prepare.py,UNKNOWN,py:0;doc:4,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/data/Imagenet64VQ_f4_800k/download_full_imagenet64.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,image-line
+block_lo_arm_order_network/data/Imagenet64VQ_f4_800k/download_smoke_subset.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/data/Imagenet64VQ_f4_800k/fill_missing.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/data/Imagenet64VQ_f4_800k/prepare.py,UNKNOWN,py:0;doc:4,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/data/Imagenet64VQ_f4_800k/rearrange_to_patches.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,image-line
+block_lo_arm_order_network/debug_coordinate_system.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/debug_mlp_steps.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/diag_a_diff.py,DIAGNOSTIC,py:0;sh:1;doc:1,LOW-SH,-> scripts|analyses/diagnostics (Phase 2B),sh=run_cotrain_round0.sh; diag-name
+block_lo_arm_order_network/diagnose_10k_patch8x8.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name; image-line
+block_lo_arm_order_network/diagnose_batch_vs_per_sample.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+block_lo_arm_order_network/diagnose_labels.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+block_lo_arm_order_network/diagnose_patch_aggregation.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name; image-line
+block_lo_arm_order_network/diagnose_reward_signal.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+block_lo_arm_order_network/directed_graph_policy.py,MAINLINE,py:43;doc:15,HIGH,KEEP,"imported_by=extract_per_sample_gB.py,cem_readout_search.py,consensus_order_diagnostic.py..."
+block_lo_arm_order_network/dp_solver.py,MAINLINE,py:9;doc:2,HIGH,KEEP,"imported_by=diagnose_labels.py,eval_on.py,eval_reranker.py..."
+block_lo_arm_order_network/drift_eval.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/eval_alignment.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+block_lo_arm_order_network/eval_cotrain_per_step.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+block_lo_arm_order_network/eval_fixed_order_protocol.py,MAINLINE,py:2,MED,KEEP,"imported_by=eval_order_sensitivity.py,test_eval_fixed_order_protocol.py"
+block_lo_arm_order_network/eval_on.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+block_lo_arm_order_network/eval_on64_entropy.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+block_lo_arm_order_network/eval_on64_generalization.py,MAINLINE,py:2,MED,KEEP,"imported_by=drift_eval.py,eval_on64_entropy.py"
+block_lo_arm_order_network/eval_order_sensitivity.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+block_lo_arm_order_network/eval_reranker.py,DIAGNOSTIC,py:0;doc:1,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+block_lo_arm_order_network/eval_structural.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+block_lo_arm_order_network/extract_A32_from_on32_aogpt.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/extract_A32_nn_from_N64.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/extract_A_ar_ckpt.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/extract_image_attention.py,MAINLINE,py:3;doc:5,HIGH,KEEP,"imported_by=diagnose_10k_patch8x8.py,run_frozen_diagnostic.py,run_image_large_grw_pipeline.py; image-line"
+block_lo_arm_order_network/extract_image_attention_e2.py,MAINLINE,py:3;sh:2;doc:4,HIGH,KEEP,"imported_by=phase1_5_aggregation_knee.py,phase1_5_per_head.py,train_vq64_alternating.py; image-line"
+block_lo_arm_order_network/extract_real_attention.py,MAINLINE,py:2;doc:2,MED,KEEP,"imported_by=test_extract_real_attention_ych.py,train_aogpt_graph_rw.py"
+block_lo_arm_order_network/extract_train_A.py,MAINLINE,py:3;sh:1;doc:1,HIGH,KEEP,"imported_by=drift_eval.py,eval_on64_entropy.py,eval_on64_generalization.py"
+block_lo_arm_order_network/extract_train_A32.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/generate_nn_paths.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/graph_normalize.py,MAINLINE,py:5;doc:4,HIGH,KEEP,"imported_by=causal_hidden_rollout.py,graph_order.py,graph_structure_metrics.py..."
+block_lo_arm_order_network/graph_order.py,MAINLINE,py:4;doc:3,HIGH,KEEP,"imported_by=test_causal_hidden_rollout.py,test_graph_order.py,run_causal_hidden_probe.py..."
+block_lo_arm_order_network/graph_regime_diagnostic.py,UNKNOWN,py:0;doc:3,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/graph_structure_metrics.py,MAINLINE,py:2;doc:4,MED,KEEP,"imported_by=test_graph_structure_metrics.py,run_hidden_graph_diag.py"
+block_lo_arm_order_network/hidden_graph.py,MAINLINE,py:2;doc:2,MED,KEEP,"imported_by=test_hidden_graph.py,run_hidden_graph_diag.py"
+block_lo_arm_order_network/hidden_graph_modelio.py,MAINLINE,py:3;doc:3,HIGH,KEEP,"imported_by=test_hidden_graph_modelio.py,run_causal_hidden_probe.py,run_hidden_graph_diag.py"
+block_lo_arm_order_network/hidden_residual_graph.py,MAINLINE,py:4;doc:3,HIGH,KEEP,"imported_by=test_hidden_residual_graph.py,run_causal_hidden_probe.py,run_hidden_graph_diag.py..."
+block_lo_arm_order_network/hidden_residual_hidden.py,MAINLINE,py:3;doc:4,HIGH,KEEP,"imported_by=test_hidden_residual_hidden.py,run_hidden_graph_diag.py,run_hidden_residual_diag.py"
+block_lo_arm_order_network/hidden_residual_probe.py,MAINLINE,py:2;doc:1,MED,KEEP,"imported_by=test_hidden_residual_probe.py,run_hidden_residual_diag.py"
+block_lo_arm_order_network/hill_climb_batched.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/layer_head_locality_scan.py,LAUNCH_HELPER,py:0;sh:1;doc:3,LOW-SH,KEEP (launcher dep),sh=run_overnight_p0_p1_p2.sh
+block_lo_arm_order_network/m_step_train.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/mlp_residual_policy.py,MAINLINE,py:2;doc:2,MED,KEEP,"imported_by=stage_b_sanity_check.py,train_learned_policy.py"
+block_lo_arm_order_network/model_AOGPT_AdaLN6_NoRep_cond_128_trunc_qknorm.py,MAINLINE,py:29;doc:7,HIGH,KEEP,"imported_by=path_patch_handoff.py,diagnose_reward_signal.py,drift_eval.py..."
+block_lo_arm_order_network/neural_readout/__init__.py,MAINLINE,py:0;doc:12,NONE,KEEP,no refs found
+block_lo_arm_order_network/neural_readout/ablation_inputs.py,MAINLINE,py:2;doc:1,MED,KEEP,"imported_by=train_nr1.py,test_neural_readout_ablation_inputs.py"
+block_lo_arm_order_network/neural_readout/dataset.py,MAINLINE,py:4;sh:13;doc:37,HIGH,KEEP,"imported_by=eval_frozen_nll.py,train_nr1.py,test_neural_readout_dataset.py..."
+block_lo_arm_order_network/neural_readout/diversity_stats.py,MAINLINE,py:1;sh:3;doc:1,MED,KEEP,imported_by=test_neural_readout_diversity.py
+block_lo_arm_order_network/neural_readout/eval_frozen_nll.py,MAINLINE,py:1;sh:1;doc:2,MED,KEEP,imported_by=test_neural_readout_frozen_nll.py
+block_lo_arm_order_network/neural_readout/eval_metrics.py,MAINLINE,py:13;sh:1;doc:4,HIGH,KEEP,"imported_by=block_granularity_scan.py,label_free_pipeline.py,train_offline.py..."
+block_lo_arm_order_network/neural_readout/extract_b.py,MAINLINE,py:42;doc:9,HIGH,KEEP,"imported_by=block_granularity_scan.py,build_gbeta_headset_dataset.py,build_l0_dynamic_gbeta_dataset.py..."
+block_lo_arm_order_network/neural_readout/graph_transformer_readout.py,MAINLINE,py:4;sh:1;doc:3,HIGH,KEEP,"imported_by=eval_frozen_nll.py,train_nr1.py,test_neural_readout_model.py..."
+block_lo_arm_order_network/neural_readout/loss.py,MAINLINE,py:5;sh:5;doc:108,HIGH,KEEP,"imported_by=train_offline.py,train_nr1.py,test_batch_readout_loss.py..."
+block_lo_arm_order_network/neural_readout/teacher_labels.py,MAINLINE,py:21;doc:5,HIGH,KEEP,"imported_by=block_granularity_scan.py,build_gbeta_headset_dataset.py,diagnose_readout_collapse.py..."
+block_lo_arm_order_network/neural_readout/train_nr1.py,MAINLINE,py:1;sh:3;doc:3,MED,KEEP,imported_by=test_neural_readout_train_smoke.py
+block_lo_arm_order_network/nn_paths_gpu.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/nn_paths_mp.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/nn_paths_n64.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/none_separated_block_graph.py,MAINLINE,py:34;doc:22,HIGH,KEEP,"imported_by=canonical_reanalysis.py,diag_model_frame_feedback.py,diag_shuffled_ar_model_frame_order.py..."
+block_lo_arm_order_network/order_diagnostics.py,MAINLINE,py:14;doc:2,HIGH,KEEP,"imported_by=consensus_order_diagnostic.py,diagnose_patch_aggregation.py,directed_graph_policy.py..."
+block_lo_arm_order_network/order_network.py,MAINLINE,py:22;doc:3,HIGH,KEEP,"imported_by=compare_on_versions.py,cotrain_aogpt_on.py,cotrain_sampling.py..."
+block_lo_arm_order_network/p0_extract_delta_attention.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/p0_n16_direct.py,UNKNOWN,py:0;doc:3,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/p0_permuted_ckpt.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/p0_route_a.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/p1_validate_dp.py,MAINLINE,py:1;doc:2,MED,KEEP,imported_by=test_p1_validate_dp.py
+block_lo_arm_order_network/p2_build_training_data.py,MAINLINE,py:2;doc:2,MED,KEEP,"imported_by=generate_nn_paths.py,test_p2_build_training_data.py"
+block_lo_arm_order_network/per_head_order_scan.py,MAINLINE,py:53;sh:6;doc:29,HIGH,KEEP,"imported_by=build_gbeta_headset_dataset.py,canonical_reanalysis.py,cdl_teacher_ablation.py..."
+block_lo_arm_order_network/plot_training_curves.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+block_lo_arm_order_network/position_graph.py,MAINLINE,py:3;doc:4,HIGH,KEEP,"imported_by=test_position_graph.py,run_causal_hidden_probe.py,run_hidden_graph_diag.py"
+block_lo_arm_order_network/probe_adjacent.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/quick_head_selector.py,MAINLINE,py:4;doc:3,HIGH,KEEP,"imported_by=block_granularity_scan.py,cheap_layer_screen_image.py,per_head_order_scan.py..."
+block_lo_arm_order_network/readout_fitness.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/readout_order_diagnostic.py,MAINLINE,py:6;doc:2,HIGH,KEEP,"imported_by=cem_readout_search.py,train_imagelarge_round2.py,diagnose_attention_graphs.py..."
+block_lo_arm_order_network/reranker.py,MAINLINE,py:9;doc:3,HIGH,KEEP,"imported_by=compare_modes.py,debug_mlp_steps.py,diagnose_labels.py..."
+block_lo_arm_order_network/run_experiments.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/run_frozen_diagnostic.py,LAUNCH_HELPER,py:0;sh:1,LOW-SH,KEEP (launcher dep),sh=run_overnight_p0_p1_p2.sh
+block_lo_arm_order_network/run_full10k.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/run_image_large_grw_pipeline.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,image-line
+block_lo_arm_order_network/run_long7k.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/run_multi_seed_short.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/run_phase1_diagnostic.py,UNKNOWN,py:0;doc:2,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/sample_level_locality_diagnostic.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/scripts/aggregate_frozen_beta_curves.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/scripts/analyze_image_locality.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,image-line
+block_lo_arm_order_network/scripts/audition_heads.py,LAUNCH_HELPER,py:0;sh:1;doc:2,LOW-SH,KEEP (launcher dep),sh=pipeline_no_label.sh
+block_lo_arm_order_network/scripts/calibrate_position_only.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/scripts/calibrate_position_only_fine.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/scripts/image/aggregate_image_ci.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,image-line
+block_lo_arm_order_network/scripts/run_alternating_from0.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/scripts/run_phase2_chain.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/scripts/run_phase33_gbeta.py,LAUNCH_HELPER,py:0;sh:7;doc:5,LOW-SH,KEEP (launcher dep),sh=auto_seed1_frozen_beta.sh
+block_lo_arm_order_network/scripts/run_position_only.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/scripts/run_source_start_overnight.py,MAINLINE,py:3;doc:1,HIGH,KEEP,"imported_by=run_alternating_from0.py,run_phase2_chain.py,run_position_only.py"
+block_lo_arm_order_network/scripts/run_text_phase2_smoke_preflight.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/scripts/scan_image_heads.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name; image-line
+block_lo_arm_order_network/scripts/summarize_phase2_text.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+block_lo_arm_order_network/scripts/text/audit_text_runs.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/stage_b_sanity_check.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/structural_probes.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/sweep_tau.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/test_attention_order.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/test_attn_order.py,MAINLINE,py:0;doc:2,NONE,KEEP,test
+block_lo_arm_order_network/test_attn_order_alternating.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/test_attn_order_mlp_policy.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/test_on_gen.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/test_proximity_order.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/test_vq64_alternating.py,MAINLINE,py:0;doc:1,NONE,KEEP,test; image-line
+block_lo_arm_order_network/tests/__init__.py,MAINLINE,py:0;doc:12,NONE,KEEP,test
+block_lo_arm_order_network/tests/conftest.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_add_consensus_order_to_gbeta_dataset.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_analyze_handoff_circuit.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_aogpt_ych_attention_export.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_attention_curriculum_orders.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_attention_trajectory_alllayer.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_attn_composition.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_batch_readout_dataset.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_batch_readout_diversity.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_batch_readout_eval_frozen_phase2.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_batch_readout_extract.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_batch_readout_integration_hook.py,MAINLINE,py:0;doc:2,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_batch_readout_loss.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_batch_readout_metrics.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_batch_readout_model.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_batch_readout_pl_sampling.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_batch_readout_selection_policy.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_batch_readout_train_overfit.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_build_l0_dynamic_gbeta_dataset.py,MAINLINE,py:0;doc:2,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_build_label_free_candidate_sets.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_canon_ablation.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_canon_aggregate.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_canon_content.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_canon_emergence_curves.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_canon_plot.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_canon_scan.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_canon_sweep.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_causal_hidden_rollout.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_clean_training_protocol.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_cotrain_sampling.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_direct_order_provider.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_direct_policy_training_config.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_directed_graph_policy.py,MAINLINE,py:0;doc:2,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_dp_solver.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_emergence_a1.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_emergence_a2.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_emergence_a3.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_emergence_a4_extract.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_emergence_a4_render.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_emergence_driver.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_emergence_loader.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_eval_fixed_order_protocol.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_eval_l0_dynamic_gbeta.py,MAINLINE,py:0;doc:2,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_eval_l0_dynamic_gbeta_losses.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_extract_A_remap_vectorized.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_extract_real_attention_ych.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_frozen_gbeta_hook.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_graph_normalize.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_graph_order.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_graph_structure_metrics.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_handoff_carrier_config.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_handoff_driver_smoke.py,MAINLINE,py:0;doc:1,NONE,KEEP,test; dated/one-off
+block_lo_arm_order_network/tests/test_handoff_mean_ablation.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_handoff_path_patch.py,MAINLINE,py:0;doc:1,NONE,KEEP,test; image-line
+block_lo_arm_order_network/tests/test_handoff_probe_readout.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_handoff_stage1.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_handoff_stage2.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_handoff_table.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_hidden_graph.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_hidden_graph_modelio.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_hidden_residual_graph.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_hidden_residual_hidden.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_hidden_residual_probe.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_hook_order_provider.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_l0_dynamic_gbeta.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_l0_strict65.py,MAINLINE,py:0;doc:2,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_label_free_cdl_teacher.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_layout_ood_eval.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_mock_data.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_neural_readout_ablation_inputs.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_neural_readout_dataset.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_neural_readout_diversity.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_neural_readout_extract_b.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_neural_readout_extract_seed.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_neural_readout_frozen_nll.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_neural_readout_loss.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_neural_readout_metrics.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_neural_readout_model.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_neural_readout_overfit.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_neural_readout_selection_policy.py,MAINLINE,py:0;sh:1;doc:1,LOW-SH,KEEP,test; sh=run_nr1_task16_report.sh
+block_lo_arm_order_network/tests/test_neural_readout_teacher.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_neural_readout_train_smoke.py,MAINLINE,py:0,NONE,KEEP,test; dated/one-off
+block_lo_arm_order_network/tests/test_none_separated_block_graph.py,MAINLINE,py:0;doc:4,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_order_distillation_losses.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_order_distillation_metrics.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_order_network.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_order_tau_readout.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p1_validate_dp.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p2_build_training_data.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p3prime_a0.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p3prime_a1_local.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p3prime_a1_loko.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p3prime_b.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p3prime_builder.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p3prime_c.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p3prime_d.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p3prime_driver.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p3prime_readme.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p3prime_transforms.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p3prime_verdict.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p5_candidates.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p5_controllers.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p5_driver.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p5_headroom.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p5_hidden.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p5_metrics.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p5_order_nll.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p5_routing.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p5_scaffold.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p5_teacher.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p5_train.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p6_h_residual.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_p6_routing.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_per_head_scan_batched.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_plot_collaborator_b1_average_model_to_phys.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_plot_emergence.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_position_graph.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pp_binding.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pp_floor.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pp_frame.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pp_layouts.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pp_part1.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pp_part1_summary.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pp_part2_driver.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pp_pe_ablation.py,MAINLINE,py:0;doc:2,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pp_plot_part2.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pp_relayout.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pss_blockswap.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pss_gate.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pss_mask_norm.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pss_per_text.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pss_plot.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pss_predictor.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pss_randtoken.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pss_relayout.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pss_return_halves.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pss_synth.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pss_variance.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_pss_verdict.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_quick_head_selector.py,MAINLINE,py:0;doc:2,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_route_a_order_network.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_search_raw_none_separated_65_heads.py,MAINLINE,py:0;doc:3,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_selected_head_dataset.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_soft_pairwise.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_summarize_gbeta_loss_comparison.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_topk_clustered_pairwise_teacher.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_train_clean_wandb_logging.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_train_cluster_teacher_match.py,MAINLINE,py:0;doc:1,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_train_l0_dynamic_gbeta.py,MAINLINE,py:2;doc:2,MED,KEEP,"test; imported_by=test_eval_l0_dynamic_gbeta.py,test_eval_l0_dynamic_gbeta_losses.py"
+block_lo_arm_order_network/tests/test_train_on_mixed_precomputed.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_train_route_a_feature_on.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tests/test_train_route_a_on.py,MAINLINE,py:0,NONE,KEEP,test
+block_lo_arm_order_network/tokenize_wikitext103.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/train_aogpt_cotrain.py,LAUNCH_HELPER,py:0;sh:1;doc:1,LOW-SH,KEEP (launcher dep),sh=run_cotrain_round0.sh
+block_lo_arm_order_network/train_aogpt_graph_rw.py,MAINLINE,py:2;sh:2;doc:7,MED,KEEP,"imported_by=eval_fixed_order_protocol.py,eval_order_sensitivity.py"
+block_lo_arm_order_network/train_aogpt_with_on.py,UNKNOWN,py:0;doc:3,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/train_attn_order_mlp.py,MAINLINE,py:13;doc:2,HIGH,KEEP,"imported_by=attn_order_distill.py,attn_order_image_diag.py,attn_order_mlp_policy.py..."
+block_lo_arm_order_network/train_clean_aogpt.py,MAINLINE,py:24;sh:54;doc:29,HIGH,KEEP,"imported_by=causal_layer_ablation.py,order_eval_ladder.py,eval_frozen_phase2.py..."
+block_lo_arm_order_network/train_clean_base.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/train_crossattn_on.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/train_gnn_on.py,UNKNOWN,py:0;doc:2,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/train_grpo_on.py,LAUNCH_HELPER,py:0;sh:1;doc:1,LOW-SH,KEEP (launcher dep),sh=run_step0_on_round3.sh
+block_lo_arm_order_network/train_imagelarge_graph_rw.py,MAINLINE,py:1;sh:1;doc:2,MED,KEEP,imported_by=readout_fitness.py; image-line
+block_lo_arm_order_network/train_imagelarge_round2.py,MAINLINE,py:2;sh:5;doc:3,MED,KEEP,"imported_by=sample_quality_fid_imagenet64_vq.py,train_imagenet32_continuous_round2.py; image-line"
+block_lo_arm_order_network/train_joint.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/train_learned_policy.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/train_method_from_base.py,LAUNCH_HELPER,py:0;sh:2,LOW-SH,KEEP (launcher dep),sh=launch_topk8_after_eps015.sh
+block_lo_arm_order_network/train_on.py,MAINLINE,py:2,MED,KEEP,"imported_by=eval_on.py,test_order_network.py"
+block_lo_arm_order_network/train_on32.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/train_on_mixed.py,MAINLINE,py:6;sh:1,HIGH,KEEP,"imported_by=drift_eval.py,eval_on64_entropy.py,eval_on64_generalization.py..."
+block_lo_arm_order_network/train_on_mixed_v2.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/train_reranker.py,MAINLINE,py:2;doc:1,MED,KEEP,"imported_by=diagnose_labels.py,eval_reranker.py"
+block_lo_arm_order_network/train_reranker_q.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/train_reranker_struct.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+block_lo_arm_order_network/train_route_a_feature_on.py,MAINLINE,py:1,MED,KEEP,imported_by=test_train_route_a_feature_on.py
+block_lo_arm_order_network/train_route_a_on.py,MAINLINE,py:2,MED,KEEP,"imported_by=test_train_route_a_on.py,train_route_a_feature_on.py"
+block_lo_arm_order_network/training_utils.py,MAINLINE,py:55;sh:1;doc:9,HIGH,KEEP,"imported_by=block_granularity_scan.py,build_gbeta_headset_dataset.py,build_l0_dynamic_gbeta_dataset.py..."
+block_lo_arm_order_network/unified_readout.py,MAINLINE,py:2;doc:1,MED,KEEP,"imported_by=cem_readout_search.py,readout_fitness.py"
+block_lo_arm_order_network/utils.py,MAINLINE,py:12;doc:7,HIGH,KEEP,"imported_by=train_l0_dynamic_gbeta.py,eval_on.py,test_dp_solver.py..."
+scripts/_print_mlp_order.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/ablate_graph_policy_from_ckpt.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/aggregate_l0h5_evolution.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+scripts/aggregate_multiseed_minimal.py,UNKNOWN,py:0;doc:2,NONE,HUMAN REVIEW,no refs found
+scripts/build_label_free_candidate_sets.py,LAUNCH_HELPER,py:0;sh:1;doc:1,LOW-SH,KEEP (launcher dep),sh=run_topk_cluster_teacher_match_20260626.sh
+scripts/build_topk_clustered_pairwise_teacher.py,LAUNCH_HELPER,py:0;sh:1;doc:1,LOW-SH,KEEP (launcher dep),sh=run_topk_cluster_teacher_match_20260626.sh
+scripts/compact_sample_quality_summary.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/compare_ckpt_weights.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/content_relocation_diagnostic.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/debug_eval_mismatch_common.py,MAINLINE,py:2,MED,KEEP,"imported_by=debug_eval_original_objective_on_10k.py,debug_reproduce_ckpt_val_loss.py"
+scripts/debug_eval_original_objective_on_10k.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/debug_reproduce_ckpt_val_loss.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/diag_br1_head_layer_scan.py,DIAGNOSTIC,py:0;doc:2,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/diag_br1_lightweight_b.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/diagnose_attention_graphs.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/diagnose_e3_control_dual_level.py,MAINLINE,py:3;sh:2;doc:3,HIGH,KEEP,"imported_by=extract_per_sample_gB.py,phase1_5_aggregation_knee.py,phase1_5_per_head.py"
+scripts/diagnose_none_separated_65.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/extract_random_substrate_A.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+scripts/fid_3ckpt_50k.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,image-line
+scripts/fid_alt_vq64.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,image-line
+scripts/final_results_tables.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+scripts/inspect_l0_B_heads.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/inspect_l0_B_match_previous.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/inspect_l0_attention_heads.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/label_free_selector_audit.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+scripts/old_new_ckpt_matched_audit.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/phase0_residual_gate.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/plot_collaborator_attention_maps.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/plot_collaborator_b1_average_model_to_phys.py,MAINLINE,py:1,MED,KEEP,imported_by=test_plot_collaborator_b1_average_model_to_phys.py
+scripts/plot_collaborator_b1_fixed_order_relabel.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/plot_collaborator_b1_pure_axis_relabel.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/plot_collaborator_b1_two_panel.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/plot_image_story_figures.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name; image-line
+scripts/plot_l0h5_attention_across_ckpts.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/plot_multisample_token_attention.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/run_attn_order_phase0_sanity.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/run_attn_order_phase1_5_rollout_diagnostic.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/run_causal_hidden_probe.py,LAUNCH_HELPER,py:0;sh:1;doc:4,LOW-SH,KEEP (launcher dep),sh=run_ct8_all.sh
+scripts/run_frozen_gbeta_20k_comparison.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/run_frozen_gbeta_60k_overnight.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/run_frozen_gbeta_60k_v2.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/run_frozen_gbeta_comparison.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/run_frozen_gbeta_hook_smoke.py,HISTORY,py:0,NONE,"-> history/python (Phase 2A, if 0 refs)",dated/one-off
+scripts/run_hidden_graph_diag.py,MAINLINE,py:1;doc:5,MED,KEEP,imported_by=run_causal_hidden_probe.py
+scripts/run_hidden_residual_diag.py,MAINLINE,py:2;doc:3,MED,KEEP,"imported_by=run_causal_hidden_probe.py,run_hidden_graph_diag.py"
+scripts/run_p6_b2_full.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/run_p6_b2_smoke.py,HISTORY,py:0,NONE,"-> history/python (Phase 2A, if 0 refs)",dated/one-off
+scripts/run_p6_hres_replication.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,no refs found
+scripts/run_per_head_order_scan_ladder_b1_fast.py,UNKNOWN,py:0;doc:2,NONE,HUMAN REVIEW,no refs found
+scripts/sample_quality_fid_imagenet64_vq.py,MAINLINE,py:2;sh:2,MED,KEEP,"imported_by=fid_3ckpt_50k.py,fid_alt_vq64.py; image-line"
+scripts/scan_all_heads_across_ckpts.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/scan_collaborator_ckpt_b1.py,MAINLINE,py:8;doc:1,HIGH,KEEP,"imported_by=content_relocation_diagnostic.py,plot_collaborator_attention_maps.py,plot_collaborator_b1_average_model_to_phys.py..."
+scripts/search_none_separated_65_heads.py,UNKNOWN,py:0;doc:15,NONE,HUMAN REVIEW,no refs found
+scripts/search_strict_label_free_65.py,MAINLINE,py:3;sh:2;doc:6,HIGH,KEEP,"imported_by=diag_model_frame_feedback.py,diag_shuffled_ar_model_frame_order.py,head_drift_diagnostic.py"
+scripts/show_readout_orders.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/spotcheck_strict_lf_cleanbase.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,no refs found
+scripts/summarize_e2_vq_negative_minimal.py,DIAGNOSTIC,py:0;sh:1,LOW-SH,-> scripts|analyses/diagnostics (Phase 2B),sh=run_e2_vq_negative_minimal.sh; diag-name; image-line
+scripts/summarize_e3large_fixed_negative.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/summarize_imagenet32_continuous_round2.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name; image-line
+scripts/summarize_long1_e3.py,DIAGNOSTIC,py:0;doc:1,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/summarize_round2_e3.py,DIAGNOSTIC,py:0;doc:1,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/summarize_sample_quality_common_orders.py,DIAGNOSTIC,py:0;sh:1,LOW-SH,-> scripts|analyses/diagnostics (Phase 2B),sh=run_round2_sample_quality_common_orders.sh; diag-name
+scripts/summarize_seed123_minimal.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/summarize_seed_minimal_param.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/summarize_topk_cluster_teacher_match.py,DIAGNOSTIC,py:0;sh:1;doc:2,LOW-SH,-> scripts|analyses/diagnostics (Phase 2B),sh=run_topk_cluster_teacher_match_20260626.sh; diag-name
+scripts/train_cluster_teacher_match.py,LAUNCH_HELPER,py:0;sh:1;doc:1,LOW-SH,KEEP (launcher dep),sh=run_topk_cluster_teacher_match_20260626.sh
+scripts/train_head_gated_gbeta.py,LAUNCH_HELPER,py:0;sh:3;doc:2,LOW-SH,KEEP (launcher dep),sh=queue_head_gated_gbeta_feedback.sh
+scripts/train_imagenet32_continuous_round2.py,LAUNCH_HELPER,py:0;sh:1,LOW-SH,KEEP (launcher dep),sh=run_imagenet32_continuous_round2_minimal.sh; image-line
+scripts/train_vq64_alternating.py,UNKNOWN,py:0;doc:5,NONE,HUMAN REVIEW,image-line
+scripts/train_vq64_fixed_baseline.py,UNKNOWN,py:0;doc:1,NONE,HUMAN REVIEW,image-line
+scripts/train_vq64_fixed_order.py,UNKNOWN,py:0,NONE,HUMAN REVIEW,image-line
+scripts/train_vq64_round2.py,MAINLINE,py:4;sh:1;doc:4,HIGH,KEEP,"imported_by=hidden_graph_modelio.py,train_vq64_alternating.py,train_vq64_fixed_baseline.py...; image-line"
+scripts/verify_batched_extractor.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/verify_cdl_evolution.py,DIAGNOSTIC,py:0,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
+scripts/vis_order_animation.py,DIAGNOSTIC,py:0;doc:1,NONE,-> scripts|analyses/diagnostics (Phase 2B),diag-name
