@@ -69,6 +69,8 @@ def test_producer_learns_cdl_pairwise(tmp_path):
     """Real small-M run: gβ agrees with teacher_pairwise above chance.
     pairwise_acc = mean[ sign(s_i - s_j) == sign(Y_ij - 0.5) ] (spec test 2)."""
     from analyses.gbeta_cdl_pretrain import pretrain_gbeta_cdl, DEFAULT_SOURCE_CKPT
+    if not pathlib.Path(DEFAULT_SOURCE_CKPT).exists():
+        pytest.skip(f"10k ckpt not present in this checkout: {DEFAULT_SOURCE_CKPT}")
     ck = pretrain_gbeta_cdl(DEFAULT_SOURCE_CKPT, out_dir=str(tmp_path),
                             M=64, epochs=5, device="cpu")
     ds = np.load(tmp_path / "cdl_dataset.npz")
