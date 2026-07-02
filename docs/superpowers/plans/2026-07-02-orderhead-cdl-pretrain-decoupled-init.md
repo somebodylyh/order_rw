@@ -551,16 +551,12 @@ In `batch_readout/frozen_gbeta_hook.py`, `FrozenGBetaModelFrameBlockProvider`:
                         B_all = extract_probe_averaged_model_frame_strict65(
                             model, idx_batch, global_step, args.seed,
                             args.batch_mean_probes, device)
-                        # Batch-level single order (spec): consensus B = mean over
-                        # batch → (1, H, 65, 65), detached.
-                        # IMPLEMENTER: confirm this reduction matches how
-                        # FrozenGBetaModelFrameProvider reduces (Bsz,64) scores to
-                        # the single order it returns — read its model_frame_token_order
-                        # and mirror it EXACTLY (mean-over-batch B vs per-sample then
-                        # consensus). Verify in the GPU smoke (Step 6) that the first
-                        # Phase-B pre-sample argsort == the last Phase-A frozen argsort
-                        # on the same batch (the true B_PG == B_frozen check).
-                        B_det = B_all.mean(dim=0, keepdim=True).detach()
+                        # RESOLVED during implementation: the frozen provider does
+                        # NOT batch-mean. FrozenGBetaModelFrameProvider.physical_order
+                        # takes token_order[0] — i.e. SAMPLE 0's gβ order — and expands
+                        # it to the whole batch. So B_PG == B_frozen means using
+                        # sample 0's B, not a batch-mean. Mirror exactly:
+                        B_det = B_all[0:1].detach()   # (1, H, 65, 65), sample 0
                         scores = gbeta_scores_with_grad(pg_state["gbeta"], B_det)
                         sigma_model, logp, entropy = sample_pl(scores, tau=args.pg_tau)
                         sigma_phys = model_blocks_to_physical_blocks(
