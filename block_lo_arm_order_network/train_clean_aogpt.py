@@ -1020,6 +1020,11 @@ def parse_args(default_run_kind="baseline"):
                    help="entropy bonus coefficient on the PG loss.")
     p.add_argument("--pg-adv-clip", type=float, default=0.3,
                    help="clamp on the scalar batch advantage.")
+    p.add_argument("--pg-logp-normalize", choices=["none", "length"], default="none",
+                   help="PL log-prob scale for the PG term. 'none' = sequence sum "
+                        "log P(σ)=Σ_t log π(σ_t) (~-250 for N=64); 'length' = mean "
+                        "(1/N)Σ_t, i.e. gradient rescaled by 1/N — a pure scale "
+                        "stabilization (equivalent to λ_PG/N), reward unchanged.")
     p.add_argument("--cdl-pretrain", action="store_true",
                    help="if set and --frozen-beta-ckpt absent, CDL-pretrain gβ "
                         "from --cdl-source-ckpt before training (Stage 1).")
@@ -2140,6 +2145,10 @@ def main(default_run_kind="baseline"):
                         B_det = B.detach()                          # no PG grad to backbone
                         scores = gbeta_scores_with_grad(pg_state["gbeta"], B_det)
                         sigma_model, logp, entropy = sample_pl(scores, tau=args.pg_tau)
+                        if args.pg_logp_normalize == "length":
+                            # length-normalize: sum log P(σ) -> mean over N steps.
+                            # Pure gradient rescale by 1/N (≡ λ_PG/N); reward unchanged.
+                            logp = logp / float(scores.shape[0])
                         sigma_model = torch.as_tensor(sigma_model, device=device,
                                                       dtype=torch.long)
                         sigma_phys = model_blocks_to_physical_blocks(sigma_model, clean_perm)

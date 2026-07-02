@@ -226,6 +226,24 @@ model-frame-block → token-order conversion used by
 Phase B `λ_PG > 0`. Per-token CE reuses the `compute_token_ce` contract
 (`logits, _ = forward_fn(idx, token_order); targets = idx.gather(1, token_order)`).
 
+**PG scale stabilization (`--pg-logp-normalize`, default `none`).** The PL
+log-prob is a sum over the N=64 reveal steps, so `log P(σ)=Σ_t log π(σ_t) ≈ -250`
+— the PG term `-A·log P(σ)` is ~100× the LM loss (~3.5) and destabilizes at
+`λ_PG=1`. `--pg-logp-normalize length` uses the mean instead:
+
+$$\log P_{\text{mean}}(\sigma)=\tfrac1N\textstyle\sum_t\log\pi(\sigma_t)
+\;\Rightarrow\;
+-\lambda_{\text{PG}}A\log P_{\text{mean}}=-\tfrac{\lambda_{\text{PG}}}{N}A\log P_{\text{sum}}$$
+
+This is a **pure gradient rescale by 1/N (≡ `λ_PG`/N)** — it does not change the
+reward or the optimization direction, only the scale. Default stays `none`
+(sum-logp) so the documented math above is unchanged; the smoke/experiments pass
+`length` for stability. GPU-smoke-observed instability at `λ_PG=1, none, τ=1`
+(loss 3.6→42 over 50 steps, gβ L1 delta 207) is addressed by conservative HPs
+(`--lam-pg 1e-2 --orderhead-lr 3e-5 --pg-adv-clip 0.1 --pg-tau 0.05`) and/or
+`--pg-logp-normalize length`. A multi-sample GRPO-style within-state normalized
+advantage is the deferred next-stage upgrade (not vanilla REINFORCE + EMA baseline).
+
 ---
 
 ## CLI additions to `train_clean_aogpt.py`
