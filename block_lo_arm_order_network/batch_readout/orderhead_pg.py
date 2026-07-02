@@ -9,13 +9,21 @@ from analyses.v3_group_credit import per_sample_loss, group_rewards
 
 
 def gbeta_scores_with_grad(gbeta_model, B_det):
-    """Grad-enabled L0DynamicGBeta forward on ONE batch-mean B.
+    """Grad-enabled gβ forward on ONE detached B, returning model-frame scores.
 
-    B_det: (1, H=8, 65, 65) detached tensor built identically to the frozen
-    provider's B. Returns the model-frame score vector (64,) with grad on gβ
-    params (head dropout OFF so it matches the deployed argsort path).
+    Model-agnostic across the two deployed readouts:
+      - NodewiseReadout (single-head L1H7 path): ``model(B)`` -> scores (1, 64),
+        B_det is (1, 64, 64), built like ``FrozenBetaHook.step``.
+      - L0DynamicGBeta (multi-head path): ``model(B, apply_head_dropout=False)``
+        -> (scores, aux), B_det is (1, 8, 65, 65).
+
+    Returns the model-frame score vector (64,) with grad on gβ params.
     """
-    scores, _aux = gbeta_model(B_det, apply_head_dropout=False)  # (1, 64)
+    try:
+        out = gbeta_model(B_det, apply_head_dropout=False)
+    except TypeError:
+        out = gbeta_model(B_det)                 # NodewiseReadout: no dropout kwarg
+    scores = out[0] if isinstance(out, tuple) else out  # (1, 64)
     return scores[0]
 
 

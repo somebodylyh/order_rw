@@ -269,17 +269,63 @@ def maybe_unfreeze_orderhead(optimizer, gbeta_module, global_step, args, state):
     at = getattr(args, "unfreeze_orderhead_at_step", None)
     if at is None or state.get("unfrozen") or int(global_step) < int(at):
         return False
-    for p in gbeta_module.parameters():
-        p.requires_grad_(True)
     assert not any(g.get("is_orderhead") for g in optimizer.param_groups), \
         "an is_orderhead param group already exists before unfreeze"
-    optimizer.add_param_group({
-        "params": [p for p in gbeta_module.parameters()],
-        "lr": float(args.orderhead_lr),
-        "weight_decay": 0.0,
-        "is_orderhead": True,
-    })
+    _insert_orderhead_group(optimizer, gbeta_module, args.orderhead_lr)
     state["unfrozen"] = True
+    return True
+
+
+def _insert_orderhead_group(optimizer, gbeta_module, orderhead_lr):
+    """Set gβ trainable and add its single optimizer param group (idempotent)."""
+    for p in gbeta_module.parameters():
+        p.requires_grad_(True)
+    if not any(g.get("is_orderhead") for g in optimizer.param_groups):
+        optimizer.add_param_group({
+            "params": [p for p in gbeta_module.parameters()],
+            "lr": float(orderhead_lr),
+            "weight_decay": 0.0,
+            "is_orderhead": True,
+        })
+
+
+def orderhead_ckpt_fields(pg_state, unfreeze_state):
+    """Checkpoint fields that persist the Phase-B OrderHead across save/resume.
+
+    Returns {} when there is no OrderHead training (pg_state is None), so
+    non-frozen_beta runs are unchanged.
+    """
+    if pg_state is None:
+        return {}
+    ema_b = pg_state["ema"].b
+    return {
+        "orderhead": {k: v.detach().cpu()
+                      for k, v in pg_state["gbeta"].state_dict().items()},
+        "orderhead_ema": None if ema_b is None else ema_b.detach().cpu(),
+        "orderhead_unfrozen": bool(unfreeze_state.get("unfrozen", False)),
+    }
+
+
+def restore_orderhead_on_resume(ckpt, optimizer, pg_state, unfreeze_state, args):
+    """Reconstruct OrderHead state from a resumed ckpt BEFORE the optimizer state
+    is loaded, so the param-group count matches.
+
+    - Phase-A resume (no orderhead / not unfrozen): load gβ weights if present,
+      return False (optimizer state loads normally, one group).
+    - Phase-B resume (orderhead_unfrozen): load gβ weights, insert the gβ param
+      group, restore EMA + unfrozen flag, return True (caller must load the
+      optimizer state AFTER this so both groups exist).
+    """
+    if pg_state is None or not ckpt:
+        return False
+    if ckpt.get("orderhead") is not None:
+        pg_state["gbeta"].load_state_dict(ckpt["orderhead"])
+    if not ckpt.get("orderhead_unfrozen"):
+        return False
+    _insert_orderhead_group(optimizer, pg_state["gbeta"], args.orderhead_lr)
+    if ckpt.get("orderhead_ema") is not None:
+        pg_state["ema"].b = ckpt["orderhead_ema"]
+    unfreeze_state["unfrozen"] = True
     return True
 
 
@@ -1314,7 +1360,15 @@ def main(default_run_kind="baseline"):
         betas=(args.beta1, args.beta2),
         device_type="cuda" if device.type == "cuda" else "cpu",
     )
-    if ckpt is not None and "optimizer" in ckpt:
+    # OrderHead (Stage-3) state lives in main() scope; init here so the
+    # save_ckpt closure (defined + first called below) always resolves them.
+    pg_state = None
+    unfreeze_state = {"unfrozen": False}
+    # A Phase-B resume ckpt has an extra (OrderHead) optimizer param group. That
+    # group only exists after gβ is built (below), so DEFER loading the optimizer
+    # state until the group is reconstructed (see restore_orderhead_on_resume).
+    _defer_optimizer_resume = bool(ckpt is not None and ckpt.get("orderhead_unfrozen"))
+    if ckpt is not None and "optimizer" in ckpt and not _defer_optimizer_resume:
         optimizer.load_state_dict(ckpt["optimizer"])
         log("Resumed optimizer state.")
 
@@ -1745,6 +1799,9 @@ def main(default_run_kind="baseline"):
             model, optimizer, args, clean_perm, split, global_step,
             train_losses, metrics, rw_policy, rw_params
         )
+        # Persist Phase-B OrderHead (gβ weights + EMA + unfrozen flag) so the
+        # trained controller survives save/resume. No-op for non-frozen_beta runs.
+        payload.update(orderhead_ckpt_fields(pg_state, unfreeze_state))
         torch.save(payload, path)
         log(f"Saved checkpoint: {path}")
 
@@ -1804,6 +1861,18 @@ def main(default_run_kind="baseline"):
             # The producer runs strictly BEFORE the optimizer/training loop, so
             # no CDL symbol is executed inside the loop (spec red line).
             if args.cdl_pretrain:
+                # The canonical (label-free-selected) gβ is single-head L1H7 +
+                # NodewiseReadout. Its reproduce-producer is a SEPARATE deliverable
+                # (scripts/train_nodewise_gbeta.py, pending real-ckpt validation).
+                # gbeta_cdl_pretrain only produces the multi-head L0DynamicGBeta
+                # variant, which the single-head deploy path cannot load — so guard.
+                if args.gbeta_input_mode == "single_head":
+                    raise NotImplementedError(
+                        "--cdl-pretrain for the single-head NodewiseReadout path is "
+                        "not wired yet. Pass --frozen-beta-ckpt "
+                        "reports/uniform_label_free_v1/nodewise_K1000.pt "
+                        "(label-free-selected L1H7, acc 0.94). The reproduce-producer "
+                        "scripts/train_nodewise_gbeta.py is a pending follow-up.")
                 from analyses.gbeta_cdl_pretrain import (
                     pretrain_gbeta_cdl, DEFAULT_SOURCE_CKPT,
                 )
@@ -1811,7 +1880,8 @@ def main(default_run_kind="baseline"):
                 args.frozen_beta_ckpt = pretrain_gbeta_cdl(
                     src, out_dir=str(Path(args.output_dir) / "gbeta_cdl"),
                     device=str(device))
-                log(f"[stage1] CDL-pretrained gβ -> {args.frozen_beta_ckpt}")
+                log(f"[stage1] CDL-pretrained (multi-head L0DynamicGBeta) gβ -> "
+                    f"{args.frozen_beta_ckpt}")
             else:
                 raise ValueError(
                     "run-kind=frozen_beta requires --frozen-beta-ckpt "
@@ -1926,14 +1996,15 @@ def main(default_run_kind="baseline"):
         _track_head_maps_raw(model, start_step)
 
     # ── Stage-3 setup: gβ stays frozen through Phase A; unfreeze fires in-loop ──
-    pg_state = None
-    unfreeze_state = {"unfrozen": False}
+    # (pg_state / unfreeze_state were initialized near the optimizer so the
+    #  save_ckpt closure resolves them; here we populate pg_state.)
     if args.run_kind == "frozen_beta" and args.unfreeze_orderhead_at_step is not None:
         if not hasattr(beta_provider, "gbeta_module"):
             raise ValueError(
-                "--unfreeze-orderhead-at-step requires the batch-mean multi-head "
-                "gβ provider (use --batch-mean-probes >1); the current "
-                f"{type(beta_provider).__name__} exposes no gbeta_module.")
+                f"--unfreeze-orderhead-at-step: {type(beta_provider).__name__} "
+                "exposes no gbeta_module. Use the single-head path "
+                "(--gbeta-input-mode single_head, the default) or a provider "
+                "that exposes gbeta_module.")
         from analyses.v3_group_credit import group_ids_for, GroupEMA
         _gb = beta_provider.gbeta_module
         for _p in _gb.parameters():
@@ -1941,13 +2012,27 @@ def main(default_run_kind="baseline"):
         _groups = group_ids_for(args.batch_size, args.pg_group_m)
         pg_state = {"gbeta": _gb, "groups": _groups,
                     "ema": GroupEMA(len(_groups), 0.9)}
+        # Resume path: restore gβ weights (+ EMA / param group when the ckpt was
+        # already in Phase B) BEFORE loading the deferred optimizer state, so the
+        # optimizer's param-group count matches the saved one.
+        reinserted = restore_orderhead_on_resume(
+            ckpt, optimizer, pg_state, unfreeze_state, args)
+        if _defer_optimizer_resume and "optimizer" in ckpt:
+            optimizer.load_state_dict(ckpt["optimizer"])
+            log(f"Resumed optimizer state (Phase-B, orderhead group "
+                f"reinserted={reinserted}).")
         log(f"[stage3] unfreeze gβ at step {args.unfreeze_orderhead_at_step}; "
-            f"lam_pg={args.lam_pg} pg_tau={args.pg_tau} group_m={args.pg_group_m}")
+            f"lam_pg={args.lam_pg} pg_tau={args.pg_tau} group_m={args.pg_group_m} "
+            f"resume_unfrozen={unfreeze_state['unfrozen']}")
 
     for global_step in range(start_step, args.max_steps):
         alpha = alpha_for_step(global_step, start_step, args)
         total_loss = 0.0
-        if pg_state is not None:
+        # Unfreeze gβ ONLY when PG will actually run this step (step>=threshold
+        # AND alpha>0). This keeps unfreeze/param-group-insertion, the PG branch,
+        # and the pg_active log in lockstep — no false "active" window while the
+        # order is still the random/frozen mix (alpha ramping from 0).
+        if pg_state is not None and alpha > 0.0:
             maybe_unfreeze_orderhead(optimizer, pg_state["gbeta"], global_step,
                                      args, unfreeze_state)
         optimizer.zero_grad(set_to_none=True)
@@ -1983,19 +2068,25 @@ def main(default_run_kind="baseline"):
                     if pg_on:
                         # ── Phase B: PL sample + LM-NLL policy gradient (batch-level) ──
                         # CDL never appears here — pure LM-NLL + PG (spec red line).
+                        # Single-head L1H7 → NodewiseReadout path: mirror
+                        # FrozenBetaHook.step EXACTLY (same head/none_mode/probe →
+                        # A → B = A.T.mean(batch), diag=0), only grad-enabled + PL.
+                        # This guarantees B_PG == B_frozen by construction.
                         from batch_readout.orderhead_pg import (
                             gbeta_scores_with_grad, batch_advantage)
-                        from batch_readout.frozen_gbeta_hook import (
-                            extract_probe_averaged_model_frame_strict65)
+                        from batch_readout.hook_order_provider import (
+                            extract_selected_head_A_for_batch, random_probe_token_orders)
                         from analyses.p7_gbeta_policy import sample_pl
-                        B_all = extract_probe_averaged_model_frame_strict65(
-                            model, idx_batch, global_step=global_step,
-                            seed=args.seed, batch_mean_probes=args.batch_mean_probes,
-                            device=device)
-                        # B_PG == B_frozen: the provider uses SAMPLE 0's B
-                        # (token_order[0]) as the batch order — mirror it exactly
-                        # (not a batch-mean). Detach: no PG grad into the backbone.
-                        B_det = B_all[0:1].detach()
+                        probe = random_probe_token_orders(
+                            idx_batch.shape[0], args.seed, global_step, device)
+                        A = extract_selected_head_A_for_batch(
+                            model, idx_batch, tuple(args.frozen_beta_head),
+                            clean_perm, device, probe,
+                            none_mode=args.frozen_beta_none_mode)   # (batch, N, N)
+                        B = A.transpose(1, 2).mean(dim=0, keepdim=True)  # (1, N, N)
+                        _d = torch.arange(B.shape[-1], device=B.device)
+                        B[:, _d, _d] = 0.0
+                        B_det = B.detach()                          # no PG grad to backbone
                         scores = gbeta_scores_with_grad(pg_state["gbeta"], B_det)
                         sigma_model, logp, entropy = sample_pl(scores, tau=args.pg_tau)
                         sigma_model = torch.as_tensor(sigma_model, device=device,
@@ -2125,7 +2216,9 @@ def main(default_run_kind="baseline"):
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
         lr = get_lr(global_step, args)
         for group in optimizer.param_groups:
-            group["lr"] = lr
+            # The OrderHead (gβ) param group keeps its own fixed LR; only the
+            # backbone groups follow the scheduled LR.
+            group["lr"] = args.orderhead_lr if group.get("is_orderhead") else lr
         optimizer.step()
 
         avg_loss = total_loss / args.grad_accum

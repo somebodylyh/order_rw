@@ -134,6 +134,12 @@ class HookOrderProvider:
         self._sigma = None
         self._last_refresh = None
 
+    @property
+    def gbeta_module(self):
+        """The underlying readout (NodewiseReadout for the single-head L1H7 path),
+        for Stage-3 freeze/unfreeze + optimizer insertion."""
+        return self.hook.model
+
     def physical_order(self, model, idx_batch, global_step):
         if self._sigma is None or (global_step - self._last_refresh) >= self.refresh_every:
             probe = random_probe_token_orders(idx_batch.shape[0], self.seed, global_step, self.device)

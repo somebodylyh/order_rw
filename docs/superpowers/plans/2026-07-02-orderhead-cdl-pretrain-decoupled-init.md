@@ -2,6 +2,35 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> ## ⚠ Corrections applied after implementation + review (2026-07-02)
+> The body below (written before the model was pinned down) says the gβ is
+> **L0DynamicGBeta** (multi-head, batch-mean-probes). **That was wrong.** The
+> label-free-selected canonical gβ is **single-head L1H7 + NodewiseReadout**
+> (`reports/uniform_label_free_v1/nodewise_K1000.pt`, acc 0.94). The shipped code
+> targets the single-head path:
+> - Phase-B grad scorer mirrors `FrozenBetaHook.step` (single head L1H7 → 64×64 B →
+>   NodewiseReadout); `gbeta_scores_with_grad` is model-agnostic (tensor or tuple).
+> - `gbeta_module` accessor added to `HookOrderProvider` (single-head).
+> - `--cdl-pretrain` is guarded off for `single_head` (raises, points to
+>   `--frozen-beta-ckpt nodewise_K1000.pt`); the multi-head `gbeta_cdl_pretrain`
+>   orchestrator remains as a validated *variant*, not the canonical.
+>
+> **Reviewer blockers fixed (all with unit tests):**
+> - **P1-1** gβ/EMA/unfrozen now persist in the ckpt (`orderhead_ckpt_fields`) and
+>   resume reconstructs the optimizer param group before loading optimizer state
+>   (`restore_orderhead_on_resume`); round-trip test.
+> - **P1-2** the per-step LR schedule no longer clobbers the OrderHead group's LR.
+> - **P1-3** the GPU smoke command (Task 4 Step 6) now passes `--resume-ckpt` (10k
+>   parent) and a real ~100-step window.
+> - **P2-4** unfreeze fires only when PG actually runs (`alpha>0`), keeping
+>   unfreeze / PG branch / `pg_active` log consistent.
+>
+> **Deferred (explicit follow-up):** `scripts/train_nodewise_gbeta.py` — a
+> reproducible single-head NodewiseReadout producer (extract L1H7 B → bootstrap
+> K=1000 m=8 batch-mean + CDL teacher → NodewiseReadout pairwise-BCE 40ep). Not
+> written yet: it must be validated against `nodewise_K1000.pt` in a checkout that
+> has the 10k ckpt. The experiment is NOT blocked — it loads the existing ckpt.
+
 **Goal:** On the production `train_clean_aogpt.py` path, decouple the OrderHead's CDL initialization from its downstream fine-tuning: CDL-pretrain gβ (L0DynamicGBeta) offline, warm the backbone up with gβ frozen (argsort), then at a scheduled step unfreeze gβ and fine-tune it with LM-NLL policy gradient — CDL and PG never in the same loss.
 
 **Architecture:** Stage 1 is a thin orchestrator over the existing two-step CDL pipeline (`build_l0_dynamic_gbeta_dataset` + `train_l0_dynamic_gbeta`). Stages 2–3 live in `train_clean_aogpt.py --run-kind frozen_beta`: Stage 2 is today's frozen behavior; Stage 3 adds a `--unfreeze-orderhead-at-step` schedule that flips gβ to trainable, inserts one optimizer param group, switches the order policy argsort→Plackett-Luce, and applies a `v3_group_credit` batch-level advantage.
@@ -620,12 +649,29 @@ Expected: PASS (all).
 Add a smoke that constructs a tiny AO-GPT-like stub exposing `forward_fn` and runs 2 Phase-A + 2 Phase-B steps, asserting: Phase A gβ param delta == 0; Phase B gβ param delta > 0; backbone (stub) receives LM grad; `cdl_calls` stays 0. Keep it under the existing tiny-model test fixtures if present; otherwise assert the loss-path pieces in isolation (Steps 1–5 already cover the math). Document that the true end-to-end run uses the 10k ckpt on GPU:
 
 ```bash
-# manual smoke (GPU), not a unit test:
+# manual smoke (GPU), not a unit test.
+# MUST resume the SAME 10k parent backbone (--resume-ckpt), else Stage 2 starts
+# from a random step-0 backbone. --max-steps = start_step + ~100 for a true smoke
+# (start_step is read from the resume ckpt = 10000), so 10100 = ~100 steps.
+# Canonical gβ = single-head L1H7 NodewiseReadout (label-free-selected, acc 0.94):
+CK=block_lo_arm_order_network/probe_results/overnight_20260625_random_baseline/ckpt_step10000.pt
 python -u block_lo_arm_order_network/train_clean_aogpt.py --run-kind frozen_beta \
-  --cdl-pretrain --batch-mean-probes 4 --frozen-beta-none-mode model \
-  --unfreeze-orderhead-at-step 10050 --max-steps 10100 --lam-pg 1.0 \
+  --resume-ckpt "$CK" \
+  --frozen-beta-ckpt reports/uniform_label_free_v1/nodewise_K1000.pt \
+  --frozen-beta-head 1 7 --gbeta-input-mode single_head --frozen-beta-none-mode strict65_model \
+  --unfreeze-orderhead-at-step 10050 --max-steps 10100 --lam-pg 1.0 --orderhead-lr 3e-4 \
+  --alpha-start 1.0 --alpha-target 1.0 \
   --data-source continuous --train-bin <...> --val-bin <...> --seed 123 --device cuda:0
+# Verify in the log: [stage3] fires at 10050; before it, orderhead_grad==0 and no
+# is_orderhead group; after it, pg=... adv=... appears and gβ param delta > 0.
+# --alpha-start/target 1.0 avoids the alpha-warmup window so PG activates cleanly
+# at the unfreeze step (else PG waits for alpha>0).
 ```
+
+**Note (P1-3 / --frozen-beta-none-mode):** confirm the none_mode the deployed
+`nodewise_K1000.pt` uses (the single-head path feeds NodewiseReadout N=64). The
+Phase-B grad scorer mirrors `FrozenBetaHook.step` with `--frozen-beta-none-mode`,
+so it stays consistent with Stage-2 whatever value is canonical.
 
 - [ ] **Step 7: Commit**
 

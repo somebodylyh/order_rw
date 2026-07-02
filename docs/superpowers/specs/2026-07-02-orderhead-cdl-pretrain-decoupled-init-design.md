@@ -2,7 +2,19 @@
 
 **Date:** 2026-07-02 (rewritten after code verification; supersedes the v3_group_trainer draft)
 **Branch:** `v3-joint-orderhead-phase1`
-**Status:** design — awaiting user review before writing implementation plan
+**Status:** implemented; superseded on the gβ-model choice — see banner.
+
+> ## ⚠ Superseded: gβ model = single-head NodewiseReadout (not L0DynamicGBeta)
+> This spec's body describes the gβ as **L0DynamicGBeta** (multi-head,
+> batch-mean-probes). Later determination (with acc evidence: 0.94 vs 0.635): the
+> label-free-selected canonical gβ is **single-head L1H7 + NodewiseReadout**
+> (`reports/uniform_label_free_v1/nodewise_K1000.pt`). The shipped code targets
+> the single-head path; Stage-3 mirrors `FrozenBetaHook.step` (L1H7 → 64×64 B →
+> NodewiseReadout, grad-enabled + PL). Everything else in this spec (three-stage
+> decoupling, PL, batch-level group-credit, red lines, weight continuity, single
+> param-group insertion) stands. See the plan's correction banner for the
+> reviewer-blocker fixes (checkpoint persistence, independent LR, resume-ckpt,
+> alpha/PG semantics) and the deferred single-head reproduce-producer.
 
 ## Purpose
 

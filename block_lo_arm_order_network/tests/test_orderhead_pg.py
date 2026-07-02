@@ -20,6 +20,20 @@ def test_gbeta_scores_with_grad_shape_and_grad():
     assert any(p.grad is not None for p in m.parameters())
 
 
+def test_gbeta_scores_with_grad_nodewise_single_head():
+    """Single-head L1H7 path: NodewiseReadout(N=64) takes (1,64,64) B, returns
+    plain (1,64) scores (no aux/dropout). Grad flows to gβ."""
+    from batch_readout.orderhead_pg import gbeta_scores_with_grad
+    from batch_readout.model import NodewiseReadout
+    m = NodewiseReadout(N=64, d_model=64, n_layers=2, n_heads=4)
+    B = torch.randn(1, 64, 64)
+    scores = gbeta_scores_with_grad(m, B)
+    assert scores.shape == (64,)
+    assert scores.requires_grad
+    scores.sum().backward()
+    assert any(p.grad is not None for p in m.parameters())
+
+
 def test_batch_advantage_is_scalar_and_detached():
     from batch_readout.orderhead_pg import batch_advantage
     from analyses.v3_group_credit import group_ids_for, GroupEMA
