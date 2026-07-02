@@ -72,6 +72,52 @@ def test_grad_scores_match_frozen_scores_before_unfreeze():
                        s_grad.argsort(descending=True))
 
 
+class TestGRPOAdvantage:
+    """Tests for grpo_advantage: within-group normalized advantage."""
+
+    def test_normal_distribution(self):
+        """Standard case: different rewards → mean 0, std 1."""
+        from batch_readout.orderhead_pg import grpo_advantage
+        rewards = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        adv = grpo_advantage(rewards)
+        assert adv.shape == (4,)
+        assert abs(adv.mean().item()) < 1e-6, f"mean {adv.mean().item()} not ≈ 0"
+        assert abs(adv.std().item() - 1.0) < 1e-3, f"std {adv.std().item()} not ≈ 1"
+
+    def test_zero_variance(self):
+        """All rewards equal → all advantages zero."""
+        from batch_readout.orderhead_pg import grpo_advantage
+        rewards = torch.tensor([2.0, 2.0, 2.0, 2.0])
+        adv = grpo_advantage(rewards)
+        assert torch.all(adv == 0.0), f"expected zeros, got {adv}"
+
+    def test_detached(self):
+        """Advantage must be detached (stopgrad)."""
+        from batch_readout.orderhead_pg import grpo_advantage
+        rewards = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        adv = grpo_advantage(rewards)
+        assert not adv.requires_grad, "advantage must be detached"
+
+    def test_sign_convention(self):
+        """Better reward (higher) → higher advantage.
+        With r=[1.0, 5.0]: r_1=5.0 is above mean 3.0 → positive advantage."""
+        from batch_readout.orderhead_pg import grpo_advantage
+        rewards = torch.tensor([1.0, 5.0])
+        adv = grpo_advantage(rewards)
+        assert adv[0] < adv[1], (
+            f"adv[0]={adv[0]:.4f} should be < adv[1]={adv[1]:.4f} "
+            f"(better reward → higher advantage)"
+        )
+
+    def test_near_zero_std_uses_eps(self):
+        """When std ≈ 0 but not exactly zero, eps prevents division blow-up."""
+        from batch_readout.orderhead_pg import grpo_advantage
+        rewards = torch.tensor([1.0, 1.0 + 1e-9])
+        adv = grpo_advantage(rewards, eps=1e-8)
+        assert torch.isfinite(adv).all(), f"got non-finite: {adv}"
+        assert abs(adv.mean().item()) < 1e-6
+
+
 def test_pg_loss_does_not_touch_backbone():
     """PG grad routes to gβ only; detached B ⇒ no path to the 'backbone'."""
     from batch_readout.orderhead_pg import gbeta_scores_with_grad, batch_advantage

@@ -45,4 +45,29 @@ def batch_advantage(token_losses, groups, ema, adv_clip):
     return A, ell_i
 
 
-__all__ = ["gbeta_scores_with_grad", "batch_advantage"]
+def grpo_advantage(rewards: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """GRPO-style within-group normalized advantage (detached).
+
+    Args:
+        rewards: (K,) tensor of scalar rewards. Higher = better (use -NLL).
+        eps: small constant to prevent division by zero when std ≈ 0.
+
+    Returns:
+        (K,) detached tensor. mean ≈ 0, std ≈ 1 for non-constant rewards.
+        Zero-variance rewards produce all-zeros (no signal).
+
+    Advantage sign convention:
+        A_k > 0 → reward_k is above the group mean → increase P(sigma_k).
+        L_GRPO = -mean_k(stopgrad(A_k) * log P(sigma_k)).
+    """
+    import torch as _torch
+    r = rewards.float()
+    mean_r = r.mean()
+    std_r = r.std()
+    if std_r < eps:
+        return _torch.zeros_like(r)
+    adv = (r - mean_r) / (std_r + eps)
+    return adv.detach()
+
+
+__all__ = ["gbeta_scores_with_grad", "batch_advantage", "grpo_advantage"]
