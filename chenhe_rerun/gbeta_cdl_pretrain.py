@@ -42,9 +42,16 @@ def _file_hash(path):
 
 
 def load_chenhe_backbone(ckpt_path, device):
-    """Load a chenhe AOGPT from a chenhe ckpt ({'model','model_args',...})."""
+    """Load a chenhe AOGPT from a chenhe ckpt ({'model','model_args',...}).
+
+    chenhe's saved model_args carries extra train.py config keys (e.g. order_impl)
+    that AOGPTConfig does not accept, so filter to the config's own fields.
+    """
+    import inspect
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    margs = dict(ckpt["model_args"])
+    raw = dict(ckpt["model_args"])
+    valid = set(inspect.signature(AOGPTConfig).parameters)
+    margs = {k: v for k, v in raw.items() if k in valid}
     model = AOGPT(AOGPTConfig(**margs))
     state = ckpt["model"]
     # strip a possible compile prefix

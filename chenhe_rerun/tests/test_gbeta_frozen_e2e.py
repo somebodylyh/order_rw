@@ -15,7 +15,9 @@ def _tiny_parent(path):
                dropout=0.0, bias=True, block_order_block_len=4,
                block_order_layout="contiguous", position_encoding_mode="absolute")
     m = AOGPT(AOGPTConfig(**cfg))
-    torch.save({"model": m.state_dict(), "optimizer": {}, "model_args": cfg,
+    # chenhe ckpts save extra train.py keys (order_impl) not in AOGPTConfig:
+    torch.save({"model": m.state_dict(), "optimizer": {},
+                "model_args": {**cfg, "order_impl": "block"},
                 "iter_num": 10000, "best_val_loss": 9.9}, path)
 
 
