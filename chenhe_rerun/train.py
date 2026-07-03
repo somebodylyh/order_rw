@@ -7690,6 +7690,7 @@ def _forward_with_active_training_policy(
         or str(aogpt_train_mode) == "AttnMLPFrozenOrder"
         or str(aogpt_train_mode) == "OnlineSpectralFixedHeadOrder"
         or str(aogpt_train_mode) == "OnlineSpectralOrderDistribution"
+        or str(aogpt_train_mode) == "GBetaFrozenOrder"
         or _segment_guided_policy_active()
     )
     if needs_explicit_policy:
