@@ -25,9 +25,9 @@ def test_gbeta_frozen_smoke(tmp_path):
     parent = os.path.join(str(tmp_path), "ckpt.pt")
     _tiny_parent(parent)
     gb_dir = os.path.join(str(tmp_path), "gb")
-    gbeta = pretrain_gbeta_cdl(parent, gb_dir, M=8, batch_mean_size=2,
-                               batch_mean_probes=2, epochs=2, device="cpu",
-                               data_bin=TRAIN_BIN, forward_batch=8)
+    gbeta = pretrain_gbeta_cdl(parent, gb_dir, n_select=16, n_groups=12, batch_mean_size=2,
+                               n_reveal=4, batch_mean_probes=2, epochs=2, device="cpu",
+                               data_bin=TRAIN_BIN)
     assert os.path.exists(gbeta)
 
     cmd = [PY, "train.py",

@@ -1,44 +1,38 @@
 import sys, os
-import numpy as np
 import torch
 
 CHENHE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, CHENHE)
-from orderhead_v3.l0_dynamic_gbeta import L0DynamicGBeta
-from orderhead_v3.cdl_teacher import build_dynamic_teacher, consensus_order_from_pairwise
+from orderhead_v3.readouts import NodewiseReadout, FlattenReadout, build_readout
+from orderhead_v3.head_selection import select_best_head
+from AOGPT_block import AOGPT, AOGPTConfig
 
 
-def test_gbeta_forward_shape():
-    B = torch.rand(3, 8, 65, 65)
-    gb = L0DynamicGBeta(heads=8, nodes=65).eval()
-    with torch.no_grad():
-        scores, _aux = gb(B, apply_head_dropout=False)
-    assert scores.shape == (3, 64)
-    assert torch.isfinite(scores).all()
-    sigma = scores.argsort(dim=1, descending=True)
-    assert all(sorted(sigma[i].tolist()) == list(range(64)) for i in range(3))
+def test_readout_shapes():
+    B = torch.rand(3, 64, 64)
+    for m in [NodewiseReadout(N=64, d_model=64, n_layers=2, n_heads=4),
+              FlattenReadout(N=64, hidden=(256, 64))]:
+        m.eval()
+        with torch.no_grad():
+            s = m(B)
+        assert s.shape == (3, 64) and torch.isfinite(s).all()
+        sigma = s.argsort(dim=1, descending=True)
+        assert all(sorted(sigma[i].tolist()) == list(range(64)) for i in range(3))
 
 
-def test_teacher_is_model_frame():
-    # build_dynamic_teacher operates PER SAMPLE on (H, 65, 65) and emits
-    # orders/ranks/pairwise over model-frame content indices [0,63] — no
-    # inverse_block_perm applied anywhere.
-    rng = np.random.default_rng(0)
-    B_heads = rng.random((8, 65, 65)).astype(np.float64)
-    for h in range(8):
-        np.fill_diagonal(B_heads[h], 0.0)
-        B_heads[h][:, 0] = 0.0                     # no edges into None
-    teacher = build_dynamic_teacher(B_heads)
-    # per-head orders are permutations of the 64 model-frame blocks
-    assert teacher["orders"].shape == (8, 64)
-    for h in range(8):
-        assert sorted(teacher["orders"][h].tolist()) == list(range(64))
-    # soft pairwise is (64,64), antisymmetric around 0.5, diagonal 0.5
-    Y = teacher["pairwise"]
-    assert Y.shape == (64, 64)
-    off = ~np.eye(64, dtype=bool)
-    assert np.allclose((Y + Y.T)[off], 1.0)
-    assert np.allclose(np.diag(Y), 0.5)
-    # derived consensus order is a model-frame [0,63] permutation
-    order = consensus_order_from_pairwise(Y)
-    assert sorted(order.tolist()) == list(range(64))
+def test_build_readout_from_config():
+    m = build_readout({"model_name": "nodewise", "N": 64, "d_model": 64,
+                       "n_layers": 2, "n_heads": 4})
+    assert isinstance(m, NodewiseReadout)
+
+
+def test_head_selection_returns_valid_head():
+    cfg = dict(block_size=256, vocab_size=50304, n_layer=2, n_head=8, n_embd=128,
+               dropout=0.0, bias=True, block_order_block_len=4,
+               block_order_layout="contiguous", position_encoding_mode="absolute")
+    model = AOGPT(AOGPTConfig(**cfg)).eval()
+    chunks = torch.randint(0, 50304, (16, 256))
+    (layer, head), scores = select_best_head(model, chunks, n_reveal=4, seed=0, device="cpu")
+    assert 0 <= layer < 2 and 0 <= head < 8            # valid (layer, head)
+    assert len(scores) == 2 * 8                          # all layers x heads scored
+    assert scores[0]["total"] >= scores[-1]["total"]    # sorted best-first
