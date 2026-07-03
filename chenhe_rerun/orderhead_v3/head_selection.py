@@ -38,7 +38,8 @@ def _extract_all_B65(model, chunks, total, seed, device, n_reveal, fwd_batch=32)
         for start in range(0, total, fwd_batch):
             end = min(start + fwd_batch, total)
             probe = _make_probe(model, end - start, seed * 100000 + ri * 1000 + start, device)
-            out = model.forward_fn(chunks[start:end].to(device), probe, return_attentions=True)
+            out = model.forward_fn(chunks[start:end].to(device), probe,
+                                   return_attentions=True, return_logits=False)
             attn_list = out[-1]
             if B_sum is None:
                 L, H_per = len(attn_list), attn_list[0].shape[1]

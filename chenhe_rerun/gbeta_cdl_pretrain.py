@@ -67,7 +67,8 @@ def _make_probe(model, batch_size, seed, device):
 @torch.no_grad()
 def single_head_B_from_forward(model, idx_batch, layer, head, probe, device):
     """One forward -> selected single-head content B (Bsz, 64, 64), None stripped."""
-    out = model.forward_fn(idx_batch.to(device), probe.to(device), return_attentions=True)
+    out = model.forward_fn(idx_batch.to(device), probe.to(device),
+                           return_attentions=True, return_logits=False)
     a = out[-1][layer].cpu().numpy()                     # (Bsz, H, 257, 257)
     probe_np = probe.cpu().numpy()
     B = np.empty((idx_batch.shape[0], 64, 64), np.float32)
