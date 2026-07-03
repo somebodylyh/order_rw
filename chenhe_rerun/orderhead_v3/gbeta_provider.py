@@ -48,7 +48,7 @@ class GBetaFrozenProvider:
         self.refresh_every = max(1, int(refresh_every))
         self.seed, self.device, self.probe_mode = int(seed), device, probe_mode
         self._train_sigma = self._train_step = None
-        self._eval_sigma = None
+        self._eval_sigma = self._eval_step = None
 
     @torch.no_grad()
     def _compute_sigma(self, model, idx_batch, global_step):
@@ -64,7 +64,12 @@ class GBetaFrozenProvider:
     @torch.no_grad()
     def block_orders(self, model, idx_batch, global_step, is_eval):
         if is_eval:
-            self._eval_sigma = self._compute_sigma(model, idx_batch, global_step)
+            # one σ per eval (all eval batches share global_step) — not per batch;
+            # estimate_loss calls this eval_iters times at a fixed step, so caching
+            # by step turns O(eval_iters) strict65 extractions into O(1).
+            if self._eval_sigma is None or self._eval_step != int(global_step):
+                self._eval_sigma = self._compute_sigma(model, idx_batch, global_step)
+                self._eval_step = int(global_step)
             sigma = self._eval_sigma
         else:
             if self._train_sigma is None or global_step - self._train_step >= self.refresh_every:

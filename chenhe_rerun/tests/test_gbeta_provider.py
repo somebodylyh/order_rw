@@ -53,12 +53,17 @@ def test_provenance_mismatch_rejected(tmp_path):
         GBetaFrozenProvider(gpath, other, device="cpu")  # parent hash mismatch
 
 
-def test_eval_refreshes_per_batch(tmp_path):
+def test_eval_caches_per_step(tmp_path):
     m, parent, gpath = _backbone_and_ckpts(str(tmp_path))
     prov = GBetaFrozenProvider(gpath, parent, refresh_every=1000, device="cpu")
     idx = torch.randint(0, 50304, (2, 256))
+    idx2 = torch.randint(0, 50304, (2, 256))
     prov.block_orders(m, idx, global_step=0, is_eval=False)
     train_sig = prov._train_sigma.clone()
-    prov.block_orders(m, idx, global_step=5, is_eval=True)
-    assert prov._eval_sigma is not None
-    assert torch.equal(prov._train_sigma, train_sig)     # train cache untouched by eval
+    prov.block_orders(m, idx, global_step=5, is_eval=True)   # eval step 5: compute σ
+    s5 = prov._eval_sigma.clone(); assert prov._eval_step == 5
+    prov.block_orders(m, idx2, global_step=5, is_eval=True)  # SAME step: reuse cache
+    assert torch.equal(prov._eval_sigma, s5)                 # not recomputed on new batch
+    prov.block_orders(m, idx, global_step=6, is_eval=True)   # NEW step: recompute
+    assert prov._eval_step == 6
+    assert torch.equal(prov._train_sigma, train_sig)         # train cache untouched by eval
