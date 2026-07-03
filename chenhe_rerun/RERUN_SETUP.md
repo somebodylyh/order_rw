@@ -79,10 +79,13 @@ python train.py config/WikiText103/seq256/permute/block64/random.py \
   --max_iters=10000 --out_dir=out/rerun/parent_random_10k --wandb_log=False
 
 # (b) CDL-pretrain gβ from that parent (offline; ~mins on GPU)
+#     = Stage-A label-free head selection (all layers/heads) -> single selected head
+#       -> NodewiseReadout, trained BATCH-MEAN (per-sample is noise). Prints the
+#       selected head (e.g. L1H6) and val_pairwise_acc (expect ~0.9+).
 python -c "from gbeta_cdl_pretrain import pretrain_gbeta_cdl; \
   print(pretrain_gbeta_cdl('out/rerun/parent_random_10k/ckpt.pt', \
-        'out/rerun/gbeta_from_parent10k', M=2000, batch_mean_size=16, \
-        epochs=40, device='cuda'))"
+        'out/rerun/gbeta_from_parent10k', n_select=800, n_groups=300, \
+        batch_mean_size=16, n_reveal=8, epochs=40, device='cuda'))"
 
 # (c) frozen-gβ continuation to 50k (resumes the parent, only order policy differs)
 python train.py config/WikiText103/seq256/permute/block64/gbeta_frozen_warmup.py \
