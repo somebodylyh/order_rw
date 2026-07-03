@@ -6,7 +6,7 @@ sys.path.insert(0, CHENHE)
 from AOGPT_block import AOGPT, AOGPTConfig
 from gbeta_cdl_pretrain import pretrain_gbeta_cdl
 
-PY = "/data/users/chenhe/conda_envs/X1/bin/python"
+PY = sys.executable  # portable: run the subprocess with the same interpreter
 TRAIN_BIN = os.path.join(CHENHE, "data/wikitext103/train.bin")
 
 
