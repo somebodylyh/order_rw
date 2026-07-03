@@ -1,0 +1,927 @@
+import argparse
+import json
+import pickle
+from contextlib import nullcontext
+from pathlib import Path
+import sys
+
+import numpy as np
+import torch
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from AOGPT import AOGPT, AOGPTConfig
+from order_utils import build_fixed_block_permutation, block_permutation_to_token_permutation
+
+
+EXPORT_TYPES = ("with_none", "without_none", "diff")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Export AO-GPT block attention heatmaps with/without [None] and their difference."
+    )
+    parser.add_argument("--ckpt_path", type=Path, required=True)
+    parser.add_argument("--out_dir", type=Path, required=True)
+    parser.add_argument("--dataset", type=str, default=None)
+    parser.add_argument("--data_dir", type=Path, default=None)
+    parser.add_argument("--split", type=str, default="val", choices=["train", "val"])
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--num_batches", type=int, default=200)
+    parser.add_argument("--seed", type=int, default=12345)
+    parser.add_argument("--mode", type=str, default="Random", choices=["AR", "Random"])
+    parser.add_argument(
+        "--order_frame",
+        type=str,
+        default="original",
+        choices=["reveal", "original"],
+        help=(
+            "Retained for backward compatibility. The script now always exports both "
+            "reveal and original frames regardless of this value."
+        ),
+    )
+    parser.add_argument("--layer_reduce", type=str, default="mean", choices=["mean", "last"])
+    parser.add_argument("--head_reduce", type=str, default="mean", choices=["mean", "first"])
+    parser.add_argument("--force_manual_attention", action="store_true")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda" if torch.cuda.is_available() else "cpu",
+    )
+    parser.add_argument(
+        "--dtype",
+        type=str,
+        default=(
+            "bfloat16"
+            if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+            else "float32"
+        ),
+        choices=["float32", "float16", "bfloat16"],
+    )
+    return parser.parse_args()
+
+
+def get_autocast_context(device: str, dtype: str):
+    if "cuda" not in device or dtype == "float32":
+        return nullcontext()
+    amp_dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16}[dtype]
+    return torch.amp.autocast(device_type="cuda", dtype=amp_dtype)
+
+
+def load_checkpoint(ckpt_path: Path, device: str):
+    return torch.load(ckpt_path, map_location=device)
+
+
+def build_model(checkpoint, device: str, force_manual_attention: bool):
+    model_args = dict(checkpoint["model_args"])
+
+    if "force_manual_attention" in getattr(AOGPTConfig, "__annotations__", {}):
+        model_args["force_manual_attention"] = bool(force_manual_attention)
+
+    model = AOGPT(AOGPTConfig(**model_args))
+
+    state_dict = checkpoint["model"]
+    unwanted_prefix = "_orig_mod."
+    for key in list(state_dict.keys()):
+        if key.startswith(unwanted_prefix):
+            state_dict[key[len(unwanted_prefix) :]] = state_dict.pop(key)
+
+    incompatible = model.load_state_dict(state_dict, strict=False)
+
+    if hasattr(model, "set_attention_backend"):
+        model.set_attention_backend(force_manual_attention)
+
+    model.to(device)
+    model.eval()
+
+    ignored_policy_keys = [
+        key for key in incompatible.unexpected_keys if key.startswith("policy_order_head.")
+    ]
+    other_unexpected_keys = [
+        key for key in incompatible.unexpected_keys if not key.startswith("policy_order_head.")
+    ]
+    allowed_missing_keys = {
+        f"transformer.h.{layer_idx}.attn.bias" for layer_idx in range(model.config.n_layer)
+    }
+    other_missing_keys = [
+        key for key in incompatible.missing_keys if key not in allowed_missing_keys
+    ]
+
+    if ignored_policy_keys:
+        print(f"ignored {len(ignored_policy_keys)} legacy policy_order_head keys from checkpoint")
+    if other_unexpected_keys:
+        raise RuntimeError(
+            f"Unexpected checkpoint keys that were not recognized: {other_unexpected_keys}"
+        )
+    if other_missing_keys:
+        raise RuntimeError(
+            f"Missing checkpoint keys that were not expected analysis-only buffers: {other_missing_keys}"
+        )
+
+    return model
+
+
+def resolve_data_dir(args, checkpoint):
+    if args.data_dir is not None:
+        return args.data_dir
+    dataset = args.dataset or checkpoint.get("config", {}).get("dataset")
+    if dataset is None:
+        raise ValueError("Could not infer dataset. Pass --dataset or --data_dir.")
+    return REPO_ROOT / "data" / dataset
+
+
+class TokenArray:
+    def __init__(self, values, data_record_mode="stream"):
+        self.values = values
+        self.data_record_mode = str(data_record_mode or "stream")
+
+    def __len__(self):
+        return len(self.values)
+
+    def __getitem__(self, item):
+        return self.values[item]
+
+
+def infer_data_record_mode(data_dir: Path, fallback="stream"):
+    meta_path = data_dir / "meta.pkl"
+    if not meta_path.exists():
+        return str(fallback)
+    with meta_path.open("rb") as handle:
+        meta = pickle.load(handle)
+    return str(meta.get("data_record_mode", fallback))
+
+
+def load_tokens(data_dir: Path, split: str, data_record_mode=None):
+    split_path = data_dir / f"{split}.bin"
+    if not split_path.exists():
+        raise FileNotFoundError(f"Could not find split file: {split_path}")
+    if data_record_mode is None:
+        data_record_mode = infer_data_record_mode(data_dir)
+    return TokenArray(np.memmap(split_path, dtype=np.uint16, mode="r"), data_record_mode=data_record_mode)
+
+
+def sample_batch(tokens, batch_size: int, block_size: int, rng, device: str):
+    data_record_mode = str(getattr(tokens, "data_record_mode", "stream"))
+    if data_record_mode == "fixed":
+        num_records = len(tokens) // block_size
+        if num_records <= 0:
+            raise ValueError("Dataset split is shorter than one fixed block_size record.")
+        record_ids = rng.integers(0, num_records, size=batch_size)
+        starts = (record_ids * block_size).tolist()
+    elif data_record_mode == "stream":
+        max_start = len(tokens) - block_size
+        if max_start < 0:
+            raise ValueError("Dataset split is shorter than block_size.")
+        starts = rng.integers(0, max_start + 1, size=batch_size).tolist()
+    else:
+        raise ValueError(f"Unsupported data_record_mode={data_record_mode!r}.")
+    batch = torch.stack(
+        [torch.from_numpy(tokens[start : start + block_size].astype(np.int64)) for start in starts]
+    )
+    return batch.to(device), [int(v) for v in starts]
+
+
+def build_orders(model, idx, mode):
+    if mode == "AR":
+        token_orders = model.set_ascending_orders(idx)
+    elif mode == "Random":
+        token_orders = model.sample_random_orders(idx)
+    else:
+        raise ValueError(f"Unsupported mode: {mode}")
+
+    if hasattr(model, "token_orders_to_block_orders"):
+        block_orders = model.token_orders_to_block_orders(token_orders)
+    else:
+        block_len = model.block_order_block_len
+        block_orders = token_orders.view(token_orders.size(0), model.num_blocks, block_len)[:, :, 0] // block_len
+    return token_orders, block_orders
+
+
+def normalize_perm_1d(values, expected_len: int, name: str):
+    perm = torch.as_tensor(values, dtype=torch.long, device="cpu")
+    if perm.ndim != 1 or perm.numel() != expected_len:
+        raise ValueError(
+            f"{name} must be a 1D permutation of length {expected_len}, got shape={tuple(perm.shape)}."
+        )
+    expected = torch.arange(expected_len, dtype=torch.long, device="cpu")
+    if not torch.equal(torch.sort(perm).values, expected):
+        raise ValueError(f"{name} is not a valid permutation of [0, {expected_len - 1}].")
+    return perm
+
+
+def resolve_data_permutation(checkpoint, num_blocks: int, block_len: int, model=None):
+    data_permutation = checkpoint.get("data_permutation")
+    if not data_permutation:
+        return None
+
+    permute_mode = data_permutation.get("permute_mode")
+    if permute_mode != "block":
+        raise ValueError(
+            f"Unsupported checkpoint data_permutation permute_mode={permute_mode!r}. Only 'block' is supported."
+        )
+
+    if "block_perm" in data_permutation:
+        block_perm = normalize_perm_1d(
+            data_permutation["block_perm"],
+            expected_len=num_blocks,
+            name="checkpoint.data_permutation.block_perm",
+        )
+    else:
+        permute_seed = data_permutation.get("permute_seed")
+        if permute_seed is None:
+            raise ValueError(
+                "Checkpoint data_permutation is missing both block_perm and permute_seed."
+            )
+        block_perm = build_fixed_block_permutation(num_blocks, permute_seed).to(dtype=torch.long, device="cpu")
+
+    if "inverse_block_perm" in data_permutation:
+        inverse_block_perm = normalize_perm_1d(
+            data_permutation["inverse_block_perm"],
+            expected_len=num_blocks,
+            name="checkpoint.data_permutation.inverse_block_perm",
+        )
+    else:
+        inverse_block_perm = invert_permutation(block_perm)
+
+    if not torch.equal(invert_permutation(block_perm), inverse_block_perm):
+        raise ValueError("checkpoint.data_permutation inverse_block_perm is inconsistent with block_perm.")
+
+    config = checkpoint.get("config", {})
+    block_order_layout = str(
+        data_permutation.get(
+            "block_order_layout",
+            getattr(model, "block_order_layout", config.get("block_order_layout", "contiguous")),
+        )
+    )
+    image_size = int(data_permutation.get("image_size", getattr(model, "image_size", config.get("image_size", 0))))
+    image_block_size = int(
+        data_permutation.get(
+            "image_block_size",
+            getattr(model, "image_block_size", config.get("image_block_size", 0)),
+        )
+    )
+    image_block_height = int(
+        data_permutation.get(
+            "image_block_height",
+            getattr(model, "image_block_height", config.get("image_block_height", 0)),
+        )
+    )
+    image_block_width = int(
+        data_permutation.get(
+            "image_block_width",
+            getattr(model, "image_block_width", config.get("image_block_width", 0)),
+        )
+    )
+    token_perm = block_permutation_to_token_permutation(
+        block_perm,
+        block_len=block_len,
+        block_order_layout=block_order_layout,
+        image_size=image_size,
+        image_block_size=image_block_size,
+        image_block_height=image_block_height,
+        image_block_width=image_block_width,
+    )
+
+    return {
+        "permute_mode": permute_mode,
+        "permute_seed": data_permutation.get("permute_seed"),
+        "block_order_layout": block_order_layout,
+        "image_size": image_size,
+        "image_block_size": image_block_size,
+        "image_block_height": image_block_height,
+        "image_block_width": image_block_width,
+        "block_perm": block_perm,
+        "inverse_block_perm": inverse_block_perm,
+        "token_perm": token_perm,
+    }
+
+
+def maybe_apply_data_permutation(idx, data_permutation):
+    if data_permutation is None:
+        return idx
+    token_perm = data_permutation["token_perm"].to(device=idx.device)
+    return idx[:, token_perm]
+
+
+def get_export_frames(data_permutation):
+    if data_permutation is None:
+        return ("reveal", "original")
+    return ("reveal", "original", "true_original")
+
+
+def reduce_attention_batch(attn_outputs, layer_reduce, head_reduce):
+    layers = [layer_att.detach().float().cpu() for layer_att in attn_outputs]
+    if layer_reduce == "last":
+        attn = layers[-1]
+    else:
+        attn = torch.stack(layers, dim=0).mean(dim=0)
+
+    if head_reduce == "first":
+        return attn[:, 0]
+    return attn.mean(dim=1)
+
+
+def extract_logits_loss_attentions(outputs):
+    if not isinstance(outputs, (tuple, list)):
+        raise RuntimeError(
+            "Expected model.forward_fn(..., return_attentions=True) to return a tuple/list."
+        )
+    if len(outputs) < 3:
+        raise RuntimeError(
+            f"Expected at least 3 outputs from model.forward_fn(..., return_attentions=True), got {len(outputs)}."
+        )
+
+    logits = outputs[0]
+    loss = outputs[1]
+    attentions = None
+
+    for candidate in reversed(outputs[2:]):
+        if isinstance(candidate, (list, tuple)) and candidate:
+            if all(torch.is_tensor(item) and item.ndim == 4 for item in candidate):
+                attentions = candidate
+                break
+
+    if attentions is None:
+        raise RuntimeError(
+            "Could not find attention tensors in model.forward_fn(..., return_attentions=True) outputs."
+        )
+
+    return logits, loss, attentions
+
+
+def invert_permutation(perm_1d):
+    inverse = torch.empty_like(perm_1d)
+    inverse[perm_1d] = torch.arange(perm_1d.numel(), dtype=perm_1d.dtype, device=perm_1d.device)
+    return inverse
+
+
+def reorder_block_attention_to_original(block_matrix, block_order):
+    inverse = invert_permutation(block_order)
+    return block_matrix[inverse][:, inverse]
+
+
+def aggregate_predictor_aligned_attention_to_block(attn_2d, block_len):
+    """
+    Aggregate token attention into predictor-aligned reveal blocks.
+
+    AO-GPT predicts targets from shift_logits = logits[..., :-1, :], so the
+    predictor-aligned attention region is attn[:-1, :-1]. These positions include
+    predictor 0 = [None], therefore reveal block 0 contains [None] plus the first
+    (block_len - 1) revealed real-token predictor positions.
+    """
+    shifted_attn = attn_2d[:-1, :-1]
+    num_predictor_positions = shifted_attn.size(0)
+    if num_predictor_positions % block_len != 0:
+        raise ValueError(
+            f"Predictor-aligned attention length {num_predictor_positions} "
+            f"is not divisible by block_len={block_len}."
+        )
+
+    num_blocks = num_predictor_positions // block_len
+    return shifted_attn.view(num_blocks, block_len, num_blocks, block_len).mean(dim=(1, 3))
+
+
+def aggregate_real_token_attention_to_block(attn_2d, block_len):
+    """
+    Aggregate attention among real-token reveal positions only.
+
+    This removes the [None] row/column first, then groups contiguous revealed real-token
+    positions into full blocks of size block_len. Every exported block therefore contains
+    exactly block_len real tokens.
+    """
+    real_token_attn = attn_2d[1:, 1:]
+    num_real_positions = real_token_attn.size(0)
+    if num_real_positions % block_len != 0:
+        raise ValueError(
+            f"Real-token attention length {num_real_positions} is not divisible by block_len={block_len}."
+        )
+
+    num_blocks = num_real_positions // block_len
+    return real_token_attn.view(num_blocks, block_len, num_blocks, block_len).mean(dim=(1, 3))
+
+
+def build_block_views_for_sample(attn_2d, block_order, block_len, data_permutation=None):
+    with_none_reveal = aggregate_predictor_aligned_attention_to_block(attn_2d, block_len=block_len)
+    without_none_reveal = aggregate_real_token_attention_to_block(attn_2d, block_len=block_len)
+
+    with_none_original = reorder_block_attention_to_original(with_none_reveal, block_order)
+    without_none_original = reorder_block_attention_to_original(without_none_reveal, block_order)
+
+    diff_reveal = with_none_reveal - without_none_reveal
+    diff_original = with_none_original - without_none_original
+
+    outputs = {
+        "with_none": {
+            "reveal": with_none_reveal,
+            "original": with_none_original,
+        },
+        "without_none": {
+            "reveal": without_none_reveal,
+            "original": without_none_original,
+        },
+        "diff": {
+            "reveal": diff_reveal,
+            "original": diff_original,
+        },
+    }
+
+    if data_permutation is not None:
+        data_block_perm = data_permutation["block_perm"]
+        for export_type in EXPORT_TYPES:
+            outputs[export_type]["true_original"] = reorder_block_attention_to_original(
+                outputs[export_type]["original"],
+                data_block_perm,
+            )
+
+    return outputs
+
+
+def aggregate_batch_block_attentions(attn_batch, block_orders, block_len, data_permutation=None):
+    export_frames = get_export_frames(data_permutation)
+    aggregated = {
+        export_type: {frame: [] for frame in export_frames} for export_type in EXPORT_TYPES
+    }
+
+    for sample_idx in range(attn_batch.size(0)):
+        per_sample = build_block_views_for_sample(
+            attn_batch[sample_idx],
+            block_order=block_orders[sample_idx].detach().cpu(),
+            block_len=block_len,
+            data_permutation=data_permutation,
+        )
+        for export_type in EXPORT_TYPES:
+            for frame in export_frames:
+                aggregated[export_type][frame].append(per_sample[export_type][frame])
+
+    return {
+        export_type: {
+            frame: torch.stack(aggregated[export_type][frame], dim=0) for frame in export_frames
+        }
+        for export_type in EXPORT_TYPES
+    }
+
+
+def get_alignment_metadata(export_type: str):
+    if export_type == "with_none":
+        return {
+            "attention_alignment": "predictor_aligned_reveal_blocks_with_none",
+            "attention_alignment_detail": (
+                "attention is first aligned to shift loss positions with attn[:-1, :-1]. "
+                "Blocks are then formed over predictor positions, so reveal block 0 includes "
+                "[None] plus the first (block_len - 1) revealed real-token predictor positions. "
+                "This is the generation-mechanism view of block attention."
+            ),
+        }
+    if export_type == "without_none":
+        return {
+            "attention_alignment": "real_token_only_reveal_blocks_without_none",
+            "attention_alignment_detail": (
+                "attention is restricted to real-token positions only via attn[1:, 1:]. "
+                "Blocks are re-formed over contiguous revealed real tokens, and every block "
+                "contains exactly block_len real tokens. This is the real block-relationship view "
+                "of block attention."
+            ),
+        }
+    if export_type == "diff":
+        return {
+            "attention_alignment": "difference_with_none_minus_without_none",
+            "attention_alignment_detail": (
+                "difference is computed as with_none - without_none after each matrix is first "
+                "aggregated in reveal blocks and then optionally reordered to original block order. "
+                "This isolates the extra effect introduced by the start predictor [None]."
+            ),
+        }
+    raise ValueError(f"Unsupported export_type: {export_type}")
+
+
+def get_frame_metadata(frame: str, data_permutation):
+    if frame == "reveal":
+        return {
+            "frame_alignment": "reveal_order",
+            "frame_alignment_detail": (
+                "rows and columns are indexed by reveal-order blocks in the current model input frame."
+            ),
+        }
+    if frame == "original":
+        return {
+            "frame_alignment": "current_input_original_order",
+            "frame_alignment_detail": (
+                "reveal-order block matrices are reordered by the sampled block order back to the original "
+                "block indices of the current model input frame."
+            ),
+        }
+    if frame == "true_original":
+        if data_permutation is None:
+            raise ValueError("true_original frame requested without checkpoint data_permutation.")
+        return {
+            "frame_alignment": "true_data_original_order",
+            "frame_alignment_detail": (
+                "after reveal-order matrices are reordered to the current input frame original order, they are "
+                "reordered again by the checkpoint's fixed data permutation back to the true unpermuted data "
+                "block order."
+            ),
+        }
+    raise ValueError(f"Unsupported frame: {frame}")
+
+
+def get_export_layout(args, data_permutation):
+    is_permuted = data_permutation is not None
+    if not is_permuted:
+        if args.mode == "Random":
+            # One Random reveal run, then export both the raw reveal view and the
+            # same matrix reordered back to current l2r.
+            return {
+                "frames_to_export": ("reveal", "original"),
+                "frame_dir_names": {
+                    "reveal": "random",
+                    "original": "current_l2r",
+                },
+                "readme_lines": [
+                    "Inside each top-level group:",
+                    "",
+                    "- `random/`: reveal-order view from a single Random rollout average",
+                    "- `current_l2r/`: the same Random-rollout matrix reordered back to current l2r order",
+                    "",
+                    "Important note:",
+                    "",
+                    "- this does not run a second l2r forward pass",
+                    "- `current_l2r/` is only a coordinate remapping of the Random attention result",
+                ],
+            }
+
+        # Match block_attention_ar_all style: no extra frame subdirs.
+        return {
+            "frames_to_export": ("reveal",),
+            "frame_dir_names": {"reveal": None},
+            "readme_lines": [
+                "Inside each top-level group:",
+                "",
+                "- files are exported directly at that level because current-frame reveal order is the canonical view",
+            ],
+        }
+
+    if args.mode == "AR":
+        # Match block_attention_b32_permute_block_ar style.
+        return {
+            "frames_to_export": ("reveal", "true_original"),
+            "frame_dir_names": {
+                "reveal": "current_frame",
+                "true_original": "true_original",
+            },
+            "readme_lines": [
+                "Inside each top-level group:",
+                "",
+                "- `current_frame/`: canonical current-frame view kept from the `reveal` export",
+                "- `true_original/`: block matrix mapped back to the true unpermuted data block order",
+                "",
+                "`original` in the current permuted input frame is omitted here because under `mode=AR` it is",
+                "effectively redundant with the canonical current-frame view for quick inspection.",
+            ],
+        }
+
+    # Match block_attention_b32_permute_block_random style.
+    return {
+        "frames_to_export": ("reveal", "original", "true_original"),
+        "frame_dir_names": {
+            "reveal": "reveal",
+            "original": "current_original",
+            "true_original": "true_original",
+        },
+        "readme_lines": [
+            "Inside each top-level group:",
+            "",
+            "- `reveal/`: reveal-order block coordinates in the current permuted input frame",
+            "- `current_original/`: reordered back to the original block order of the current permuted input frame",
+            "- `true_original/`: reordered further back to the true unpermuted data block order",
+        ],
+    }
+
+
+def write_readme(out_dir: Path, args, data_permutation, layout):
+    lines = [
+        f"# {out_dir.name}",
+        "",
+        "This directory stores block-attention analysis for the checkpoint",
+        f"`{args.ckpt_path}` evaluated with `mode={args.mode}`.",
+        "",
+        "Top-level groups:",
+        "",
+        "- `with_none/`: predictor-aligned block attention including `[None]`",
+        "- `without_none/`: real-token-only block attention excluding `[None]`",
+        "- `diff/`: `with_none - without_none`",
+        "",
+        *layout["readme_lines"],
+    ]
+    (out_dir / "README.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def save_heatmap_png(matrix, out_path: Path, title: str, *, cmap="viridis", vmin=None, vmax=None):
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return False
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.figure(figsize=(8, 6))
+    plt.imshow(matrix, aspect="auto", interpolation="nearest", cmap=cmap, vmin=vmin, vmax=vmax)
+    plt.colorbar()
+    plt.title(title)
+    plt.xlabel("key block")
+    plt.ylabel("query block")
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+    plt.close()
+    return True
+
+
+def infer_percentile_vmax(matrix, percentile=99.0):
+    values = np.asarray(matrix, dtype=np.float32)
+    positive = values[values > 0]
+    if positive.size == 0:
+        return None
+    vmax = float(np.percentile(positive, percentile))
+    if vmax <= 0:
+        return None
+    return vmax
+
+
+def save_distance_curve_png(distances, values, out_path: Path, title: str):
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return False
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.figure(figsize=(8, 4.5))
+    plt.plot(distances, values, linewidth=2.0)
+    plt.xlabel("query-key distance")
+    plt.ylabel("mean attention")
+    plt.title(title)
+    plt.grid(True, alpha=0.25)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+    plt.close()
+    return True
+
+
+def compute_distance_profile(matrix):
+    values = np.asarray(matrix, dtype=np.float32)
+    if values.ndim != 2 or values.shape[0] != values.shape[1]:
+        raise ValueError(f"Expected a square matrix, got shape={values.shape}.")
+    num_positions = values.shape[0]
+    distances = np.arange(num_positions, dtype=np.int32)
+    means = np.zeros(num_positions, dtype=np.float32)
+    for distance in distances:
+        means[distance] = float(np.diag(values, k=-int(distance)).mean())
+    return distances, means
+
+
+def export_results(
+    args,
+    model,
+    data_dir,
+    total_samples,
+    loss_sum,
+    logits_shape,
+    batch_start_offsets,
+    matrix_sums,
+    data_permutation,
+):
+    if total_samples <= 0:
+        raise RuntimeError("No attention matrices were aggregated.")
+
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    layout = get_export_layout(args, data_permutation)
+    export_frames = layout["frames_to_export"]
+    write_readme(args.out_dir, args, data_permutation, layout)
+
+    diff_abs_max = max(
+        float((matrix_sums["diff"][frame] / total_samples).abs().max().item())
+        for frame in export_frames
+    )
+
+    for export_type in EXPORT_TYPES:
+        alignment = get_alignment_metadata(export_type)
+        for frame in export_frames:
+            matrix = matrix_sums[export_type][frame] / total_samples
+
+            frame_dir_name = layout["frame_dir_names"][frame]
+            target_dir = args.out_dir / export_type
+            if frame_dir_name is not None:
+                target_dir = target_dir / frame_dir_name
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            base_name = f"block_attention_{export_type}"
+            matrix_np = matrix.numpy()
+            np.save(target_dir / f"{base_name}.npy", matrix_np)
+
+            metadata = {
+                "ckpt_path": str(args.ckpt_path),
+                "data_dir": str(data_dir),
+                "split": args.split,
+                "mode": args.mode,
+                "requested_order_frame_arg": args.order_frame,
+                "export_frame": frame,
+                "export_type": export_type,
+                "layer_reduce": args.layer_reduce,
+                "head_reduce": args.head_reduce,
+                "force_manual_attention": bool(args.force_manual_attention),
+                "seed": int(args.seed),
+                "num_batches": int(args.num_batches),
+                "batch_size": int(args.batch_size),
+                "num_samples_aggregated": int(total_samples),
+                "mean_loss": float(loss_sum / total_samples),
+                "logits_shape": logits_shape,
+                "num_blocks": int(model.num_blocks),
+                "block_len": int(model.block_order_block_len),
+                "block_order_layout": str(getattr(model, "block_order_layout", "contiguous")),
+                "image_size": int(getattr(model, "image_size", 0)),
+                "image_block_size": int(getattr(model, "image_block_size", 0)),
+                "image_block_height": int(getattr(model, "image_block_height", 0)),
+                "image_block_width": int(getattr(model, "image_block_width", 0)),
+                "axis_labels": list(range(model.num_blocks)),
+                "frame_reorder_logic": (
+                    "reveal matrices are aggregated first; original matrices are obtained by "
+                    "reordering the block-level reveal matrices with the sample block order; "
+                    "for permuted-data checkpoints, true_original matrices are then obtained by "
+                    "reordering current-frame original matrices with the checkpoint's fixed data permutation."
+                ),
+                "batch_start_offsets_preview": batch_start_offsets[: min(32, len(batch_start_offsets))],
+            }
+            metadata.update(alignment)
+            metadata.update(get_frame_metadata(frame, data_permutation))
+            if data_permutation is not None:
+                metadata["data_permutation"] = {
+                    "permute_mode": data_permutation["permute_mode"],
+                    "permute_seed": data_permutation["permute_seed"],
+                    "block_order_layout": data_permutation["block_order_layout"],
+                    "image_size": data_permutation["image_size"],
+                    "image_block_size": data_permutation["image_block_size"],
+                    "image_block_height": data_permutation["image_block_height"],
+                    "image_block_width": data_permutation["image_block_width"],
+                    "block_perm": data_permutation["block_perm"].tolist(),
+                    "inverse_block_perm": data_permutation["inverse_block_perm"].tolist(),
+                }
+
+            (target_dir / f"{base_name}_metadata.json").write_text(
+                json.dumps(metadata, indent=2),
+                encoding="utf-8",
+            )
+
+            if export_type == "diff":
+                png_ok = save_heatmap_png(
+                    matrix_np,
+                    target_dir / f"{base_name}.png",
+                    title=f"block attention diff | mode={args.mode} | frame={frame}",
+                    cmap="coolwarm",
+                    vmin=-diff_abs_max,
+                    vmax=diff_abs_max,
+                )
+            else:
+                png_ok = save_heatmap_png(
+                    matrix_np,
+                    target_dir / f"{base_name}.png",
+                    title=f"block attention {export_type} | mode={args.mode} | frame={frame}",
+                )
+
+            if png_ok:
+                print(f"saved heatmap png to {target_dir / f'{base_name}.png'}")
+            else:
+                print(f"matplotlib not installed; skipped png export for {target_dir / base_name}")
+
+            if export_type != "diff":
+                percentile_vmax = infer_percentile_vmax(matrix_np, percentile=99.0)
+                percentile_png_ok = save_heatmap_png(
+                    matrix_np,
+                    target_dir / f"{base_name}_p99.png",
+                    title=f"block attention {export_type} (p99-scaled) | mode={args.mode} | frame={frame}",
+                    vmax=percentile_vmax,
+                )
+                if percentile_png_ok:
+                    print(
+                        f"saved percentile-scaled heatmap png to {target_dir / f'{base_name}_p99.png'}"
+                    )
+
+                log_matrix_np = np.log10(matrix_np.astype(np.float32) + 1e-6)
+                np.save(target_dir / f"{base_name}_log10.npy", log_matrix_np)
+                log_png_ok = save_heatmap_png(
+                    log_matrix_np,
+                    target_dir / f"{base_name}_log10.png",
+                    title=f"block attention {export_type} (log10) | mode={args.mode} | frame={frame}",
+                    cmap="magma",
+                )
+                if log_png_ok:
+                    print(f"saved log-scaled heatmap png to {target_dir / f'{base_name}_log10.png'}")
+
+                distances, distance_means = compute_distance_profile(matrix_np)
+                np.save(target_dir / "distance_profile_distances.npy", distances)
+                np.save(target_dir / "distance_profile_mean_attention.npy", distance_means)
+                (target_dir / "distance_profile.json").write_text(
+                    json.dumps(
+                        {
+                            "distance": distances.tolist(),
+                            "mean_attention": distance_means.tolist(),
+                        },
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                distance_png_ok = save_distance_curve_png(
+                    distances,
+                    distance_means,
+                    target_dir / "distance_profile.png",
+                    title=f"block attention {export_type} distance profile | mode={args.mode} | frame={frame}",
+                )
+                if distance_png_ok:
+                    print(f"saved distance-profile png to {target_dir / 'distance_profile.png'}")
+
+
+def main():
+    args = parse_args()
+
+    checkpoint = load_checkpoint(args.ckpt_path, args.device)
+    model = build_model(checkpoint, args.device, force_manual_attention=args.force_manual_attention)
+    data_dir = resolve_data_dir(args, checkpoint)
+    data_record_mode = str(checkpoint.get("config", {}).get("data_record_mode", infer_data_record_mode(data_dir)))
+    tokens = load_tokens(data_dir, args.split, data_record_mode=data_record_mode)
+    rng = np.random.default_rng(args.seed)
+    autocast_context = get_autocast_context(args.device, args.dtype)
+    data_permutation = resolve_data_permutation(
+        checkpoint,
+        num_blocks=model.num_blocks,
+        block_len=model.block_order_block_len,
+        model=model,
+    )
+    export_frames = get_export_frames(data_permutation)
+
+    total_samples = 0
+    loss_sum = 0.0
+    logits_shape = None
+    batch_start_offsets = []
+    matrix_sums = {
+        export_type: {frame: None for frame in export_frames} for export_type in EXPORT_TYPES
+    }
+
+    for batch_idx in range(int(args.num_batches)):
+        idx, starts = sample_batch(tokens, args.batch_size, model.config.block_size, rng, args.device)
+        idx = maybe_apply_data_permutation(idx, data_permutation)
+        token_orders, block_orders = build_orders(model, idx, args.mode)
+        batch_start_offsets.extend(int(v) for v in starts)
+
+        with torch.no_grad():
+            with autocast_context:
+                outputs = model.forward_fn(
+                    idx,
+                    token_orders,
+                    return_attentions=True,
+                )
+
+        logits, loss, attn_outputs = extract_logits_loss_attentions(outputs)
+        logits_shape = list(logits.shape)
+
+        attn_batch = reduce_attention_batch(
+            attn_outputs,
+            layer_reduce=args.layer_reduce,
+            head_reduce=args.head_reduce,
+        )
+
+        batch_matrices = aggregate_batch_block_attentions(
+            attn_batch,
+            block_orders,
+            block_len=model.block_order_block_len,
+            data_permutation=data_permutation,
+        )
+
+        for export_type in EXPORT_TYPES:
+            for frame in export_frames:
+                batch_sum = batch_matrices[export_type][frame].sum(dim=0)
+                if matrix_sums[export_type][frame] is None:
+                    matrix_sums[export_type][frame] = batch_sum
+                else:
+                    matrix_sums[export_type][frame] += batch_sum
+
+        batch_samples = int(attn_batch.size(0))
+        total_samples += batch_samples
+        loss_sum += float(loss.item()) * batch_samples
+
+        if (batch_idx + 1) % 10 == 0 or batch_idx == 0 or batch_idx + 1 == int(args.num_batches):
+            print(f"processed {batch_idx + 1}/{args.num_batches} batches")
+
+    export_results(
+        args=args,
+        model=model,
+        data_dir=data_dir,
+        total_samples=total_samples,
+        loss_sum=loss_sum,
+        logits_shape=logits_shape,
+        batch_start_offsets=batch_start_offsets,
+        matrix_sums=matrix_sums,
+        data_permutation=data_permutation,
+    )
+    print(f"saved block attention arrays, pngs, and metadata to {args.out_dir}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,90 @@
+# Research State - Central Project Tracking
+
+project:
+  title: "nanoGPT Learned Order"
+  question: "Can local pair/block structure mined from a random-order AO-GPT backbone be aggregated into curriculum units that recover meaningful left-to-right or spatial order under permutation settings, and does the method scale from WikiText103 block recovery to ImageNet32 spatial recovery, including the newer vq-f4 seq64 latent-grid branch?"
+  status: active
+  started: "2026-05-05"
+  domain: "autoregressive modeling, learned order recovery, curriculum training"
+
+literature:
+  key_papers:
+    - id: "uria2014orderagnostic"
+      title: "A Deep and Tractable Density Estimator"
+      authors: "Uria et al."
+      year: 2014
+      relevance: "Introduces order-agnostic training for neural autoregressive density estimation; useful precedent for learning under many factorizations rather than a fixed scan order."
+    - id: "yang2019xlnet"
+      title: "XLNet: Generalized Autoregressive Pretraining for Language Understanding"
+      authors: "Yang et al."
+      year: 2019
+      relevance: "Permutation language modeling objective; important contrast because it trains over factorization orders without necessarily recovering an external latent order."
+    - id: "hoogeboom2021ardm"
+      title: "Autoregressive Diffusion Models"
+      authors: "Hoogeboom et al."
+      year: 2021
+      relevance: "Connects autoregressive modeling and arbitrary-order generation through absorbing-state diffusion; relevant to image/token order flexibility."
+    - id: "chang2022maskgit"
+      title: "MaskGIT: Masked Generative Image Transformer"
+      authors: "Chang et al."
+      year: 2022
+      relevance: "Demonstrates non-raster, confidence-based parallel image generation; useful contrast for spatial ordering in image tokens."
+    - id: "parmar2018image_transformer"
+      title: "Image Transformer"
+      authors: "Parmar et al."
+      year: 2018
+      relevance: "Strong raster-order image autoregressive baseline; frames why recovering spatial order under randomized patch order is meaningful."
+    - id: "wu2026ar_visual_generation"
+      title: "Autoregressive Models Rival Diffusion Models at Any-Order Visual Generation"
+      authors: "Wu et al."
+      year: 2026
+      relevance: "Recent any-order visual AR result; directly relevant to Imagenet32 arbitrary/spatial order experiments."
+  open_problems:
+    - "Most arbitrary-order objectives optimize likelihood or sample quality, but do not test whether the trained model exposes a recoverable latent local order graph."
+    - "Permutation LM work separates factorization order from content representation, leaving open whether early-loss pair signals can reveal the original or spatial adjacency structure."
+    - "Image AR work often imposes raster or masked-generation schedules; it is unclear whether a random-order backbone contains enough local patch adjacency signal for curriculum recovery."
+  evidence_gaps:
+    - "Need a clean ImageNet32 baseline for random, AR, and curriculum policies. The old pixel-token branch is seq1024/block64 with 4x4 patches; the newer recommended branch is vq-f4 seq64/block64 with an 8x8 latent grid."
+    - "Need diagnostics that distinguish local spatial adjacency recovery from globally correct patch ordering."
+    - "Need ablations showing which pair score gates prevent noisy early merges from amplifying."
+    - "Need a 10k validation reconstruction-FID for vq-f4 to establish the decoder/tokenizer ceiling before reporting decoded AO-GPT FID."
+
+hypotheses:
+  - id: H1
+    statement: "On ImageNet32, especially the vq-f4 seq64/block64 8x8 latent-grid branch, early-loss pair mining from a random-order AO-GPT backbone will recover above-random local spatial adjacency among neighboring latent cells in the permuted frame."
+    status: pending
+    motivation: "WikiText103 block64 runs already show strong local order recovery; image latent cells add 2D locality that should produce detectable pair-level structure if the signal is genuine."
+    parent: null
+    priority: high
+  - id: H2
+    statement: "Gain-only filtering will be necessary on Imagenet32 to prevent high-confidence but spatially inconsistent patch pairs from over-aggregating into noisy units."
+    status: pending
+    motivation: "Existing text runs identify noise amplification as the main failure mode; images have more symmetric local neighborhoods, so conservative gates should matter more."
+    parent: null
+    priority: high
+  - id: H3
+    statement: "A 2D spatial evaluation metric will reveal useful local recovery even when a 1D concatenated Kendall tau is weak."
+    status: pending
+    motivation: "Imagenet32 patch order is grid-structured rather than a single canonical sentence order; evaluation should measure adjacency and Manhattan-neighborhood consistency."
+    parent: null
+    priority: medium
+
+experiments:
+  proxy_metric: "Local spatial adjacency recovery for ImageNet32 units, especially vq-f4 seq64 8x8 latent cells, plus validation loss under Random/AR/curriculum evaluation policies and decoded-image FID relative to the vq-f4 reconstruction ceiling."
+  baseline_value: null
+  best_value: null
+  total_runs: 0
+  trajectory: []
+
+outer_loop:
+  cycle: 0
+  last_direction: null
+  last_reflection: "Initialized autoresearch state from the repository README, active Imagenet32 config, and lightweight literature bootstrap."
+
+workspace:
+  findings: "docs/findings/findings.md"
+  log: "research-log.md"
+  literature_dir: "literature/"
+  experiments_dir: "experiments/"
+  to_human_dir: "to_human/"
+  paper_dir: "paper/"
