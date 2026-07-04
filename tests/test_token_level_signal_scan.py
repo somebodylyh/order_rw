@@ -92,3 +92,16 @@ def test_canonical_sample_count_is_M_times_batch_size():
     assert canonical_sample_count(M=20, batch_size=8) == 160
     with pytest.raises(ValueError, match="positive"):
         canonical_sample_count(M=0, batch_size=4)
+
+
+def test_forward_slices_only_control_execution_chunking():
+    from analyses.token_level_signal_scan import forward_slices
+
+    assert list(forward_slices(total=10, forward_batch=4)) == [
+        (0, 4),
+        (4, 8),
+        (8, 10),
+    ]
+    assert sum(stop - start for start, stop in forward_slices(10, 3)) == 10
+    with pytest.raises(ValueError, match="positive"):
+        list(forward_slices(total=10, forward_batch=0))
