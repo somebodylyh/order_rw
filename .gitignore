@@ -66,3 +66,9 @@ by/
 # Python bytecode
 *.pyc
 *.pyo
+
+# V3 gap-closing / CDL / room-verify run outputs (large, machine-local)
+runs/v3_sweep/
+runs/v3_gapclose_pilot_*/
+runs/v3_cdl_from10k*/
+runs/v3_room_verify*/

@@ -45,12 +45,31 @@ from training_utils import load_train_chunks
 
 
 ARMS = {
-    "l2r":           {"default_m": None, "use_orderhead": False, "train_orderhead": False, "freeze_backbone": False},
-    "frozen_gbeta":  {"default_m": 64,  "use_orderhead": True,  "train_orderhead": False, "freeze_backbone": False},
-    "joint_group":   {"default_m": 16,  "use_orderhead": True,  "train_orderhead": True,  "freeze_backbone": False},
-    "joint_batch":   {"default_m": 64,  "use_orderhead": True,  "train_orderhead": True,  "freeze_backbone": False},
-    "train_gbeta":   {"default_m": 16,  "use_orderhead": True,  "train_orderhead": True,  "freeze_backbone": True},
+    # ── legacy arms ──────────────────────────────────────────────────────────
+    "l2r":           {"default_m": None, "b_source": "none",  "reward": "lm", "train_backbone": True,  "train_orderhead": False},
+    "frozen_gbeta":  {"default_m": 64,  "b_source": "live",  "reward": "lm", "train_backbone": True,  "train_orderhead": False},
+    "joint_group":   {"default_m": 16,  "b_source": "live",  "reward": "lm", "train_backbone": True,  "train_orderhead": True},
+    "joint_batch":   {"default_m": 64,  "b_source": "live",  "reward": "lm", "train_backbone": True,  "train_orderhead": True},
+    # Frozen CDL-teacher order source (greedy C-D+L rollout on the same B as gβ),
+    # no gβ, no PG — the "use the teacher directly" control.
+    "cdl_teacher":   {"default_m": 64,  "b_source": "live",  "reward": "lm", "train_backbone": True,  "train_orderhead": False},
+    # ── new arms (independent B / PG / backbone switches) ────────────────────
+    # Precompute B first, then train OrderHead with LM reward.
+    "train_gbeta":   {"default_m": 16,  "b_source": "precomputed", "reward": "lm", "train_backbone": False, "train_orderhead": True},
+    # Pure offline: precomputed B + entropy-only PG (NO backbone at all).
+    "train_gbeta_offline": {"default_m": 16, "b_source": "precomputed", "reward": "none", "train_backbone": False, "train_orderhead": True},
 }
+
+
+def _resolve_config(arm):
+    """Return a normalized config dict with derived legacy fields."""
+    raw = ARMS[arm]
+    use_orderhead = raw["b_source"] != "none" or raw["train_orderhead"]
+    return {
+        **raw,
+        "use_orderhead": use_orderhead,
+        "freeze_backbone": not raw["train_backbone"],
+    }
 
 
 def _validate_request(arm, n_steps, batch_size, m, tau):
@@ -63,15 +82,15 @@ def _validate_request(arm, n_steps, batch_size, m, tau):
     if not math.isfinite(float(tau)) or tau <= 0:
         raise ValueError("tau must be finite and positive")
 
-    cfg = ARMS[arm]
+    cfg = _resolve_config(arm)
     if not cfg["use_orderhead"]:
         if m is not None:
             raise ValueError("m is not used by the l2r arm and must be None")
-        return None
+        return None, cfg
     resolved_m = cfg["default_m"] if m is None else m
     # group_ids_for owns the exact positive-integer/divisibility validation.
     group_ids_for(batch_size, resolved_m)
-    return resolved_m
+    return resolved_m, cfg
 
 
 @dataclass
@@ -114,6 +133,56 @@ class _ClassicBatchSource:
             self.grad_accum,
         )
         return self.chunks.index_select(0, torch.as_tensor(ids, dtype=torch.long))
+
+
+@dataclass
+class _PrecomputedSource:
+    """Cycles through precomputed (A, idx) pairs.  Each epoch = one pass over the
+    fixed pool; ``batch(step, micro)`` ignores step/micro and returns the next
+    entry in round-robin order."""
+    entries: list  # list of {"A": Tensor (B,65,65), "idx": Tensor (B,T)}
+    cursor: int = 0
+
+    def batch(self, _global_step, _micro_step):
+        entry = self.entries[self.cursor % len(self.entries)]
+        self.cursor += 1
+        return entry["A"], entry["idx"]
+
+
+def precompute_B_batches(ckpt_path, n_batches, *, batch_size=64, device="cpu",
+                         gbeta_ckpt=None):
+    """Extract B matrices + token indices for *n_batches* from the frozen backbone.
+
+    Returns a list of dicts ``[{"A": Tensor, "idx": Tensor}, ...]`` suitable for
+    ``_PrecomputedSource``.  The backbone stays in eval mode; B is detached.
+    """
+    import torch as _torch
+
+    _gbeta_src = gbeta_ckpt if gbeta_ckpt is not None else GBETA_CKPT
+    model, source, clean_perm, _dev, meta = _load_training_context(
+        ckpt_path, batch_size, n_batches, device
+    )
+    dev = _torch.device(device)
+    model.eval()
+    order_head = OrderHeadModule(_gbeta_src, device=str(dev)).to(dev)
+    wrap = AOGPTWithOrderHead(model, order_head, clean_perm, device=str(dev))
+    start_step = int(meta.get("global_step", meta.get("iter_num", 0)))
+    args = meta.get("args", {})
+    grad_accum = int(args.get("grad_accum", 1))
+    policy_seed = int(args.get("seed", 0))
+    gather = build_phys_to_model_token_gather(clean_perm, BLOCK_LEN)
+
+    entries = []
+    for local_step in range(n_batches):
+        for micro_step in range(grad_accum):
+            global_step = start_step + local_step
+            idx = source.batch(global_step, micro_step)
+            probe_step = global_step * grad_accum + micro_step
+            probe = random_probe_token_orders(batch_size, policy_seed, probe_step, dev)
+            A = wrap.extract_B(idx.to(dev), probe).detach().cpu()
+            entries.append({"A": A, "idx": idx.cpu()})
+
+    return entries
 
 
 def _load_training_context(ckpt_path, batch_size, n_steps, device):
@@ -460,8 +529,13 @@ def train_arm(
     save_checkpoints=True,
     allow_batch_size_override=False,
     gbeta_ckpt=None,
+    precomputed=None,
+    seed=None,
 ):
     """Train one Phase-1 arm and return a JSON-serializable result.
+
+    ``seed`` (optional) overrides the checkpoint's policy seed — used to run the
+    same arm under multiple seeds for a decisive multi-seed comparison.
 
     ``n_steps`` is the target number of completed optimizer steps relative to
     the source checkpoint (not an additional count after ``resume_from``).
@@ -469,10 +543,17 @@ def train_arm(
     responsible for converting its global 10k/15k/... schedule to local steps.
     ``gbeta_ckpt`` overrides the default P7 gβ checkpoint (used by
     ``frozen_gbeta`` to deploy a Phase-A-trained OrderHead).
+    ``precomputed`` is a list of ``{"A": Tensor, "idx": Tensor}`` from
+    ``precompute_B_batches()``.  When provided with ``freeze_backbone``, the
+    trainer skips attention extraction and cycles through the precomputed pool
+    (multiple epochs allowed).
     """
-    resolved_m = _validate_request(arm, n_steps, batch_size, m, tau)
-    cfg = ARMS[arm]
-    freeze_backbone = bool(cfg.get("freeze_backbone", False))
+    resolved_m, cfg = _validate_request(arm, n_steps, batch_size, m, tau)
+    precomputed_source = _PrecomputedSource(precomputed) if precomputed else None
+    if cfg["b_source"] == "precomputed" and precomputed_source is None:
+        raise ValueError(f"arm {arm!r} requires precomputed=... (b_source='precomputed')")
+    freeze_backbone = cfg["freeze_backbone"]
+    reward_lm = cfg["reward"] == "lm"
     model, source, clean_perm, dev, meta = _load_training_context(
         ckpt_path, batch_size, n_steps, device
     )
@@ -518,7 +599,7 @@ def train_arm(
     groups = group_ids_for(batch_size, resolved_m) if cfg["use_orderhead"] else []
     ema = GroupEMA(len(groups), ema_alpha) if cfg["train_orderhead"] else None
     start_step = int(meta.get("global_step", meta.get("iter_num", 0)))
-    policy_seed = int(args.get("seed", 0))
+    policy_seed = int(args.get("seed", 0)) if seed is None else int(seed)
     eval_step_set = {int(step) for step in eval_steps}
     output = pathlib.Path(out_dir) / str(tag) / arm
     checkpoint_dir = output / "checkpoints"
@@ -593,10 +674,18 @@ def train_arm(
         global_step = start_step + local_step
         optimizer.zero_grad(set_to_none=True)
         lm_values, pg_values, entropy_values = [], [], []
+        adv_values, score_norm_values = [], []
 
         for micro_step in range(grad_accum):
-            idx = source.batch(global_step, micro_step).to(dev)
             logps, entropies = [], []
+
+            if precomputed_source is not None:
+                # Precomputed path: skip data loading + attention extraction.
+                selected_A, idx_raw = precomputed_source.batch(global_step, micro_step)
+                idx = idx_raw.to(dev)
+                selected_A = selected_A.to(dev)
+            else:
+                idx = source.batch(global_step, micro_step).to(dev)
 
             if arm == "l2r":
                 physical = torch.arange(N, dtype=torch.long).repeat(batch_size, 1)
@@ -604,22 +693,36 @@ def train_arm(
                     physical, clean_perm, BLOCK_LEN
                 ).to(dev)
             else:
-                probe_step = global_step * grad_accum + micro_step
-                probe = random_probe_token_orders(batch_size, 0, probe_step, dev)
-                selected_A = wrap.extract_B(idx, probe).detach()
+                if precomputed_source is None:
+                    probe_step = global_step * grad_accum + micro_step
+                    probe = random_probe_token_orders(batch_size, 0, probe_step, dev)
+                    if arm == "cdl_teacher":
+                        # CDL needs the strict65 (None-retained) B; extract_B strips it.
+                        selected_B65 = wrap.extract_B65(idx, probe).detach()
+                    else:
+                        selected_A = wrap.extract_B(idx, probe).detach()
                 if not freeze_backbone:
                     model.train()
                 model_orders = []
                 for group in groups:
                     group_index = torch.as_tensor(group, dtype=torch.long, device=dev)
-                    group_A = selected_A.index_select(0, group_index)
-                    scores = order_head.scores(group_A, per_sample=False)[0]
-                    if arm == "frozen_gbeta":
-                        order = torch.argsort(scores.detach(), descending=True, stable=True)
+                    if arm == "cdl_teacher":
+                        # Frozen CDL teacher: greedy C-D+L rollout on the group's
+                        # batch-mean strict65 B (no gβ, no PG).
+                        from analyses.v3_own_order_eval import cdl_order_fn
+                        group_B65 = selected_B65.index_select(0, group_index)
+                        order = torch.as_tensor(cdl_order_fn(group_B65),
+                                                dtype=torch.long, device=dev)
                     else:
-                        order, logp, entropy = _sample_pl_order(scores, tau=tau)
-                        logps.append(logp)
-                        entropies.append(entropy)
+                        group_A = selected_A.index_select(0, group_index)
+                        scores = order_head.scores(group_A, per_sample=False)[0]
+                        score_norm_values.append(float(scores.detach().norm().item()))
+                        if arm == "frozen_gbeta":
+                            order = torch.argsort(scores.detach(), descending=True, stable=True)
+                        else:
+                            order, logp, entropy = _sample_pl_order(scores, tau=tau)
+                            logps.append(logp)
+                            entropies.append(entropy)
                     model_orders.append(order.unsqueeze(0).expand(len(group), -1))
                 order_model = torch.cat(model_orders, dim=0)
                 inv_perm = clean_perm.inv_perm_model_to_phys.to(dev)
@@ -628,25 +731,34 @@ def train_arm(
                     order_phys, clean_perm, BLOCK_LEN
                 ).to(dev)
 
-            lm_loss, token_losses, contract = _forward_with_token_losses(
-                model, idx, token_order
-            )
-            token_loss_contract = contract
-            if not _finite_scalar(lm_loss):
-                failure = {
-                    "component": "lm_loss", "global_step": global_step,
-                    "local_step": local_step, "micro_step": micro_step,
-                }
-                break
+            if reward_lm:
+                lm_loss, token_losses, contract = _forward_with_token_losses(
+                    model, idx, token_order
+                )
+                token_loss_contract = contract
+                if not _finite_scalar(lm_loss):
+                    failure = {
+                        "component": "lm_loss", "global_step": global_step,
+                        "local_step": local_step, "micro_step": micro_step,
+                    }
+                    break
+            else:
+                lm_loss = idx.new_zeros(())
+                token_losses = None
+                contract = "none"
 
             if cfg["train_orderhead"]:
                 logp = torch.stack(logps)
                 entropy = torch.stack(entropies)
-                ell_i = per_sample_loss(token_losses.detach())
-                ell_g = group_rewards(ell_i, groups)
-                baseline = ema.update(ell_g)
-                advantage = (baseline - ell_g).detach().clamp(-adv_clip, adv_clip)
-                pg = -(advantage * logp).mean() - float(beta) * entropy.mean()
+                if reward_lm:
+                    ell_i = per_sample_loss(token_losses.detach())
+                    ell_g = group_rewards(ell_i, groups)
+                    baseline = ema.update(ell_g)
+                    advantage = (baseline - ell_g).detach().clamp(-adv_clip, adv_clip)
+                    adv_values.extend(advantage.detach().cpu().tolist())
+                    pg = -(advantage * logp).mean() - float(beta) * entropy.mean()
+                else:
+                    pg = -float(beta) * entropy.mean()  # entropy maximisation only
                 if not _finite_scalar(pg):
                     failure = {
                         "component": "pg", "global_step": global_step,
@@ -727,6 +839,9 @@ def train_arm(
             "orderhead_grad_norm": orderhead_grad_norm,
             "backbone_grad_norm": backbone_grad_norm,
             "lr_backbone": float(lr),
+            "adv_mean": float(np.mean(adv_values)) if adv_values else 0.0,
+            "adv_std": float(np.std(adv_values)) if adv_values else 0.0,
+            "score_norm": float(np.mean(score_norm_values)) if score_norm_values else 0.0,
         }
         logs.append(entry)
 

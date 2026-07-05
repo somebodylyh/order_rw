@@ -84,6 +84,22 @@ class AOGPTWithOrderHead(nn.Module):
             self.device, probe, none_mode=NONE_MODE)
         return A.to(self.device).float()
 
+    def extract_B65(self, idx_batch, probe):
+        """Selected-head 65-node strict65 B (None row/col RETAINED) — the CDL
+        teacher input. ``extract_B`` strips None to 64x64 for gβ; the greedy
+        C-D+L rollout needs the None-support row, so this keeps all 65 nodes."""
+        from batch_readout.hook_order_provider import (
+            extract_all_layers_all_heads_strict65_A_for_batch,
+        )
+        allB = extract_all_layers_all_heads_strict65_A_for_batch(
+            self.backbone, idx_batch.to(self.device), self.clean_perm,
+            self.device, probe)                       # (B, L*H, 65, 65)
+        hidx = HEAD[0] * self.backbone.config.n_head + HEAD[1]
+        B65 = allB[:, hidx]                            # (B, 65, 65) selected head
+        if not torch.is_tensor(B65):
+            B65 = torch.as_tensor(B65)
+        return B65.to(self.device).float()
+
     def compute_order_logits(self, idx_batch, probe, per_sample):
         A = self.extract_B(idx_batch, probe).detach()   # DETACH — no grad to backbone
         return self.order_head.scores(A, per_sample)     # grad on order_head only

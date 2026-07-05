@@ -87,7 +87,7 @@ def decide_gate(m: dict) -> dict:
         )
     if payoff_life:
         reasons.append(
-            "payoff life: fixed-order PPL/AUC matches or beats frozen_gbeta"
+            "payoff life: own-order val/AUC matches or beats frozen_gbeta"
         )
     if not tier2:
         reasons.append("no life sign: neither mechanism nor payoff shows improvement")
@@ -104,29 +104,86 @@ def decide_gate(m: dict) -> dict:
 # ── evaluator closure (Task 3 + Task 4) ──────────────────────────────────────
 
 
-def _build_evaluator(held_chunks, clean_perm, device, *, m=16):
+def _build_evaluator(held_chunks, clean_perm, device, *, m=16, init_orders=None,
+                     order_fn=None):
     """Closure over the FIXED held-out chunks/grouping.
 
     Identical for every arm and checkpoint (Global Constraints: fixed held-out
     grouping).  Called by ``train_arm`` at each eval step.
+
+    **Headline/selection metric = own-order ``val_loss``** (teacher-forced NLL
+    under each arm's OWN policy reveal order) — the same signal the OrderHead PG
+    is rewarded on.  The fixed-L2R value is retained only as an anti-gaming
+    diagnostic (``val_l2r_transfer`` / ``own_over_l2r``), never as selection.
+    The l2r arm has no OrderHead, so its own order IS L2R and val_loss falls back
+    to the fixed-L2R loss.
+
+    ``init_orders`` (list of per-group model-frame orders, e.g. the 20k gβ init
+    from ``group_policy_orders``) enables ``tau_to_init`` = mean Kendall τ of the
+    current policy orders vs the init — the policy-diffusion monitor. If None, the
+    evaluator lazily captures the init on its first call (tau_to_init=1.0 then).
+
+    ``order_fn`` overrides the reveal-order source (default gβ argsort). The
+    cdl_teacher arm passes ``cdl_order_fn`` so own_over_l2r / tau_to_init /
+    tau_to_l2r are all computed under the CDL order; the gβ-specific group_probe
+    guards are skipped in that case.
     """
     import torch
+    from scipy.stats import kendalltau
     from analyses.v3_group_probe import group_probe
     from analyses.v3_fixed_order_eval import fixed_order_val_loss
+    from analyses.v3_own_order_eval import order_transfer, group_policy_orders, L2R
 
     held_stack = torch.stack(list(held_chunks))
+    state = {"init_orders": init_orders}
 
     def evaluator(step: int, model, wrap):
-        loss = fixed_order_val_loss(model, list(held_chunks), clean_perm, device)
-        gp = group_probe(wrap, held_stack, m=m, seed=0, device=str(device))
-        return {
-            "val_loss": loss,
-            "ppl": float(math.exp(loss)),
-            "delta_probe_group": gp["delta_probe_group"],
-            "real_beats_controls": gp["real_beats_controls"],
-            "tau_to_l2r": gp["tau_to_l2r"],
-            "tau_consensus": gp["tau_consensus"],
+        if getattr(wrap, "order_head", None) is None:
+            # l2r arm: own order == L2R; no OrderHead => no group probe.
+            own = fixed_order_val_loss(model, list(held_chunks), clean_perm, device)
+            out = {
+                "val_loss": own,
+                "ppl": float(math.exp(own)),
+                "val_l2r_transfer": own,
+                "own_over_l2r": 0.0,
+            }
+            return out
+
+        tr = order_transfer(wrap, held_stack, m=m, seed=0, device=str(device),
+                            order_fn=order_fn)
+        own = tr["own_order_val"]
+
+        cur = group_policy_orders(wrap, held_stack, m=m, seed=0, device=str(device),
+                                  order_fn=order_fn)
+        if state["init_orders"] is None:
+            state["init_orders"] = cur            # lazy capture on first eval
+        taus = [kendalltau(c, i).correlation for c, i in zip(cur, state["init_orders"])]
+        taus = [t for t in taus if t is not None and not np.isnan(t)]
+        tau_to_init = float(np.mean(taus)) if taus else float("nan")
+        # tau_to_l2r vs PHYSICAL (text) L2R: map the model-frame order to physical
+        # (inv_perm) before comparing to arange. cur is model-frame; L2R=arange is
+        # physical-block L2R. (Comparing cur to arange directly = MODEL L2R = wrong.)
+        t2 = [kendalltau(wrap.inv_perm[c], L2R).correlation for c in cur]
+        t2 = [t for t in t2 if t is not None and not np.isnan(t)]
+        tau_to_l2r = float(np.mean(t2)) if t2 else float("nan")
+
+        out = {
+            "val_loss": own,                       # HEADLINE: own-order val
+            "ppl": float(math.exp(own)),
+            "val_l2r_transfer": tr["l2r_transfer_val"],   # diagnostic only
+            "own_over_l2r": tr["own_over_l2r"],           # diagnostic only
+            "tau_to_l2r": tau_to_l2r,
+            "tau_to_init": tau_to_init,            # policy-diffusion monitor
         }
+        if order_fn is None:
+            # gβ-specific confound guards (real/shuffle/zero-B) only apply to gβ.
+            gp = group_probe(wrap, held_stack, m=m, seed=0, device=str(device))
+            out.update({
+                "delta_probe_group": gp["delta_probe_group"],
+                "real_beats_controls": gp["real_beats_controls"],
+                "tau_consensus": gp["tau_consensus"],
+            })
+        return out
 
     return evaluator
 
