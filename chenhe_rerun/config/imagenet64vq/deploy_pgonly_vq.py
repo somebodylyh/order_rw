@@ -44,7 +44,7 @@ gbeta_refresh_every = 1
 gbeta_probe_mode = 'eval'
 gbeta_trainable = True
 
-gbeta_pg_start_iter = 1000
+gbeta_pg_start_iter = 10000   # gβ frozen-deployed 0→10k, then PG 10k→20k (per user: PG from 10k)
 gbeta_pg_update_every = 100
 gbeta_pg_k = 4
 gbeta_pg_tau = 0.05
