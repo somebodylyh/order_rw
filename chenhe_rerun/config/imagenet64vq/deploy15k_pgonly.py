@@ -6,7 +6,9 @@ out_dir = '../out/rerun_vq/deploy15k_pgonly'
 eval_interval = 500
 eval_iters = 100
 log_interval = 50
-wandb_log = False
+wandb_log = True
+wandb_project = 'amor-order'
+wandb_run_name = 'vq15k_pgonly'
 
 dataset = 'imagenet64vq_patch2x2'
 batch_size = 64
