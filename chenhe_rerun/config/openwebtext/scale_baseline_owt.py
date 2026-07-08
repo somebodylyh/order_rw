@@ -29,8 +29,8 @@ block_order_block_len = 4
 
 learning_rate = 6e-4
 warmup_iters = 0
-max_iters = 60000
-lr_decay_iters = 60000   # anchor decay to the full run length (not 10k) so warmup isn't over-annealed
+max_iters = 30000
+lr_decay_iters = 30000   # anchor decay to the full run length (not 5k) so the warmup snapshot isn't over-annealed
 min_lr = 6e-5
 beta1 = 0.9
 beta2 = 0.95
@@ -38,5 +38,5 @@ weight_decay = 0.1
 grad_clip = 1.0
 
 init_from = 'ckpt'
-init_from_ckpt = 'out/rerun_owt/scale12L768_warmup10k/ckpt.pt'
+init_from_ckpt = 'out/rerun_owt/scale12L768_warmup5k/ckpt.pt'
 init_from_ckpt_mode = 'weights_only'

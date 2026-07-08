@@ -3,7 +3,7 @@ import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gbeta_cdl_pretrain import pretrain_gbeta_cdl
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CKPT = os.path.join(REPO, "chenhe_rerun/out/rerun_owt/scale12L768_warmup10k/ckpt.pt")
+CKPT = os.path.join(REPO, "chenhe_rerun/out/rerun_owt/scale12L768_warmup5k/ckpt.pt")
 OWT  = os.path.join(REPO, "chenhe_rerun/data/openwebtext/train.bin")
 OUT  = os.path.join(REPO, "chenhe_rerun/out/rerun_owt/gbeta_owt_bm16")
 if __name__ == "__main__":

@@ -26,33 +26,33 @@ No meta.pkl needed — vocab_size=50304 is set in the config.
 
 ## Stage 2 — Scaled random backbone: warmup + baseline (12L/768/8h)
 chenhe train.py only saves `ckpt.pt` (overwritten each eval — no periodic step-named ckpts),
-so the 10k warmup is a **separate short run**, then continued for the baseline.
+so the 5k warmup is a **separate short run**, then continued for the baseline.
 ```bash
 cd chenhe_rerun
-# 2a. warmup → ckpt.pt = the 10k warmup snapshot (head-select + gβ read this)
-python -u train.py config/openwebtext/scale_warmup10k_owt.py
-#     → out/rerun_owt/scale12L768_warmup10k/ckpt.pt
+# 2a. warmup → ckpt.pt = the 5k warmup snapshot (head-select + gβ read this)
+python -u train.py config/openwebtext/scale_warmup5k_owt.py
+#     → out/rerun_owt/scale12L768_warmup5k/ckpt.pt
 
-# 2b. baseline = random continuation 10k→60k (the random arm)
+# 2b. baseline = random continuation 5k→30k (the random arm)
 python -u train.py config/openwebtext/scale_baseline_owt.py
 #     → out/rerun_owt/scale12L768_baseline/ckpt.pt
 ```
-LR decay is anchored to 60k in the warmup config so the 10k snapshot isn't over-annealed.
+LR decay is anchored to 30k in the warmup config so the 5k snapshot isn't over-annealed.
 
-## Stage 3 — gβ pretrain on the 10k warmup (head-select + CDL + readout)
+## Stage 3 — gβ pretrain on the 5k warmup (head-select + CDL + readout)
 ```bash
 python -u chenhe_rerun/run_gbeta_owt_pretrain.py
 # → out/rerun_owt/gbeta_owt_bm16/{g_beta_best.pt, gbeta_provenance.json}
 # reports selected head + val_pairwise_acc (wikitext ref 98.44%; VQ image was 65-74%)
 ```
 
-## Stage 4 — Deploy (frozen + pgonly), 10k→60k, PG@20k
+## Stage 4 — Deploy (frozen + pgonly), 5k→30k, PG@10k
 ```bash
 cd chenhe_rerun
-python -u train.py config/openwebtext/deploy_frozen_owt.py   # gβ frozen 10k->60k
-python -u train.py config/openwebtext/deploy_pgonly_owt.py   # gβ frozen 10k->20k, PG 20k->60k
+python -u train.py config/openwebtext/deploy_frozen_owt.py   # gβ frozen 5k->30k
+python -u train.py config/openwebtext/deploy_pgonly_owt.py   # gβ frozen 5k->10k, PG 10k->30k
 ```
-Both init from `ckpt_step10000.pt` (chenhe-native → no compat ckpt needed).
+Both init from `warmup5k/ckpt.pt` (chenhe-native → no compat ckpt needed).
 
 ## Read the result (own-order val, wandb `amor-order`)
 | arm | own-order val | tests |
@@ -66,11 +66,11 @@ Does **PG > frozen** hold (text) or go inert (image)? Compare own-order val curv
 
 ## Files
 - `chenhe_rerun/data/openwebtext/prepare_streaming.py` — OWT streaming tokenizer (2.5B cap)
-- `chenhe_rerun/config/openwebtext/scale_warmup10k_owt.py` — 12L/768/8h random warmup → 10k
-- `chenhe_rerun/config/openwebtext/scale_baseline_owt.py` — random continuation 10k→60k (baseline arm)
-- `chenhe_rerun/run_gbeta_owt_pretrain.py` — gβ pretrain on the 10k warmup
-- `chenhe_rerun/config/openwebtext/deploy_{frozen,pgonly}_owt.py` — gβ deploy arms 10k→60k
+- `chenhe_rerun/config/openwebtext/scale_warmup5k_owt.py` — 12L/768/8h random warmup → 5k
+- `chenhe_rerun/config/openwebtext/scale_baseline_owt.py` — random continuation 5k→30k (baseline arm)
+- `chenhe_rerun/run_gbeta_owt_pretrain.py` — gβ pretrain on the 5k warmup
+- `chenhe_rerun/config/openwebtext/deploy_{frozen,pgonly}_owt.py` — gβ deploy arms 5k→30k
 
 ## Compute note
-12L/768 @ 60k steps ≈ multi-hour per arm on one 24GB GPU; 4 runs (warmup+baseline+frozen+pgonly)
+12L/768 @ 30k steps ≈ multi-hour per arm on one 24GB GPU; 4 runs (warmup+baseline+frozen+pgonly)
 = a multi-GPU-day campaign. Run arms in parallel across machines/GPUs if available (wandb groups them).

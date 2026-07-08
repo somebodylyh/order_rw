@@ -1,6 +1,6 @@
 # SCALE Stage-2a: 12L/768/8h random-order AOGPT warmup on OWT, to 10k (ckpt.pt = warmup).
 # head-select + gβ read this early/generic backbone. n_head=8 (assert_layout HEADS=8).
-out_dir = 'out/rerun_owt/scale12L768_warmup10k'
+out_dir = 'out/rerun_owt/scale12L768_warmup5k'
 eval_interval = 1000
 eval_iters = 100
 log_interval = 50
@@ -8,7 +8,7 @@ always_save_checkpoint = True
 
 wandb_log = True
 wandb_project = 'amor-order'
-wandb_run_name = 'scale12L768_warmup10k'
+wandb_run_name = 'scale12L768_warmup5k'
 
 dataset = 'openwebtext'
 data_record_mode = 'stream'
@@ -33,12 +33,12 @@ bias = False
 block_order_block_len = 4
 
 learning_rate = 6e-4
-max_iters = 10000
-lr_decay_iters = 60000   # anchor decay to the full run length (not 10k) so warmup isn't over-annealed
+max_iters = 5000
+lr_decay_iters = 30000   # anchor decay to the full run length (not 5k) so the warmup snapshot isn't over-annealed
 min_lr = 6e-5
 beta1 = 0.9
 beta2 = 0.95
-warmup_iters = 2000
+warmup_iters = 1000
 weight_decay = 0.1
 grad_clip = 1.0
 

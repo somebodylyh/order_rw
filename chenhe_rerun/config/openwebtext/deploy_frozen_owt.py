@@ -25,18 +25,18 @@ generalization_eval_mode = ''
 block_order_block_len = 4
 
 learning_rate = 6e-4
-max_iters = 60000
-lr_decay_iters = 60000
+max_iters = 30000
+lr_decay_iters = 30000
 min_lr = 6e-5
 beta2 = 0.95
 warmup_iters = 0
 
 init_from = 'ckpt'
-init_from_ckpt = 'out/rerun_owt/scale12L768_warmup10k/ckpt.pt'
+init_from_ckpt = 'out/rerun_owt/scale12L768_warmup5k/ckpt.pt'
 init_from_ckpt_mode = 'weights_only'
 
 gbeta_ckpt = 'out/rerun_owt/gbeta_owt_bm16/g_beta_best.pt'
-gbeta_parent_ckpt = 'out/rerun_owt/scale12L768_warmup10k/ckpt.pt'
+gbeta_parent_ckpt = 'out/rerun_owt/scale12L768_warmup5k/ckpt.pt'
 gbeta_anchor_size = 16
 gbeta_probe_order_mode = 'deployment'
 gbeta_batch_mean_probes = 4
@@ -44,7 +44,7 @@ gbeta_refresh_every = 1
 gbeta_probe_mode = 'eval'
 gbeta_trainable = False
 
-gbeta_pg_start_iter = 20000
+gbeta_pg_start_iter = 10000
 gbeta_pg_update_every = 100
 gbeta_pg_k = 4
 gbeta_pg_tau = 0.05
