@@ -1,0 +1,43 @@
+# SCALE Stage-2a: 12L/768/8h random-order AOGPT warmup on OWT, to 10k (ckpt.pt = warmup).
+# head-select + gβ read this early/generic backbone. n_head=8 (assert_layout HEADS=8).
+out_dir = 'out/rerun_owt/deploy_ori_l2r'
+eval_interval = 1000
+eval_iters = 100
+log_interval = 50
+always_save_checkpoint = True
+
+wandb_log = True
+wandb_project = 'amor-order'
+wandb_run_name = 'deploy_ori_l2r'
+
+dataset = 'openwebtext'
+data_record_mode = 'stream'
+batch_size = 64
+block_size = 256
+gradient_accumulation_steps = 2
+permute_data = True
+permute_seed = 42
+permute_mode = 'block'
+
+model_type = 'aogpt'
+train_stage = 'standard'
+aogpt_train_mode = 'FixedBlockOrder'
+fixed_block_order = '11,32,38,42,19,22,55,16,9,61,4,29,45,57,15,62,37,28,43,30,53,60,8,34,1,63,35,47,36,5,12,50,21,27,41,18,6,44,0,56,51,20,40,24,46,14,49,17,2,39,10,7,13,59,58,26,25,23,31,33,54,48,52,3'
+main_eval_mode = 'AR'
+generalization_eval_mode = ''
+
+block_order_block_len = 4
+
+learning_rate = 6e-4
+warmup_iters = 0
+max_iters = 30000
+lr_decay_iters = 30000   # anchor decay to the full run length (not 5k) so the warmup snapshot isn't over-annealed
+min_lr = 6e-5
+beta1 = 0.9
+beta2 = 0.95
+weight_decay = 0.1
+grad_clip = 1.0
+
+init_from = 'ckpt'
+init_from_ckpt = 'out/rerun_owt/scale12L768_warmup5k/ckpt.pt'
+init_from_ckpt_mode = 'weights_only'
